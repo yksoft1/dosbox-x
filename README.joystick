@@ -4,12 +4,36 @@ Overview of latest joystick parameters in dosbox.conf
 Sample configuration:
 
 [joystick]
+
+# Note: these addresses logical devices (DOS joysticks) !
+
 joy1deadzone1=0.26
 joy1deadzone2=0.26
 joy2deadzone1=0.26
+
 joy1response1=3.00
 joy1response2=3.00
 joy2response1=3.00
+
+# Note: these addresses physical devices !
+
+joy1axis0=0
+joy1axis1=1
+joy1axis2=2
+joy1axis3=3
+joy1axis4=4
+joy1axis5=5
+joy1axis6=6
+joy1axis7=7
+
+joy2axis0=0
+joy2axis1=1
+joy2axis2=2
+joy2axis3=3
+joy2axis4=4
+joy2axis5=5
+joy2axis6=6
+joy2axis7=7
 
 
 General usage
@@ -46,3 +70,22 @@ Setting a negative value will generate the opposite behavior.
 
 Tip 2:
 Do not set to 0.0 as this will invariably generate a movement, see https://en.wikipedia.org/wiki/Exponentiation for more details.
+
+
+Axes mapping
+------------
+
+You can remap axes to mitigate issues with devices that have a weird axis order. Any axis not specified will be mapped to its default value, e.g. joy1axis0=0.
+
+Examples (applies to 4axis, 4axis_2, fcs, ch modes):
+
+Xbox One Controller
+
+Use right thumbstick instead of triggers for 2nd DOS joystick:
+joy1axis2=5
+joy1axis3=4
+
+Xbox 360 Controller
+
+Fix behavior of triggers being right thumbstick X axis, e.g. use right thumbstick as 2nd DOS joystick:
+joy1axis2=4
