@@ -727,6 +727,10 @@ protected:
 
 bool autofire = false;
 
+// map of joystick axes
+int joy1axes[8];
+int joy2axes[8];
+
 class CStickBindGroup : public  CBindGroup {
 public:
 	CStickBindGroup(Bitu _stick,Bitu _emustick,bool _dummy=false) : CBindGroup (){
@@ -926,8 +930,10 @@ public:
 			}
 		}
 
+		int* axis_map = stick == 0 ? &joy1axes[0] : &joy2axes[0];
 		for (i=0; i<axes; i++) {
-			Sint16 caxis_pos=SDL_JoystickGetAxis(sdl_joystick,i);
+			Bitu i1 = axis_map[i];
+			Sint16 caxis_pos=SDL_JoystickGetAxis(sdl_joystick,i1);
 			/* activate bindings for joystick position */
 			if (caxis_pos>1) {
 				if (old_neg_axis_state[i]) {
