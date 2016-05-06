@@ -1932,6 +1932,22 @@ void DOSBOX_SetupConfigSections(void) {
 		}
 	}
 
+	auto joysticks = 2;
+	auto axes = 8;
+	for (size_t i = 0; i < joysticks; i++)
+	{
+		for (size_t j = 0; j < axes; j++)
+		{
+			auto joy = std::to_string(i + 1);
+			auto axis = std::to_string(j);
+			auto propname = "joy" + joy + "axis" + axis;
+			Pint = secprop->Add_int(propname, Property::Changeable::WhenIdle, j);
+			Pint->SetMinMax(0, axes - 1);
+			auto help = "axis for joystick " + joy + " axis " + axis + ".";
+			Pint->Set_help(help);
+		}
+	}
+
 	secprop=control->AddSection_prop("serial",&Null_Init,true);
    
 	Pmulti_remain = secprop->Add_multiremain("serial1",Property::Changeable::WhenIdle," ");
