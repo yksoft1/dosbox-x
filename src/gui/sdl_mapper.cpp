@@ -118,7 +118,7 @@ struct Vector2
 
 	}
 
-	Vector2() : Vector2(0.0f, 0.0f)
+	Vector2() : X(0.0f), Y(0.0f)
 	{
 
 	}
