@@ -280,7 +280,7 @@ public:
 			if (!strcasecmp(word,"hold")) flags|=BFLG_Hold;
 		}
 	}
-	void ActivateBind(Bits _value,bool ev_trigger,bool skip_action=false) {
+	virtual void ActivateBind(Bits _value,bool ev_trigger,bool skip_action=false) {
 		if (event->IsTrigger()) {
 			/* use value-boundary for on/off events */
 			if (_value>25000) {
@@ -661,10 +661,11 @@ class CJHatBind;
 
 class CJAxisBind : public CBind {
 public:
-	CJAxisBind(CBindList * _list,CBindGroup * _group,Bitu _axis,bool _positive) : CBind(_list){
+	CJAxisBind(CBindList * _list,CBindGroup * _group,Bitu _joystick,Bitu _axis,bool _positive) : CBind(_list){
 		group = _group;
 		axis = _axis;
 		positive = _positive;
+		joystick = _joystick;
 	}
 	virtual ~CJAxisBind() {}
 	void ConfigName(char * buf) {
@@ -673,10 +674,82 @@ public:
 	void BindName(char * buf) {
 		sprintf(buf,"%s Axis %d%s",group->BindStart(),(int)axis,positive ? "+" : "-");
 	}
+
+	// Gets the joystick index for this instance.
+	Bitu GetJoystick() const { return joystick; };
+
+	// Gets the axis index for this instance.
+	Bitu GetAxis() const { return axis; }
+
+	// Gets the axis direction for this instance.
+	bool GetPositive() const { return positive; }
+
+	// Gets the deadzone for a joystick axis direction.
+	static int GetJoystickDeadzone(int joystick, int axis, bool positive)
+	{
+		auto section = control->GetSection("mapper");
+		auto prop = static_cast<Section_prop*>(section);
+		auto name = "joy" + std::to_string(joystick + 1) + "deadzone" + std::to_string(axis) + (positive ? "+" : "-");
+		auto value = prop->Get_double(name);
+		auto deadzone = static_cast<int>(value * 32767.0);
+		return deadzone;
+	}
+
+	void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false) override
+	{
+		// NOTE copied base class implementation logic here.
+
+		if (!event->IsTrigger())
+		{
+			/* store value for possible later use in the activated event */
+			event->SetValue(_value);
+			event->ActivateEvent(ev_trigger, false);
+			return;
+		}
+
+		/*
+		
+		NOTE: As the codebase is rather flawed, here we'll use a simple approach to
+		alleviate its deficiencies. We fetch user-defined deadzone, then if it exceeds
+		the dumb hard-coded value of 25000, we'll set it to 25001.
+		Existing code will work as usual and we do not have to change CTriggeredEvent
+		using a dynamic cast to know whether we were handling a joystick axis.
+		
+		TODO: C*Event types should not need to check against that value, ever.
+		
+		*/
+
+		// activate if we exceed user-defined deadzone
+
+		auto joystick = this->GetJoystick();
+		auto axis = this->GetAxis();
+		auto positive = this->GetPositive();
+		auto deadzone = GetJoystickDeadzone(joystick, axis, positive);
+		if (_value > deadzone) _value = 25000 + 1;
+
+		/* use value-boundary for on/off events */
+		if (_value > 25000)
+		{
+			event->SetValue(_value);
+			if (active) return;
+			event->ActivateEvent(ev_trigger, skip_action);
+			active = true;
+		}
+		else
+		{
+			if (active)
+			{
+				event->DeActivateEvent(ev_trigger);
+				active = false;
+			}
+		}
+	}
+
 protected:
 	CBindGroup * group;
 	Bitu axis;
 	bool positive;
+	Bitu joystick;
 };
 
 class CJButtonBind : public CBind {
@@ -993,8 +1066,8 @@ private:
 
 	CBind * CreateAxisBind(Bitu axis,bool positive) {
 		if (axis<axes) {
-			if (positive) return new CJAxisBind(&pos_axis_lists[axis],this,axis,positive);
-			else return new CJAxisBind(&neg_axis_lists[axis],this,axis,positive);
+			if (positive) return new CJAxisBind(&pos_axis_lists[axis],this,stick,axis,positive);
+			else return new CJAxisBind(&neg_axis_lists[axis],this,stick,axis,positive);
 		}
 		return NULL;
 	}
