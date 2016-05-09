@@ -1947,6 +1947,29 @@ void DOSBOX_SetupConfigSections(void) {
 			Pint->Set_help(help);
 		}
 	}
+	
+	/* [mapper] section */
+	secprop = control->AddSection_prop("mapper", &Null_Init, true);
+
+	// joystick deadzones
+	auto directions = 2;
+	for (size_t i = 0; i < joysticks; i++)
+	{
+		for (size_t j = 0; j < axes; j++)
+		{
+			for (size_t k = 0; k < directions; k++)
+			{
+				auto joy = std::to_string(i + 1);
+				auto axis = std::to_string(j);
+				auto dir = k == 0 ? "-" : "+";
+				auto name = "joy" + joy + "deadzone" + axis + dir;
+				Pdouble = secprop->Add_double(name, Property::Changeable::WhenIdle, 0.6);
+				Pdouble->SetMinMax(0.0, 1.0);
+				auto help = "deadzone for joystick " + joy + " axis " + axis + dir;
+				Pdouble->Set_help(help);
+			}
+		}
+	}
 
 	secprop=control->AddSection_prop("serial",&Null_Init,true);
    
