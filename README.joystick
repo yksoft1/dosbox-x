@@ -36,6 +36,45 @@ joy2axis6=6
 joy2axis7=7
 
 
+[mapper]
+
+# Note: these addresses physical devices !
+
+joy1deadzone0-=0.60
+joy1deadzone0+=0.60
+joy1deadzone1-=0.60
+joy1deadzone1+=0.60
+joy1deadzone2-=0.20
+joy1deadzone2+=0.20
+joy1deadzone3-=0.20
+joy1deadzone3+=0.20
+joy1deadzone4-=0.20
+joy1deadzone4+=0.20
+joy1deadzone5-=0.20
+joy1deadzone5+=0.20
+joy1deadzone6-=0.20
+joy1deadzone6+=0.20
+joy1deadzone7-=0.20
+joy1deadzone7+=0.20
+
+joy2deadzone0-=0.60
+joy2deadzone0+=0.60
+joy2deadzone1-=0.60
+joy2deadzone1+=0.60
+joy2deadzone2-=0.20
+joy2deadzone2+=0.20
+joy2deadzone3-=0.20
+joy2deadzone3+=0.20
+joy2deadzone4-=0.20
+joy2deadzone4+=0.20
+joy2deadzone5-=0.20
+joy2deadzone5+=0.20
+joy2deadzone6-=0.20
+joy2deadzone6+=0.20
+joy2deadzone7-=0.20
+joy2deadzone7+=0.20
+
+
 General usage
 =============
 
@@ -89,3 +128,29 @@ Xbox 360 Controller
 
 Fix behavior of triggers being right thumbstick X axis, e.g. use right thumbstick as 2nd DOS joystick:
 joy1axis2=4
+
+
+Mapper deadzones
+----------------
+
+Allows to define per-axis-direction deadzones, with these settings you can define the sensitivity of a mapper key when it is bound to a joystick axis.
+
+Example:
+
+Bind WSAD keys to a left thumbstick and ensure strafing and moving works simultaneously:
+
+1. open the mapper and assign thumbstick directions to WSAD keys
+
+2. define deadzones for thumbstick directions (axes 0/1 assumed to be the thumbstick):
+
+[mapper]
+joy1deadzone0-=0.60
+joy1deadzone0+=0.60
+joy1deadzone1-=0.60
+joy1deadzone1+=0.60
+
+Tip 1:
+To ensure the triggering of such bi-directional command, deadzone values shall be less than ~0.7071 (the maximum possible extent when diagonally moving with a joystick with a circular restriction).
+
+Tip 2:
+The mapper deadzones are affected by 'axes mapping', this is not likely to be a problem as you are looking to emulate keyboard presses using a joystick. However, make sure to set 'axes mapping' to their default value, or simply remove them from your configuration.
