@@ -280,26 +280,9 @@ public:
 			if (!strcasecmp(word,"hold")) flags|=BFLG_Hold;
 		}
 	}
-	virtual void ActivateBind(Bits _value,bool ev_trigger,bool skip_action=false) {
-		if (event->IsTrigger()) {
-			/* use value-boundary for on/off events */
-			if (_value>25000) {
-				event->SetValue(_value);
-				if (active) return;
-				event->ActivateEvent(ev_trigger,skip_action);
-				active=true;
-			} else {
-				if (active) {
-					event->DeActivateEvent(ev_trigger);
-					active=false;
-				}
-			}
-		} else {
-			/* store value for possible later use in the activated event */
-			event->SetValue(_value);
-			event->ActivateEvent(ev_trigger,false);
-		}
-	}
+	
+	virtual void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false) = 0;
+
 	void DeActivateBind(bool ev_trigger) {
 		if (event->IsTrigger()) {
 			if (!active) return;
@@ -572,6 +555,31 @@ public:
 	void ConfigName(char * buf) {
 		sprintf(buf,"key %d",MapSDLCode((Bitu)key));
 	}
+
+	void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false)
+	{
+		if (event->IsTrigger()) {
+			/* use value-boundary for on/off events */
+			if (_value>25000) {
+				event->SetValue(_value);
+				if (active) return;
+				event->ActivateEvent(ev_trigger, skip_action);
+				active = true;
+			}
+			else {
+				if (active) {
+					event->DeActivateEvent(ev_trigger);
+					active = false;
+				}
+			}
+		}
+		else {
+			/* store value for possible later use in the activated event */
+			event->SetValue(_value);
+			event->ActivateEvent(ev_trigger, false);
+		}
+	}
+
 public:
 	SDLKey key;
 };
@@ -695,7 +703,7 @@ public:
 		return deadzone;
 	}
 
-	void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false) override
+	void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false)
 	{
 		// NOTE copied base class implementation logic here.
 
@@ -765,6 +773,31 @@ public:
 	void BindName(char * buf) {
 		sprintf(buf,"%s Button %d",group->BindStart(),(int)button);
 	}
+
+	void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false)
+	{
+		if (event->IsTrigger()) {
+			/* use value-boundary for on/off events */
+			if (_value>25000) {
+				event->SetValue(_value);
+				if (active) return;
+				event->ActivateEvent(ev_trigger, skip_action);
+				active = true;
+			}
+			else {
+				if (active) {
+					event->DeActivateEvent(ev_trigger);
+					active = false;
+				}
+			}
+		}
+		else {
+			/* store value for possible later use in the activated event */
+			event->SetValue(_value);
+			event->ActivateEvent(ev_trigger, false);
+		}
+	}
+
 protected:
 	CBindGroup * group;
 	Bitu button;
@@ -792,6 +825,31 @@ public:
 														((dir==SDL_HAT_RIGHT)?"right":
 														((dir==SDL_HAT_DOWN)?"down":"left")));
 	}
+
+	void ActivateBind(Bits _value, bool ev_trigger, bool skip_action = false)
+	{
+		if (event->IsTrigger()) {
+			/* use value-boundary for on/off events */
+			if (_value>25000) {
+				event->SetValue(_value);
+				if (active) return;
+				event->ActivateEvent(ev_trigger, skip_action);
+				active = true;
+			}
+			else {
+				if (active) {
+					event->DeActivateEvent(ev_trigger);
+					active = false;
+				}
+			}
+		}
+		else {
+			/* store value for possible later use in the activated event */
+			event->SetValue(_value);
+			event->ActivateEvent(ev_trigger, false);
+		}
+	}
+
 protected:
 	CBindGroup * group;
 	Bitu hat;
