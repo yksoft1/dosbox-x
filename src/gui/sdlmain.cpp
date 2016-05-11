@@ -3208,8 +3208,12 @@ void GFX_Events() {
 	int time=GetTicks();
 	if (time-poll_delay>20) {
 		poll_delay=time;
-		if (sdl.num_joysticks>0) SDL_JoystickUpdate();
-		MAPPER_UpdateJoysticks();
+		
+		if (sdl.num_joysticks > 0)
+		{
+			SDL_JoystickUpdate();
+			MAPPER_UpdateJoysticks();
+		}
 	}
 #endif
 	while (SDL_PollEvent(&event)) {
