@@ -32,6 +32,7 @@
 #include "dosbox.h"
 #include "video.h"
 #include "keyboard.h"
+#include "mouse.h"
 #include "pic.h"
 #include "control.h"
 #include "joystick.h"
@@ -1569,6 +1570,55 @@ public:
 	KBD_KEYS key;
 };
 
+class CMouseButtonEvent : public CTriggeredEvent
+{
+public:
+	CMouseButtonEvent(char const * const _entry, Bitu _button) : CTriggeredEvent(_entry)
+	{
+		button = _button;
+	}
+
+	virtual ~CMouseButtonEvent() {}
+	
+	void Active(bool yesno)
+	{
+		if (yesno)
+		{
+			Mouse_ButtonPressed(button);
+		}
+		else
+		{
+			Mouse_ButtonReleased(button);
+		}
+	}
+
+	Bitu button;
+};
+
+class CMouseMoveEvent : public CContinuousEvent
+{
+public:
+	CMouseMoveEvent(char const * const _entry, Bitu _direction) : CContinuousEvent(_entry)
+	{
+		direction = _direction;
+	}
+
+	virtual ~CMouseMoveEvent() {}
+	
+	void Active(bool yesno)
+	{
+		// top, left, bottom, right
+		float x = direction == 1 ? -1.0f : direction == 3 ? +1.0f : 0.0f;
+		float y = direction == 0 ? -1.0f : direction == 2 ? +1.0f : 0.0f;
+		float scale = 10.0f;
+		float xRel = x * scale;
+		float yRel = y * scale;
+		Mouse_CursorMoved(xRel, yRel, 0.0f, 0.0f, true);
+	}
+
+	Bitu direction;
+};
+
 class CJAxisEvent : public CContinuousEvent {
 public:
 	CJAxisEvent(char const * const _entry,Bitu _stick,Bitu _axis,bool _positive,CJAxisEvent * _opposite_axis) : CContinuousEvent(_entry) {
@@ -1802,6 +1852,28 @@ static CKeyEvent * AddKeyButtonEvent(Bitu x,Bitu y,Bitu dx,Bitu dy,char const * 
 	return event;
 }
 
+static CMouseButtonEvent* AddMouseButtonEvent(
+	Bitu x, Bitu y, Bitu dx, Bitu dy, char const * const title, char const * const entry, Bitu button)
+{
+	char buf[64];
+	strcpy(buf, "mouse_");
+	strcat(buf, entry);
+	auto event = new CMouseButtonEvent(buf, button);
+	new CEventButton(x, y, dx, dy, title, event);
+	return event;
+}
+
+static CMouseMoveEvent* AddMouseMoveEvent(
+	Bitu x, Bitu y, Bitu dx, Bitu dy, char const * const title, char const * const entry, Bitu direction)
+{
+	char buf[64];
+	strcpy(buf, "mouse_");
+	strcat(buf, entry);
+	auto event = new CMouseMoveEvent(buf, direction);
+	new CEventButton(x, y, dx, dy, title, event);
+	return event;
+}
+
 static CJAxisEvent * AddJAxisButton(Bitu x,Bitu y,Bitu dx,Bitu dy,char const * const title,Bitu stick,Bitu axis,bool positive,CJAxisEvent * opposite_axis) {
 	char buf[64];
 	sprintf(buf,"jaxis_%d_%d%s",(int)stick,(int)axis,positive ? "+" : "-");
@@ -1981,6 +2053,19 @@ static void CreateLayout(void) {
 	AddKeyButtonEvent(PX(XO+3),PY(YO+2),BW,BH,"F24","f24",KBD_f24);
 #undef XO
 #undef YO
+
+#define MX 18
+#define MY 18
+	new CTextButton(MX * BW + 5, MY * BH + 10, BW * 3, BH, "Mouse");
+	AddMouseButtonEvent(PX(MX + 0), PY(MY + 1), BW, BH, "LMB", "1", 0);
+	AddMouseButtonEvent(PX(MX + 2), PY(MY + 1), BW, BH, "RMB", "2", 1);
+	AddMouseMoveEvent(PX(MX + 1), PY(MY + 1), BW, BH, "Y- ", "y", 0);
+	AddMouseMoveEvent(PX(MX + 0), PY(MY + 2), BW, BH, "X- ", "l", 1);
+	AddMouseMoveEvent(PX(MX + 1), PY(MY + 2), BW, BH, "Y+ ", "d", 2);
+	AddMouseMoveEvent(PX(MX + 2), PY(MY + 2), BW, BH, "X+ ", "r", 3);
+#undef MX
+#undef MY
+
 #define XO 0
 #define YO 13
 	/* Japanese keys */
