@@ -1827,10 +1827,41 @@ public:
 	
 	void Active(bool yesno)
 	{
+		if (!yesno) return;
+		bool isJoy = false;
+		int deadzone = 0;
+		for (CBindList_it bit = bindlist.begin(); bit != bindlist.end(); bit++)
+		{
+			CBind* bind = (*bit);
+			CJAxisBind* axis_bind = dynamic_cast<CJAxisBind*>(bind);
+			if (axis_bind != nullptr)
+			{
+				isJoy = true;
+				auto joy = axis_bind->GetJoystick();
+				auto axis = axis_bind->GetAxis();
+				auto positive = axis_bind->GetPositive();
+				deadzone = CJAxisBind::GetJoystickDeadzone(joy, axis, positive);
+				break;
+
+			}
+		}
+
 		// top, left, bottom, right
 		float x = direction == 1 ? -1.0f : direction == 3 ? +1.0f : 0.0f;
 		float y = direction == 0 ? -1.0f : direction == 2 ? +1.0f : 0.0f;
-		float scale = 10.0f;
+		float scale = 5.0f;
+		if (isJoy)
+		{
+			if (current_value > deadzone)
+			{
+				scale = 5.0f * current_value / 32767.0f;
+			}
+			else
+			{
+				scale = 0.0f;
+			}
+		}
+
 		float xRel = x * scale;
 		float yRel = y * scale;
 		Mouse_CursorMoved(xRel, yRel, 0.0f, 0.0f, true);
