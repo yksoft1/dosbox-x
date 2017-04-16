@@ -30,6 +30,10 @@
 #include "mem.h"
 #endif
 
+#ifdef __MINGW32__
+#include <stdlib.h>
+#endif
+
 #define CPU_AUTODETERMINE_NONE		0x00
 #define CPU_AUTODETERMINE_CORE		0x01
 #define CPU_AUTODETERMINE_CYCLES	0x02

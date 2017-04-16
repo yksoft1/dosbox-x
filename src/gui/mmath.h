@@ -448,7 +448,7 @@ inline float exp(float x)
 	using namespace local;
 	const ExpVar<>& expVar = C<>::expVar;
 
-#if 1
+#ifndef __MINGW32__
 	__m128 x1 = _mm_set_ss(x);
 
 	int limit = _mm_cvtss_si32(x1) & 0x7fffffff;
@@ -504,6 +504,7 @@ inline double expd(double x)
 	return y * di.d;
 }
 
+#ifndef __MINGW32__
 inline void expd_v(double *px, int n)
 {
 	using namespace local;
@@ -608,6 +609,7 @@ inline __m128 exp_ps(__m128 x)
 
 	return t;
 }
+#endif
 
 inline float log(float x)
 {
@@ -625,6 +627,7 @@ inline float log(float x)
 	return f;
 }
 
+#ifndef __MINGW32__
 inline __m128 log_ps(__m128 x)
 {
 	using namespace local;
@@ -668,6 +671,7 @@ inline __m128 log_ps(__m128 x)
 	rev = _mm_mul_ps(b2, rev);
 	return _mm_add_ps(a, rev);
 }
+#endif
 
 #ifndef __CYGWIN__
 // cygwin defines log2() in global namespace!

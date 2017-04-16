@@ -55,6 +55,7 @@
 #include "setup.h"
 #include "support.h"
 #include "shell.h"
+#include <stdlib.h>
 using namespace std;
 
 void MIDI_RawOutByte(Bit8u data);

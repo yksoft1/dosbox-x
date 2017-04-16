@@ -31,7 +31,17 @@
 # ifndef _BSD_SOURCE
 #  define _BSD_SOURCE		/* for htole16, etc. endian.h functions */
 # endif
-# include <endian.h>
+# ifdef _WIN32
+#  define htole16(x) (x)
+#  define le16toh(x) (x)
+#  define htole32(x) (x)
+#  define le32toh(x) (x)
+#  define htole64(x) (x)
+#  define le64toh(x) (x)
+# endif
+# ifndef _WIN32
+#  include <endian.h>
+# endif
 #endif
 
 #if defined(__APPLE__)

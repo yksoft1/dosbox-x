@@ -30,6 +30,10 @@
 #include "bios.h"
 #endif
 
+#ifdef __MINGW32__
+#include <stdlib.h>
+#endif
+
 /* The Section handling Bios Disk Access */
 #define BIOS_MAX_DISK 10
 

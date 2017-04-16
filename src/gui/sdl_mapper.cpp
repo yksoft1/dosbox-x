@@ -2579,6 +2579,7 @@ void MAPPER_RunInternal() {
 		GFX_RestoreMode();
 	}
 #ifdef __WIN32__
+# ifndef __MINGW32__
 	if(GetAsyncKeyState(0x11)) {
 		INPUT ip;
 
@@ -2596,6 +2597,7 @@ void MAPPER_RunInternal() {
 		ip.ki.dwFlags = KEYEVENTF_KEYUP; // KEYEVENTF_KEYUP for key release
 	    SendInput(1, &ip, sizeof(INPUT));
 	}
+# endif
 #endif
 	KEYBOARD_ClrBuffer();
 	GFX_LosingFocus();

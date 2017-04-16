@@ -17,6 +17,7 @@
  */
 
 #ifdef WIN32
+#define _WIN32_WINNT 0x0500
 # ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
 # endif
@@ -1269,8 +1270,6 @@ static bool exthook_enabled = false;
 #if defined(WIN32)
 static HHOOK exthook_winhook = NULL;
 
-extern "C" void SDL_DOSBox_X_Hack_Set_Toggle_Key_WM_USER_Hack(unsigned char x);
-
 static LRESULT CALLBACK WinExtHookKeyboardHookProc(int nCode,WPARAM wParam,LPARAM lParam) {
 	if (nCode == HC_ACTION) {
 		HWND myHwnd = GetHWND();
@@ -1321,6 +1320,7 @@ static LRESULT CALLBACK WinExtHookKeyboardHookProc(int nCode,WPARAM wParam,LPARA
 						case VK_ESCAPE:	// try to catch CTRL+ESC as well (so Windows 95 Start Menu is accessible)
 						case VK_SPACE:	// and space (catching VK_ZOOM isn't enough to prevent Windows 10 from changing res)
 						// these keys have no meaning to DOSBox and so we hook them by default to allow the guest OS to use them
+#ifndef __MINGW32__
 						case VK_BROWSER_BACK: // Browser Back key
 						case VK_BROWSER_FORWARD: // Browser Forward key
 						case VK_BROWSER_REFRESH: // Browser Refresh key
@@ -1336,6 +1336,7 @@ static LRESULT CALLBACK WinExtHookKeyboardHookProc(int nCode,WPARAM wParam,LPARA
 						case VK_LAUNCH_MEDIA_SELECT: // Select Media key
 						case VK_LAUNCH_APP1: // Start Application 1 key
 						case VK_LAUNCH_APP2: // Start Application 2 key
+#endif
 						case VK_PLAY: // Play key
 						case VK_ZOOM: // Zoom key (the (+) magnifying glass keyboard shortcut laptops have these days on the spacebar?)
 							nopass = true;
@@ -1381,6 +1382,7 @@ static LRESULT CALLBACK WinExtHookKeyboardHookProc(int nCode,WPARAM wParam,LPARA
 
 // Microsoft doesn't have an outright "set toggle key state" call, they expect you
 // to know the state and then fake input to toggle. Blegh. Fine.
+#ifndef __MINGW32__
 void WinSetKeyToggleState(unsigned int vkCode, bool state) {
 	bool curState = (GetKeyState(vkCode) & 1) ? true : false;
 	INPUT inps;
@@ -1402,17 +1404,20 @@ void WinSetKeyToggleState(unsigned int vkCode, bool state) {
 	SendInput(1, &inps, sizeof(INPUT));
 }
 #endif
+#endif
 
 Bitu Keyboard_Guest_LED_State();
 void UpdateKeyboardLEDState(Bitu led_state/* in the same bitfield arrangement as using command 0xED on PS/2 keyboards */);
 
 void UpdateKeyboardLEDState(Bitu led_state/* in the same bitfield arrangement as using command 0xED on PS/2 keyboards */) {
 #if defined(WIN32) /* Microsoft Windows */
+ #ifndef __MINGW32__
 	if (exthook_enabled) { // ONLY if ext hook is enabled, else we risk infinite loops with keyboard events
 		WinSetKeyToggleState(VK_NUMLOCK, !!(led_state & 2));
 		WinSetKeyToggleState(VK_SCROLL, !!(led_state & 1));
 		WinSetKeyToggleState(VK_CAPITAL, !!(led_state & 4));
 	}
+ #endif
 #endif
 }
 
@@ -1440,9 +1445,6 @@ void DoExtendedKeyboardHook(bool enable) {
 			}
 		}
 
-		// Enable the SDL hack for Win32 to handle Num/Scroll/Caps
-		SDL_DOSBox_X_Hack_Set_Toggle_Key_WM_USER_Hack(1);
-
 		// if hooking Num/Scroll/Caps Lock then record the toggle state of those keys.
 		// then read from the keyboard emulation the LED state set by the guest and apply it to the host keyboard.
 		if (enable_hook_lock_toggle_keys) {
@@ -1458,9 +1460,11 @@ void DoExtendedKeyboardHook(bool enable) {
 		if (exthook_winhook) {
 			if (enable_hook_lock_toggle_keys) {
 				// restore state
+#ifndef __MINGW32__
 				WinSetKeyToggleState(VK_NUMLOCK, on_capture_num_lock_was_on);
 				WinSetKeyToggleState(VK_SCROLL, on_capture_scroll_lock_was_on);
 				WinSetKeyToggleState(VK_CAPITAL, on_capture_caps_lock_was_on);
+#endif
 			}
 
 			{
@@ -1477,8 +1481,6 @@ void DoExtendedKeyboardHook(bool enable) {
 			}
 
 			// Disable the SDL hack for Win32 to handle Num/Scroll/Caps
-			SDL_DOSBox_X_Hack_Set_Toggle_Key_WM_USER_Hack(0);
-
 			UnhookWindowsHookEx(exthook_winhook);
 			exthook_winhook = NULL;
 		}
@@ -2922,7 +2924,7 @@ search:
 
 		if((!strcmp(ext,".img")) || (!strcmp(ext,".pcjr")) || (!strcmp(ext,".jrc")) || (!strcmp(ext,".ima"))) {
 			extern Bitu ZDRIVE_NUM;
-			char root[4] = {'A'+ZDRIVE_NUM,':','\\',0};
+         char root[4] = {static_cast<char>('A'+ZDRIVE_NUM),':','\\',0};
 			char cmd[20];
 			DOS_Shell shell;
 			Bit16u n=1; Bit8u c='\n';
@@ -2965,7 +2967,7 @@ void Go_Boot2(const char boot_drive[_MAX_DRIVE]) {
 	DOS_WriteFile(STDOUT,&c,&n);
 	char temp[7];
 	extern Bitu ZDRIVE_NUM;
-	char root[4] = {'A'+ZDRIVE_NUM,':','\\',0};
+   char root[4] = {static_cast<char>('A'+ZDRIVE_NUM),':','\\',0};
 	char cmd[20];
 	temp[0] = 0;
 	cmd[0] = 0;
@@ -3564,6 +3566,7 @@ static bool PasteClipboardNext()
 
 	const char cKey = strPasteBuffer[0];
 	SHORT shVirKey = VkKeyScan(cKey); // If it fails then MapVirtK will also fail, so no bail yet
+#ifndef __MINGW32__
 	UINT uiScanCode = MapVirtualKey(LOBYTE(shVirKey), MAPVK_VK_TO_VSC);
 	if (uiScanCode)
 	{
@@ -3609,6 +3612,7 @@ static bool PasteClipboardNext()
 		if (bModAlt != bModAltOn) GenKBStroke(uiScanCodeAlt, bModAltOn, sdlmMods);
 		//putchar(cKey); // For debugging dropped strokes
 	}
+#endif
 
 	// Pop head. Could be made more efficient, but this is neater.
 	strPasteBuffer = strPasteBuffer.substr(1, strPasteBuffer.length()); // technically -1, but it clamps by itself anyways...
@@ -4459,8 +4463,10 @@ int main(int argc, char* argv[]) {
 	CommandLine com_line(argc,argv);
 
 #if defined(WIN32)
+# ifndef __MINGW32__
 	/* Microsoft's IME does not play nice with DOSBox */
 	ImmDisableIME((DWORD)(-1));
+# endif
 #endif
 
 	{
