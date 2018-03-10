@@ -649,7 +649,12 @@ void SHELL_Init() {
                 "\x86\x46                                                                    \x86\x46\n"
                );
         MSG_Add("SHELL_STARTUP_PC98","\x86\x46 DOSBox-X is now running in NEC PC-98 emulation mode.               \x86\x46\n"
-                "\x86\x46 \033[31mPC-98 emulation is INCOMPLETE and CURRENTLY IN DEVELOPMENT.\033[37m        \x86\x46\n");
+                "\x86\x46 \033[31mPC-98 emulation is INCOMPLETE and CURRENTLY IN DEVELOPMENT.\033[37m        \x86\x46\n"
+#ifdef __VERSION__		
+				"\x86\x46 \033[31mThis build is for use of YKSOFT Systems only.\033[37m Built with GCC " __VERSION__ " \x86\x46\n");
+#else
+ 				"\x86\x46 \033[31mThis build is for use of YKSOFT Systems only.\033[37m                      \x86\x46\n");
+#endif
         MSG_Add("SHELL_STARTUP_DEBUG",
 #if defined(MACOSX)
                 "\x86\x46 Debugger is available, use \033[31malt-F12\033[37m to enter.                       \x86\x46\n"
@@ -676,6 +681,11 @@ void SHELL_Init() {
                 "\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD"
                 "\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xCD\xBB\n"
                 "\xBA \033[32mWelcome to DOSBox-X %-8s %-25s\033[37m             \xBA\n"
+#ifdef __VERSION__		
+				"\xBA \033[31mThis build is for use of YKSOFT Systems only.\033[37m Built with GCC " __VERSION__ " \xBA\n"
+#else
+ 				"\xBA \033[31mThis build is for use of YKSOFT Systems only.\033[37m                      \xBA\n"
+#endif
                 "\xBA                                                                    \xBA\n"
                 "\xBA For a short introduction for new users type: \033[33mINTRO\033[37m                 \xBA\n"
                 "\xBA For supported shell commands type: \033[33mHELP\033[37m                            \xBA\n"
