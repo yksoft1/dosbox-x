@@ -690,7 +690,7 @@ public:
          *    SS:SP = 0030:00D8
          */
 		Bitu stack_seg=IS_PC98_ARCH ? 0x0030 : 0x7000;
-        Bitu load_seg=IS_PC98_ARCH ? 0x1FE0 : 0x07C0;
+        Bitu load_seg;//=IS_PC98_ARCH ? 0x1FE0 : 0x07C0;
 
 		if (MEM_TotalPages() > 0x9C)
 			max_seg = 0x9C00;
@@ -779,6 +779,9 @@ public:
         }
 
         unsigned int bootsize = imageDiskList[drive-65]->getSectSize();
+
+        /* NTS: Load address is 128KB - sector size */
+        load_seg=IS_PC98_ARCH ? (0x2000 - (bootsize/16U)) : 0x07C0;
 
 		imageDiskList[drive-65]->Read_Sector(0,0,1,(Bit8u *)&bootarea);
 
@@ -1038,6 +1041,32 @@ public:
                 for (unsigned int i=0;i < (80*25*2);i += 2) {
                     mem_writew(0xA0000+i,0x0000);
                     mem_writew(0xA2000+i,0x00E1);
+                }
+
+                /* There is a byte at 0x584 that describes the boot drive + type.
+                 * This is confirmed in Neko Project II source and by the behavior
+                 * of an MS-DOS boot disk formatted by a PC-98 system.
+                 *
+                 * There are three values for three different floppy formats, and
+                 * one for hard drives */
+                Bit32u heads,cyls,sects,ssize;
+
+                imageDiskList[drive-65]->Get_Geometry(&heads,&cyls,&sects,&ssize);
+
+                if (ssize == 1024 && heads == 2 && cyls == 77 && sects == 8) {
+                    mem_writeb(0x584,0x90/*type*/ + 0x00/*drive*/); /* 1.2MB 3-mode */
+                    mem_writew(0x55C,0x0001);   /* disk equipment (drive 0 is present) */
+                    mem_writew(0x5AE,0x0001);   /* disk equipment (drive 0 is present, 1.44MB) */
+                }
+                else if (ssize == 512 && heads == 2 && cyls == 80 && sects == 18) {
+                    mem_writeb(0x584,0x30/*type*/ + 0x00/*drive*/); /* 1.44MB */
+                    mem_writew(0x55C,0x0001);   /* disk equipment (drive 0 is present and high density) */
+                    mem_writew(0x5AE,0x0001);   /* disk equipment (drive 0 is present, 1.44MB) */
+                }
+                /* TODO: 640KB? */
+                else {
+                    /* hard drive */
+                    mem_writeb(0x584,0x00/*type*/ + 0x00/*drive*/);
                 }
             }
             else {
@@ -1744,58 +1773,98 @@ public:
 	void Run(void);
 };
 
+bool XMS_Active(void);
+Bitu XMS_AllocateMemory(Bitu size, Bit16u& handle);
+
 void LOADFIX::Run(void) 
 {
 	Bit16u commandNr	= 1;
-	Bit16u kb			= 64;
+	Bitu kb			    = 64;
+    bool xms            = false;
+
+    if (cmd->FindExist("-xms",true)) {
+        xms = true;
+        kb = 1024;
+    }
+
+	if (cmd->FindExist("-?", false)) {
+		WriteOut(MSG_Get("PROGRAM_LOADFIX_HELP"));
+		return;
+	}
+
 	if (cmd->FindCommand(commandNr,temp_line)) {
 		if (temp_line[0]=='-') {
 			char ch = temp_line[1];
 			if ((*upcase(&ch)=='D') || (*upcase(&ch)=='F')) {
 				// Deallocate all
-				DOS_FreeProcessMemory(0x40);
-				WriteOut(MSG_Get("PROGRAM_LOADFIX_DEALLOCALL"),kb);
+                if (xms) {
+                    WriteOut("XMS deallocation not yet implemented\n");
+                }
+                else {
+                    DOS_FreeProcessMemory(0x40);
+                    WriteOut(MSG_Get("PROGRAM_LOADFIX_DEALLOCALL"),kb);
+                }
 				return;
 			} else {
 				// Set mem amount to allocate
 				kb = atoi(temp_line.c_str()+1);
-				if (kb==0) kb=64;
+				if (kb==0) kb=xms?1024:64;
 				commandNr++;
 			}
 		}
 	}
+
 	// Allocate Memory
-	Bit16u segment;
-	Bit16u blocks = kb*1024/16;
-	if (DOS_AllocateMemory(&segment,&blocks)) {
-		DOS_MCB mcb((Bit16u)(segment-1));
-		mcb.SetPSPSeg(0x40);			// use fake segment
-		WriteOut(MSG_Get("PROGRAM_LOADFIX_ALLOC"),kb);
-		// Prepare commandline...
-		if (cmd->FindCommand(commandNr++,temp_line)) {
-			// get Filename
-			char filename[128];
-			safe_strncpy(filename,temp_line.c_str(),128);
-			// Setup commandline
-			bool ok;
-			char args[256];
-			args[0] = 0;
-			do {
-				ok = cmd->FindCommand(commandNr++,temp_line);
-				if(sizeof(args)-strlen(args)-1 < temp_line.length()+1)
-					break;
-				strcat(args,temp_line.c_str());
-				strcat(args," ");
-			} while (ok);			
-			// Use shell to start program
-			DOS_Shell shell;
-			shell.Execute(filename,args);
-			DOS_FreeMemory(segment);		
-			WriteOut(MSG_Get("PROGRAM_LOADFIX_DEALLOC"),kb);
-		}
-	} else {
-		WriteOut(MSG_Get("PROGRAM_LOADFIX_ERROR"),kb);	
-	}
+    if (xms) {
+        if (XMS_Active()) {
+            Bit16u handle;
+            Bitu err;
+
+            err = XMS_AllocateMemory(kb,/*&*/handle);
+            if (err == 0) {
+                WriteOut("XMS block allocated (%uKB)\n",kb);
+            }
+            else {
+                WriteOut("Unable to allocate XMS block\n");
+            }
+        }
+        else {
+            WriteOut("XMS not active\n");
+        }
+    }
+    else {
+        Bit16u segment;
+        Bit16u blocks = kb*1024/16;
+        if (DOS_AllocateMemory(&segment,&blocks)) {
+            DOS_MCB mcb((Bit16u)(segment-1));
+            mcb.SetPSPSeg(0x40);			// use fake segment
+            WriteOut(MSG_Get("PROGRAM_LOADFIX_ALLOC"),kb);
+            // Prepare commandline...
+            if (cmd->FindCommand(commandNr++,temp_line)) {
+                // get Filename
+                char filename[128];
+                safe_strncpy(filename,temp_line.c_str(),128);
+                // Setup commandline
+                bool ok;
+                char args[256];
+                args[0] = 0;
+                do {
+                    ok = cmd->FindCommand(commandNr++,temp_line);
+                    if(sizeof(args)-strlen(args)-1 < temp_line.length()+1)
+                        break;
+                    strcat(args,temp_line.c_str());
+                    strcat(args," ");
+                } while (ok);			
+                // Use shell to start program
+                DOS_Shell shell;
+                shell.Execute(filename,args);
+                DOS_FreeMemory(segment);		
+                WriteOut(MSG_Get("PROGRAM_LOADFIX_DEALLOC"),kb);
+            }
+        } else {
+            WriteOut(MSG_Get("PROGRAM_LOADFIX_ERROR"),kb);	
+        }
+    }
 }
 
 static void LOADFIX_ProgramStart(Program * * make) {
@@ -3208,6 +3277,20 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_LOADFIX_DEALLOC","%d kb freed.\n");
 	MSG_Add("PROGRAM_LOADFIX_DEALLOCALL","Used memory freed.\n");
 	MSG_Add("PROGRAM_LOADFIX_ERROR","Memory allocation error.\n");
+	MSG_Add("PROGRAM_LOADFIX_HELP",
+		"Reduces the amount of available conventional or XMS memory\n\n"
+		"LOADFIX [-xms] [-{ram}] [{program}]\n"
+		"LOADFIX -f [-xms]\n\n"
+		"  -xms        Allocates memory from XMS rather than conventional memory\n"
+		"  -{ram}      Specifies the amount of memory to allocate in KB\n"
+		"                 Defaults to 64kb for conventional memory; 1MB for XMS memory\n"
+		"  -f          Frees previously allocated memory\n"
+		"  {program}   Runs the specified program\n\n"
+		"Examples:\n"
+		"  LOADFIX game.exe     Allocates 64KB of conventional memory and runs game.exe\n"
+		"  LOADFIX -128         Allocates 128KB of conventional memory\n"
+		"  LOADFIX -xms         Allocates 1MB of XMS memory\n"
+		"  LOADFIX -f           Frees allocated conventional memory\n");
 
 	MSG_Add("MSCDEX_SUCCESS","MSCDEX installed.\n");
 	MSG_Add("MSCDEX_ERROR_MULTIPLE_CDROMS","MSCDEX: Failure: Drive-letters of multiple CD-ROM drives have to be continuous.\n");
