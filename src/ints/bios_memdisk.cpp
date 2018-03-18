@@ -211,6 +211,7 @@ void imageDiskMemory::init(diskGeo diskParams, bool isHardDrive, imageDisk* unde
 	memset((void*)ChunkMap, 0, total_chunks * sizeof(Bit8u*));
 
 	//set internal variables
+	this->diskname = "ram drive";
 	this->heads = diskParams.headscyl;
 	this->cylinders = diskParams.cylcount;
 	this->sectors = diskParams.secttrack;
@@ -387,10 +388,10 @@ Bit8u imageDiskMemory::Format() {
 	Bit32u partitionStart = writeMBR ? this->sectors : 0; //must be aligned with the start of a head (multiple of this->sectors)
 	Bit32u partitionLength = reported_total_sectors - partitionStart; //must be aligned with the start of a head (multiple of this->sectors)
 	//figure out the media id
-	Bit8u mediaID = this->hardDrive ? 0xF0 : this->floppyInfo.mediaid;
+	Bit8u mediaID = this->hardDrive ? 0xF8 : this->floppyInfo.mediaid;
 	//figure out the number of root entries and minimum number of sectors per cluster
 	Bit32u root_ent = this->hardDrive ? 512 : this->floppyInfo.rootentries;
-	Bit32u sectors_per_cluster = this->hardDrive ? 1 : this->floppyInfo.sectcluster;
+	Bit32u sectors_per_cluster = this->hardDrive ? 4 : this->floppyInfo.sectcluster; //fat requires 2k clusters minimum on hard drives
 
 	//calculate the number of:
 	//  root sectors
@@ -407,18 +408,10 @@ Bit8u imageDiskMemory::Format() {
 		return 0x05;
 	}
 
-	if (this->hardDrive) {
-		LOG_MSG("Formatting FAT%u hard drive C/H/S %u/%u/%u with %u bytes/sector, %u root entries, %u-byte clusters, media id 0x%X\n",
-			(unsigned int)(isFat16 ? 16 : 12),
-			(unsigned int)reported_cylinders, (unsigned int)this->heads, (unsigned int)this->sectors, (unsigned int)this->sector_size,
-			(unsigned int)root_ent, (unsigned int)(sectors_per_cluster * this->sector_size), (unsigned int)mediaID);
-	}
-	else {
-		LOG_MSG("Formatting FAT%u floppy drive C/H/S %u/%u/%u with %u bytes/sector, %u root entries, %u-byte clusters, media id 0x%X\n",
-			(unsigned int)(isFat16 ? 16 : 12),
-			(unsigned int)reported_cylinders, (unsigned int)this->heads, (unsigned int)this->sectors, (unsigned int)this->sector_size,
-			(unsigned int)root_ent, (unsigned int)(sectors_per_cluster * this->sector_size), (unsigned int)mediaID);
-	}
+	LOG_MSG("Formatting FAT%u %s drive C/H/S %u/%u/%u with %u bytes/sector, %u root entries, %u-byte clusters, media id 0x%X\n",
+		(unsigned int)(isFat16 ? 16 : 12), this->hardDrive ? "hard" : "floppy",
+		(unsigned int)reported_cylinders, (unsigned int)this->heads, (unsigned int)this->sectors, (unsigned int)this->sector_size,
+		(unsigned int)root_ent, (unsigned int)(sectors_per_cluster * this->sector_size), (unsigned int)mediaID);
 
 	//write MBR if applicable
 	Bit8u sbuf[512];
@@ -545,8 +538,8 @@ bool imageDiskMemory::CalculateFAT(Bit32u partitionStartingSector, Bit32u partit
 	//set the number of root sectors
 	*rootSectors = rootEntries * 32 / 512;
 	//make sure there is a minimum number of sectors available
-	//  minimum sectors = root sectors + 1 for boot sector + 1 for fat #1 + 1 for fat #2 + 1 for data sector + add 7 for hard drives due to allow for 4k alignment
-	if (partitionLength < (*rootSectors + 4 + (isHardDrive ? 7 : 0))) {
+	//  minimum sectors = root sectors + 1 for boot sector + 1 for fat #1 + 1 for fat #2 + 1 cluster for data + add 7 for hard drives due to allow for 4k alignment
+	if (partitionLength < (*rootSectors + 3 + *sectorsPerCluster + (isHardDrive ? 7 : 0))) {
 		LOG_MSG("Partition too small to format\n");
 		return false;
 	}

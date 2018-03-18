@@ -2365,6 +2365,7 @@ void update_pc98_function_row(bool enable) {
 }
 
 void pc98_set_digpal_entry(unsigned char ent,unsigned char grb);
+void PC98_show_cursor(bool show);
 
 static Bitu INT18_PC98_Handler(void) {
     Bit16u temp16;
@@ -2452,12 +2453,10 @@ static Bitu INT18_PC98_Handler(void) {
             pc98_gdc[GDC_MASTER].param_ram[3] = (400 << 4) >> 8;
             break;
         case 0x11: /* show cursor */
-            pc98_gdc[GDC_MASTER].force_fifo_complete();
-            pc98_gdc[GDC_MASTER].cursor_enable = true;
+            PC98_show_cursor(true);
             break;
         case 0x12: /* hide cursor */
-            pc98_gdc[GDC_MASTER].force_fifo_complete();
-            pc98_gdc[GDC_MASTER].cursor_enable = false;
+            PC98_show_cursor(false);
             break;
         case 0x13: /* set cursor position (DX=byte position) */
             void vga_pc98_direct_cursor_pos(Bit16u address);
@@ -2465,6 +2464,51 @@ static Bitu INT18_PC98_Handler(void) {
             pc98_gdc[GDC_MASTER].force_fifo_complete();
             vga_pc98_direct_cursor_pos(reg_dx >> 1);
             pc98_gdc[GDC_MASTER].cursor_enable = true; // FIXME: Right?
+            break;
+        case 0x14: /* read FONT RAM */
+            {
+                unsigned int i,o,r;
+
+                /* DX = code (must be 0x76xx or 0x7700)
+                 * BX:CX = 34-byte region to write to */
+                if (reg_dh == 0x80) { /* 8x16 ascii */
+                    i = (reg_bx << 4) + reg_cx + 2;
+                    mem_writew(i-2,0x0102);
+                    for (r=0;r < 16;r++) {
+                        o = (reg_dl*16)+r;
+
+                        assert((o+2) <= sizeof(vga.draw.font));
+
+                        mem_writeb(i+r,vga.draw.font[o]);
+                    }
+                }
+                else if ((reg_dh & 0xFC) == 0x28) { /* 8x16 kanji */
+                    i = (reg_bx << 4) + reg_cx + 2;
+                    mem_writew(i-2,0x0202);
+                    for (r=0;r < 16;r++) {
+                        o = (((((reg_dl & 0x7F)*128)+((reg_dh - 0x20) & 0x7F))*16)+r)*2;
+
+                        assert((o+2) <= sizeof(vga.draw.font));
+
+                        mem_writeb(i+r+0,vga.draw.font[o+0]);
+                    }
+                }
+                else if (reg_dh != 0) { /* 16x16 kanji */
+                    i = (reg_bx << 4) + reg_cx + 2;
+                    mem_writew(i-2,0x0202);
+                    for (r=0;r < 16;r++) {
+                        o = (((((reg_dl & 0x7F)*128)+((reg_dh - 0x20) & 0x7F))*16)+r)*2;
+
+                        assert((o+2) <= sizeof(vga.draw.font));
+
+                        mem_writeb(i+(r*2)+0,vga.draw.font[o+0]);
+                        mem_writeb(i+(r*2)+1,vga.draw.font[o+1]);
+                    }
+                }
+                else {
+                    LOG_MSG("PC-98 INT 18h AH=14h font RAM read ignored, code 0x%04x not supported",reg_dx);
+                }
+            }
             break;
         case 0x16: /* fill screen with chr + attr */
             {
@@ -2556,6 +2600,15 @@ static Bitu INT18_PC98_Handler(void) {
             else {
                 pc98_gdc[GDC_SLAVE].doublescan = false;
                 pc98_gdc[GDC_SLAVE].row_height = 1;
+            }
+
+            {
+                unsigned char b = mem_readb(0x597);
+
+                b &= ~3;
+                b |= (reg_ch - 1) & 3;
+
+                mem_writeb(0x597,b);
             }
 
             {
@@ -4707,12 +4760,41 @@ void write_FFFF_PC98_signature() {
     phys_writew(0xffffe,0xABCD);
 }
 
+extern bool                         gdc_5mhz_mode;
+extern bool                         enable_pc98_egc;
+extern bool                         enable_pc98_grcg;
+extern bool                         enable_pc98_16color;
+
+void gdc_egc_enable_update_vars(void) {
+    unsigned char b;
+
+    b = mem_readb(0x54D);
+    b &= ~0x40;
+    if (enable_pc98_egc) b |= 0x40;
+    mem_writeb(0x54D,b);
+
+    b = mem_readb(0x597);
+    b &= ~0x04;
+    if (enable_pc98_egc) b |= 0x04;
+    mem_writeb(0x597,b);
+
+    if (!enable_pc98_egc)
+        pc98_gdc_vramop &= ~(1 << VOPBIT_EGC);
+}
+
 class BIOS:public Module_base{
 private:
 	static Bitu cb_bios_post__func(void) {
 		void TIMER_BIOS_INIT_Configure();
 #if C_DEBUG
         void DEBUG_CheckCSIP();
+#endif
+
+#if C_HEAVY_DEBUG
+        /* the game/app obviously crashed, which is way more important
+         * to log than what we do here in the BIOS at POST */
+        void DEBUG_StopLog(void);
+        DEBUG_StopLog();
 #endif
 
 		if (bios_first_init) {
@@ -4790,6 +4872,12 @@ private:
             /* keyboard buffer */
             mem_writew(0x524/*tail*/,0x502);
             mem_writew(0x526/*tail*/,0x502);
+
+            /* various BIOS flags */
+            mem_writeb(0x53B,0x0F); // CRT_RASTER, 640x400 24.83KHz-hsync 56.42Hz-vsync
+            mem_writeb(0x54C,(enable_pc98_grcg ? 0x02 : 0x00) | (enable_pc98_16color ? 0x04 : 0x00)); // PRXCRT, 16-color G-VRAM, GRCG
+            mem_writeb(0x54D,(enable_pc98_egc ? 0x40 : 0x00) | (gdc_5mhz_mode ? 0x20 : 0x00) | (gdc_5mhz_mode ? 0x04 : 0x00)); // EGC
+            mem_writeb(0x597,(enable_pc98_egc ? 0x04 : 0x00/*FIXME*/)); // EGC
         }
 
         if (bios_user_reset_vector_blob != 0 && !bios_user_reset_vector_blob_run) {

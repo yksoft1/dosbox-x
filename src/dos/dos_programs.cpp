@@ -2425,7 +2425,7 @@ public:
 				return;
 			}
 			drive=temp_line[0];
-			if ((drive<'0') || (drive>3+'0')) {
+			if ((drive<'0') || (drive>=MAX_DISK_IMAGES+'0')) {
 				WriteOut_NoParsing(MSG_Get("PROGRAM_IMGMOUNT_SPECIFY2"));
 				return;
 			}
@@ -2476,36 +2476,25 @@ public:
 			if (!MountIso(drive, mediaid, paths, ide_index, ide_slave)) return;
 		} else if (fstype=="none") {
 			if (el_torito != "") {
-				newImage = MountElToritoNone(el_torito_cd_drive, el_torito_floppy_base, el_torito_floppy_type);
-				if (newImage == 0) return;
+				newImage = new imageDiskElToritoFloppy(el_torito_cd_drive, el_torito_floppy_base, el_torito_floppy_type);
+				if (newImage == NULL) return;
 			}
 			else
 			{
 				newImage = MountImageNone(sizes, imagesize, reserved_cylinders);
-				if (newImage == 0) return;
+				if (newImage == NULL) return;
 			}
 
-			/* TODO: Notify IDE ATA emulation if a drive is already there */
-			if (imageDiskList[drive - '0'] != NULL) imageDiskList[drive - '0']->Release();
-			imageDiskList[drive - '0'] = newImage;
-			updateDPT();
-			WriteOut(MSG_Get("PROGRAM_IMGMOUNT_MOUNT_NUMBER"), drive - '0', temp_line.c_str());
-			// If instructed, attach to IDE controller as ATA hard disk
-			if (ide_index >= 0) IDE_Hard_Disk_Attach(ide_index, ide_slave, drive - '0');
+			if (AttachToBiosAndIde(newImage, drive - '0', ide_index, ide_slave)) {
+				WriteOut(MSG_Get("PROGRAM_IMGMOUNT_MOUNT_NUMBER"), drive - '0', temp_line.c_str());
+			}
+			else {
+				WriteOut("Invalid mount number");
+			}
 		}
 		else {
 			WriteOut("Invalid fstype\n");
 			return;
-		}
-
-		// let FDC know if we mounted a floppy
-		if (type == "floppy") {
-			if (drive >= '0' && drive <= '1')
-				FDC_AssignINT13Disk(drive-'0');
-			else if (drive >= 'A' && drive <= 'B')
-				FDC_AssignINT13Disk(drive-'A');
-			else if (drive >= 'a' && drive <= 'b')
-				FDC_AssignINT13Disk(drive-'a');
 		}
 
 		// check if volume label is given. becareful for cdrom
@@ -2579,20 +2568,33 @@ private:
 				if (i_drive <= 1)
 					FDC_UnassignINT13Disk(i_drive);
 
+				//get reference to image and cdrom before they are possibly destroyed
+				fatDrive * drive = dynamic_cast<fatDrive*>(Drives[i_drive]);
+				imageDisk* image = drive ? drive->loadedDisk : NULL;
+				isoDrive * cdrom = dynamic_cast<isoDrive*>(Drives[i_drive]);
+
 				switch (DriveManager::UnmountDrive(i_drive)) {
-				case 0:
-					/* TODO: If the drive letter is also a CD-ROM drive attached to IDE, then let the
-					IDE code know */
-					Drives[i_drive] = 0;
+				case 0: //success
+				{
+					//detatch hard drive or floppy drive from bios and ide controller
+					if (image) DetachFromBios(image);
+
+					/* If the drive letter is also a CD-ROM drive attached to IDE, then let the IDE code know */
+					if (cdrom) IDE_CDROM_Detach(i_drive);
+
+					Drives[i_drive] = NULL;
 					if (i_drive == DOS_GetDefaultDrive())
 						DOS_SetDrive(toupper('Z') - 'A');
 					WriteOut(MSG_Get("PROGRAM_MOUNT_UMOUNT_SUCCESS"), letter);
 					return true;
+				}
 				case 1:
 					WriteOut(MSG_Get("PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL"));
 					return false;
 				case 2:
 					WriteOut(MSG_Get("MSCDEX_ERROR_MULTIPLE_CDROMS"));
+					return false;
+				default:
 					return false;
 				}
 			}
@@ -2602,7 +2604,16 @@ private:
 			}
 		}
 		else if (isdigit(letter)) { /* DOSBox-X: drives mounted by number (INT 13h) can be unmounted this way */
-			WriteOut("Unmounting imgmount by number (INT13h) is not yet implemented");
+			int index = letter - '0';
+
+			//detatch hard drive or floppy drive from bios and ide controller
+			if (index < MAX_DISK_IMAGES && imageDiskList[index]) {
+				if (index > 1) IDE_Hard_Disk_Detach(index);
+				imageDiskList[index]->Release();
+				imageDiskList[index] = NULL;
+				return true;
+			}
+			WriteOut("No drive loaded at specified point\n");
 			return false;
 		}
 		else {
@@ -2628,7 +2639,7 @@ private:
 		}
 
 		/* drive must not exist (as a hard drive) */
-		if (imageDiskList[el_torito_cd_drive - 'C'] != NULL) {
+		if (imageDiskList[el_torito_cd_drive - 'A'] != NULL) {
 			WriteOut("-el-torito CD-ROM drive specified already exists as a non-CD-ROM device\n");
 			return false;
 		}
@@ -2774,7 +2785,14 @@ private:
 	}
 
 	bool MountElToritoFat(const char drive, const Bitu sizes[], const Bit8u mediaid, const char el_torito_cd_drive, const unsigned long el_torito_floppy_base, const unsigned char el_torito_floppy_type) {
-		if (Drives[drive - 'A']) {
+		unsigned char driveIndex = drive - 'A';
+
+		if (driveIndex > 1) {
+			WriteOut("Invalid drive letter");
+			return false;
+		}
+
+		if (Drives[driveIndex]) {
 			WriteOut(MSG_Get("PROGRAM_IMGMOUNT_ALREADY_MOUNTED"));
 			return false;
 		}
@@ -2783,35 +2801,21 @@ private:
 		newImage->Addref();
 
 		DOS_Drive* newDrive = new fatDrive(newImage);
-		newImage->Release(); //fatDrive calls Addref
+		newImage->Release(); //fatDrive calls Addref, and this will release newImage if fatDrive doesn't use it
 		if (!(dynamic_cast<fatDrive*>(newDrive))->created_successfully) {
 			WriteOut(MSG_Get("PROGRAM_IMGMOUNT_CANT_CREATE"));
 			return false;
 		}
 
-		DriveManager::AppendDisk(drive - 'A', newDrive);
-		DriveManager::InitializeDrive(drive - 'A');
+		AddToDriveManager(drive, newDrive, mediaid);
+		AttachToBios(newImage, driveIndex);
 
-		// Set the correct media byte in the table 
-		mem_writeb(Real2Phys(dos.tables.mediaid) + (drive - 'A') * 2, mediaid);
+		WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_ELTORITO"), drive);
 
-		/* Command uses dta so set it to our internal dta */
-		RealPt save_dta = dos.dta();
-		dos.dta(dos.tables.tempdta);
-
-		{
-			DriveManager::CycleAllDisks();
-
-			char root[4] = { drive, ':', '\\', 0 };
-			DOS_FindFirst(root, DOS_ATTR_VOLUME); // force obtaining the label and saving it in dirCache
-		}
-		dos.dta(save_dta);
 		return true;
 	}
 
-	bool MountFat(bool &imgsizedetect, Bitu sizes[], const char drive, const Bitu mediaid, const std::string str_size, const std::string type, const std::vector<std::string> paths, const signed char ide_index, const bool ide_slave) {
-		DOS_Drive * newdrive;
-
+	bool MountFat(bool &imgsizedetect, Bitu sizes[], const char drive, const Bitu mediaid, const std::string &str_size, const std::string &type, const std::vector<std::string> &paths, const signed char ide_index, const bool ide_slave) {
 		if (imgsizedetect) {
 			/* .HDI images contain the geometry explicitly in the header. */
 			if (str_size.size() == 0) {
@@ -2865,6 +2869,83 @@ private:
 			}
 		}
 
+		AddToDriveManager(drive, imgDisks, mediaid);
+
+		if (type == "ram") {
+			WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_RAMDRIVE"), drive);
+		}
+		else {
+			std::string tmp(paths[0]);
+			for (i = 1; i < paths.size(); i++) {
+				tmp += "; " + paths[i];
+			}
+			WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, tmp.c_str());
+		}
+
+		if (imgDisks.size() == 1) {
+			imageDisk* image = ((fatDrive*)imgDisks[0])->loadedDisk;
+			if (image->hardDrive) {
+				for (int index = 2; index < MAX_DISK_IMAGES; index++) {
+					if (imageDiskList[index] == NULL) {
+						AttachToBiosAndIde(image, index, ide_index, ide_slave);
+						break;
+					}
+				}
+			}
+			else {
+				//AttachToBios(image, 0); //always attach as primary floppy drive (???)
+				AttachToBios(image, drive - 'A');  //attach as secondary floppy if mounting at B:
+			}
+		}
+		return true;
+	}
+
+	bool AttachToBios(imageDisk* image, const unsigned char bios_drive_index) {
+		if (bios_drive_index >= MAX_DISK_IMAGES) return false;
+		if (imageDiskList[bios_drive_index] != NULL) {
+			/* Notify IDE ATA emulation if a drive is already there */
+			if (bios_drive_index >= 2) IDE_Hard_Disk_Detach(bios_drive_index);
+			imageDiskList[bios_drive_index]->Release();
+		}
+		imageDiskList[bios_drive_index] = image;
+		image->Addref();
+
+		// let FDC know if we mounted a floppy
+		if (bios_drive_index <= 1) FDC_AssignINT13Disk(bios_drive_index);
+		
+		return true;
+	}
+
+	bool AttachToBiosAndIde(imageDisk* image, const unsigned char bios_drive_index, const unsigned char ide_index, const bool ide_slave) {
+		if (!AttachToBios(image, bios_drive_index)) return false;
+		//if hard drive image, and if ide controller is specified
+		if (bios_drive_index >= 2 || bios_drive_index < MAX_DISK_IMAGES) {
+			if (ide_index >= 0) IDE_Hard_Disk_Attach(ide_index, ide_slave, bios_drive_index);
+			updateDPT();
+		}
+		return true;
+	}
+
+	void DetachFromBios(imageDisk* image) {
+		if (image) {
+			for (int index = 0; index < MAX_DISK_IMAGES; index++) {
+				if (imageDiskList[index] == image) {
+					if (index > 1) IDE_Hard_Disk_Detach(index);
+					imageDiskList[index]->Release();
+					imageDiskList[index] = NULL;
+				}
+			}
+		}
+	}
+
+	void AddToDriveManager(const char drive, DOS_Drive* imgDisk, const Bit8u mediaid) {
+		std::vector<DOS_Drive*> imgDisks = { imgDisk };
+		AddToDriveManager(drive, imgDisks, mediaid);
+	}
+
+	void AddToDriveManager(const char drive, const std::vector<DOS_Drive*> &imgDisks, const Bit8u mediaid) {
+		std::vector<DOS_Drive*>::size_type ct;
+
 		// Update DriveManager
 		for (ct = 0; ct < imgDisks.size(); ct++) {
 			DriveManager::AppendDisk(drive - 'A', imgDisks[ct]);
@@ -2886,40 +2967,6 @@ private:
 		}
 		dos.dta(save_dta);
 
-		if (type == "ram") {
-			WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, "ram drive");
-		}
-		else {
-			std::string tmp(paths[0]);
-			for (i = 1; i < paths.size(); i++) {
-				tmp += "; " + paths[i];
-			}
-			WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"), drive, tmp.c_str());
-		}
-
-		if (type != "ram" && paths.size() == 1) {
-			newdrive = imgDisks[0];
-			if (((fatDrive *)newdrive)->loadedDisk->hardDrive) {
-				if (imageDiskList[2] == NULL) {
-					imageDiskList[2] = ((fatDrive *)newdrive)->loadedDisk;
-					imageDiskList[2]->Addref();
-					// If instructed, attach to IDE controller as ATA hard disk
-					if (ide_index >= 0) IDE_Hard_Disk_Attach(ide_index, ide_slave, 2);
-					updateDPT();
-				} else if (imageDiskList[3] == NULL) {
-					imageDiskList[3] = ((fatDrive *)newdrive)->loadedDisk;
-					imageDiskList[3]->Addref();
-					// If instructed, attach to IDE controller as ATA hard disk
-					if (ide_index >= 0) IDE_Hard_Disk_Attach(ide_index, ide_slave, 3);
-					updateDPT();
-				}
-			} else { //floppy image
-				if (imageDiskList[0] != NULL) imageDiskList[0]->Release();
-				imageDiskList[0] = ((fatDrive *)newdrive)->loadedDisk;
-				imageDiskList[0]->Addref();
-			}
-		}
-		return true;
 	}
 
 	bool DetectGeometry(Bitu sizes[]) {
@@ -3028,18 +3075,19 @@ private:
 		}
 
 		if (yet_detected)
+		{
+			//"Image geometry auto detection: -size %u,%u,%u,%u\r\n",
+			//sizes[0],sizes[1],sizes[2],sizes[3]);
 			WriteOut(MSG_Get("PROGRAM_IMGMOUNT_AUTODET_VALUES"), sizes[0], sizes[1], sizes[2], sizes[3]);
-
-
-		//"Image geometry auto detection: -size %u,%u,%u,%u\r\n",
-		//sizes[0],sizes[1],sizes[2],sizes[3]);
+			return true;
+		}
 		else {
 			WriteOut(MSG_Get("PROGRAM_IMGMOUNT_INVALID_GEOMETRY"));
 			return false;
 		}
 	}
 
-	bool MountIso(const char drive, const Bit8u mediaid, const std::vector<std::string> paths, const signed char ide_index, const bool ide_slave) {
+	bool MountIso(const char drive, const Bit8u mediaid, const std::vector<std::string> &paths, const signed char ide_index, const bool ide_slave) {
 		//mount cdrom
 
 		if (Drives[drive - 'A']) {
@@ -3095,18 +3143,16 @@ private:
 		return true;
 	}
 
-	imageDisk* MountElToritoNone(const char el_torito_cd_drive, const unsigned long el_torito_floppy_base, const unsigned char el_torito_floppy_type) {
-		imageDisk * newImage = new imageDiskElToritoFloppy(el_torito_cd_drive, el_torito_floppy_base, el_torito_floppy_type);
-		newImage->Addref();
-		return newImage;
-	}
-
 	imageDisk* MountImageNone(Bitu sizes[], Bit32u &imagesize, const int reserved_cylinders) {
 		imageDisk* newImage = 0;
 		/* auto-fill: sector size */
 		if (sizes[0] == 0) sizes[0] = 512;
 
 		FILE *newDisk = fopen64(temp_line.c_str(), "rb+");
+		if (!newDisk) {
+			WriteOut("Unable to open '%s'\n", temp_line.c_str());
+			return NULL;
+		}
 
 		QCow2Image::QCow2Header qcow2_header = QCow2Image::read_header(newDisk);
 
@@ -3143,8 +3189,6 @@ private:
 				newImage = new imageDisk(newDisk, (Bit8u *)temp_line.c_str(), imagesize, (imagesize > 2880));
 			}
 		}
-
-		newImage->Addref();
 
 		/* auto-fill: sector/track count */
 		if (sizes[1] == 0) sizes[1] = 63;
@@ -3375,6 +3419,8 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_MOUSE_HELP","Turns on/off mouse.\n\nMOUSE [/?] [/U] [/V]\n  /U: Uninstall\n  /V: Reverse Y-axis\n");
 	MSG_Add("PROGRAM_MOUNT_CDROMS_FOUND","CDROMs found: %d\n");
 	MSG_Add("PROGRAM_MOUNT_STATUS_FORMAT","%-5s  %-58s %-12s\n");
+	MSG_Add("PROGRAM_MOUNT_STATUS_ELTORITO", "Drive %c is mounted as el torito floppy\n");
+	MSG_Add("PROGRAM_MOUNT_STATUS_RAMDRIVE", "Drive %c is mounted as ram drive\n");
 	MSG_Add("PROGRAM_MOUNT_STATUS_2","Drive %c is mounted as %s\n");
 	MSG_Add("PROGRAM_MOUNT_STATUS_1","The currently mounted drives are:\n");
 	MSG_Add("PROGRAM_MOUNT_ERROR_1","Directory %s doesn't exist.\n");
@@ -3691,16 +3737,16 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_IMGMOUNT_MULTIPLE_NON_CUEISO_FILES", "Using multiple files is only supported for cue/iso images.\n");
 
 	MSG_Add("PROGRAM_IMGMOUNT_HELP",
-		"Mounts hard drive and optical disc images.\n\n"
+		"Mounts hard drive and optical disc images.\n"
 		"IMGMOUNT drive filename [-t floppy] [-fs fat] [-size ss,s,h,c]\n"
 		"IMGMOUNT drive filename [-t hdd] [-fs fat] [-size ss,s,h,c] [-ide 1m|1s|2m|2s]\n"
-		"IMGMOUNT driveLocation filename [-t hdd] -fs none [-size ss,s,h,c]\n"
-		"IMGMOUNT drive filename [-t iso] [-fs iso]\n"
+		"IMGMOUNT driveLoc filename -fs none [-size ss,s,h,c] [-reservecyl #]\n"
+		"IMGMOUNT drive filename -t iso [-fs iso]\n"
 		"IMGMOUNT drive -t floppy -el-torito cdDrive\n"
 		"IMGMOUNT drive -t ram -size driveSize\n"
 		"IMGMOUNT -u drive|driveLocation\n"
 		" drive               Drive letter to mount the image at\n"
-		" driveLocation       Location to mount drive, where 2 = Master and 3 = Slave\n"
+		" driveLoc            Location to mount drive, where 0-1 are FDDs, 2-5 are HDDs\n"
 		" filename            Filename of the image to mount\n"
 		" -t iso              Image type is optical disc iso or cue / bin image\n"
 		" -t floppy           Image type is floppy\n"
@@ -3709,6 +3755,7 @@ void DOS_SetupPrograms(void) {
 		" -fs iso             File system is ISO 9660\n"
 		" -fs fat             File system is FAT; FAT12 and FAT16 are supported\n"
 		" -fs none            Do not detect file system\n"
+		" -reservecyl #       Report # number of cylinders less than actual in BIOS\n"
 		" -ide 1m|1s|2m|2s    Specifies the controller to mount drive\n"
 		" -size ss,s,h,c      Specify the geometry: Sector size,Sectors,Heads,Cylinders\n"
 		" -size driveSize     Specify the drive size in KB\n"

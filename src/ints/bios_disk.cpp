@@ -25,8 +25,7 @@
 #include "dos_inc.h" /* for Drives[] */
 #include "../dos/drives.h"
 #include "mapper.h"
-
-#define MAX_DISK_IMAGES 4
+#include "ide.h"
 
 extern bool int13_extensions_enable;
 
@@ -81,6 +80,7 @@ imageDisk *GetINT13HardDrive(unsigned char drv) {
 void FreeBIOSDiskList() {
 	for (int i=0;i < MAX_DISK_IMAGES;i++) {
 		if (imageDiskList[i] != NULL) {
+			if (i >= 2) IDE_Hard_Disk_Detach(i);
 			imageDiskList[i]->Release();
 			imageDiskList[i] = NULL;
 		}
@@ -94,29 +94,26 @@ void FreeBIOSDiskList() {
 	}
 }
 
+//update BIOS disk parameter tables for first two hard drives
 void updateDPT(void) {
 	Bit32u tmpheads, tmpcyl, tmpsect, tmpsize;
-	if(imageDiskList[2] != NULL) {
-		PhysPt dp0physaddr=CALLBACK_PhysPointer(diskparm0);
-		imageDiskList[2]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
-		phys_writew(dp0physaddr,(Bit16u)tmpcyl);
-		phys_writeb(dp0physaddr+0x2,(Bit8u)tmpheads);
-		phys_writew(dp0physaddr+0x3,0);
-		phys_writew(dp0physaddr+0x5,(Bit16u)-1);
-		phys_writeb(dp0physaddr+0x7,0);
-		phys_writeb(dp0physaddr+0x8,(0xc0 | (((imageDiskList[2]->heads) > 8) << 3)));
-		phys_writeb(dp0physaddr+0x9,0);
-		phys_writeb(dp0physaddr+0xa,0);
-		phys_writeb(dp0physaddr+0xb,0);
-		phys_writew(dp0physaddr+0xc,(Bit16u)tmpcyl);
-		phys_writeb(dp0physaddr+0xe,(Bit8u)tmpsect);
-	}
-	if(imageDiskList[3] != NULL) {
-		PhysPt dp1physaddr=CALLBACK_PhysPointer(diskparm1);
-		imageDiskList[3]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
-		phys_writew(dp1physaddr,(Bit16u)tmpcyl);
-		phys_writeb(dp1physaddr+0x2,(Bit8u)tmpheads);
-		phys_writeb(dp1physaddr+0xe,(Bit8u)tmpsect);
+	PhysPt dpphysaddr[2] = { CALLBACK_PhysPointer(diskparm0), CALLBACK_PhysPointer(diskparm1) };
+	for (int i = 0; i < 2; i++) {
+		tmpheads = 0; tmpcyl = 0; tmpsect = 0; tmpsize = 0;
+		if (imageDiskList[i + 2] != NULL) {
+			imageDiskList[i + 2]->Get_Geometry(&tmpheads, &tmpcyl, &tmpsect, &tmpsize);
+		}
+		phys_writew(dpphysaddr[i], (Bit16u)tmpcyl);
+		phys_writeb(dpphysaddr[i] + 0x2, (Bit8u)tmpheads);
+		phys_writew(dpphysaddr[i] + 0x3, 0);
+		phys_writew(dpphysaddr[i] + 0x5, tmpcyl == 0 ? 0 : (Bit16u)-1);
+		phys_writeb(dpphysaddr[i] + 0x7, 0);
+		phys_writeb(dpphysaddr[i] + 0x8, tmpcyl == 0 ? 0 : (0xc0 | (((tmpheads) > 8) << 3)));
+		phys_writeb(dpphysaddr[i] + 0x9, 0);
+		phys_writeb(dpphysaddr[i] + 0xa, 0);
+		phys_writeb(dpphysaddr[i] + 0xb, 0);
+		phys_writew(dpphysaddr[i] + 0xc, (Bit16u)tmpcyl);
+		phys_writeb(dpphysaddr[i] + 0xe, (Bit8u)tmpsect);
 	}
 }
 
@@ -733,8 +730,9 @@ static Bitu INT13_DiskHandler(void) {
 		last_status = 0x00;
 		if (reg_dl&0x80) {	// harddisks
 			reg_dl = 0;
-			if(imageDiskList[2] != NULL) reg_dl++;
-			if(imageDiskList[3] != NULL) reg_dl++;
+			for (int index = 2; index < MAX_DISK_IMAGES; index++) {
+				if (imageDiskList[index] != NULL) reg_dl++;
+			}
 		} else {		// floppy disks
 			reg_dl = 0;
 			if(imageDiskList[0] != NULL) reg_dl++;
@@ -910,11 +908,8 @@ void BIOS_SetupDisks(void) {
 	CALLBACK_Setup(call_int13,&INT13_DiskHandler,CB_INT13,"Int 13 Bios disk");
 	RealSetVec(0x13,CALLBACK_RealPointer(call_int13));
 
-    /* FIXME: I see a potential problem here: We're just zeroing out the array. Didn't I rewrite disk images with refcounting? --J.C. */
-	for(i=0;i<MAX_DISK_IMAGES;i++)
-		imageDiskList[i] = NULL;
-	for(i=0;i<MAX_SWAPPABLE_DISKS;i++)
-		diskSwap[i] = NULL;
+	//release the drives after a soft reset
+	FreeBIOSDiskList();
 
     /* FIXME: Um... these aren't callbacks. Why are they allocated as callbacks? We have ROM general allocation now. */
 	diskparm0 = CALLBACK_Allocate();
