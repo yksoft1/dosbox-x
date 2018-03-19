@@ -3008,7 +3008,7 @@ private:
 		if (!dsk->active) {
 			WriteOut(MSG_Get("PROGRAM_IMGMOUNT_CANT_CREATE"));
 			delete dsk;
-			return false;
+			return NULL;
 		}
 		dsk->Set_Reserved_Cylinders(reserved_cylinders);
 		return dsk;
