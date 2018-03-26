@@ -100,6 +100,7 @@ bool OpenGL_using(void);
 #include "cpu.h"
 #include "fpu.h"
 #include "cross.h"
+#include "keymap.h"
 #include "control.h"
 
 #if defined(WIN32) && !defined(S_ISREG)
@@ -107,6 +108,88 @@ bool OpenGL_using(void);
 #endif
 
 using namespace std;
+
+const char *DKM_to_string(const unsigned int dkm) {
+    switch (dkm) {
+        case DKM_US:        return "us";
+        case DKM_DEU:       return "ger";
+        case DKM_JPN_PC98:  return "jpn_pc98";
+        case DKM_JPN:       return "jpn";
+        default:            break;
+    };
+
+    return "";
+}
+
+const char *DKM_to_descriptive_string(const unsigned int dkm) {
+    switch (dkm) {
+        case DKM_US:        return "US English";
+        case DKM_DEU:       return "German";
+        case DKM_JPN_PC98:  return "Japanese (PC-98)";
+        case DKM_JPN:       return "Japanese";
+        default:            break;
+    };
+
+    return "";
+}
+
+unsigned int mapper_keyboard_layout = DKM_US;
+unsigned int host_keyboard_layout = DKM_US;
+
+void KeyboardLayoutDetect(void) {
+    unsigned int nlayout = DKM_US;
+
+#if defined(LINUX)
+    unsigned int Linux_GetKeyboardLayout(void);
+    nlayout = Linux_GetKeyboardLayout();
+#elif defined(WIN32)
+	WORD lid = LOWORD(GetKeyboardLayout(0));
+
+	LOG_MSG("Windows keyboard layout ID is 0x%04x", lid);
+
+	switch (lid) {
+		case 0x0407:	nlayout = DKM_DEU; break;
+		case 0x0409:	nlayout = DKM_US; break;
+		case 0x0411:	nlayout = DKM_JPN; break;
+		default:		break;
+	};
+#endif
+
+    host_keyboard_layout = nlayout;
+
+    LOG_MSG("Host keyboard layout is now %s (%s)",
+        DKM_to_string(host_keyboard_layout),
+        DKM_to_descriptive_string(host_keyboard_layout));
+}
+
+void SetMapperKeyboardLayout(const unsigned int dkm) {
+    /* TODO: Make mapper re-initialize layout. If the mapper interface is visible, redraw it. */
+    mapper_keyboard_layout = dkm;
+
+    LOG_MSG("Mapper keyboard layout is now %s (%s)",
+        DKM_to_string(mapper_keyboard_layout),
+        DKM_to_descriptive_string(mapper_keyboard_layout));
+}
+
+#if defined(WIN32) && defined(C_SDL1)
+extern "C" unsigned char SDL1_hax_hasLayoutChanged(void);
+extern "C" void SDL1_hax_ackLayoutChanged(void);
+#endif
+
+void CheckMapperKeyboardLayout(void) {
+#if defined(WIN32) && defined(C_SDL1)
+	if (SDL1_hax_hasLayoutChanged()) {
+		SDL1_hax_ackLayoutChanged();
+		LOG_MSG("Keyboard layout changed");
+		KeyboardLayoutDetect();
+
+		if (host_keyboard_layout == DKM_JPN && IS_PC98_ARCH)
+			SetMapperKeyboardLayout(DKM_JPN_PC98);
+		else
+			SetMapperKeyboardLayout(host_keyboard_layout);
+	}
+#endif
+}
 
 /* yksoft1 says that older MinGW headers lack this value --Jonathan C. */
 #ifndef MAPVK_VK_TO_VSC
@@ -3679,6 +3762,7 @@ void MSG_WM_COMMAND_handle(SDL_SysWMmsg &Message);
 #endif
 
 void GFX_Events() {
+	CheckMapperKeyboardLayout();
 #if defined(C_SDL2) /* SDL 2.x---------------------------------- */
     SDL_Event event;
 #if defined (REDUCE_JOYSTICK_POLLING)
@@ -5384,6 +5468,10 @@ int main(int argc, char* argv[]) {
 		/* -- -- other steps to prepare SDL window/output */
 		SDL_Prepare();
 
+        /* -- -- Keyboard layout detection and setup */
+        KeyboardLayoutDetect();
+        SetMapperKeyboardLayout(host_keyboard_layout);
+
 		/* -- -- Initialise Joystick seperately. This way we can warn when it fails instead of exiting the application */
 		LOG(LOG_MISC,LOG_DEBUG)("Initializing SDL joystick subsystem...");
 		if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0) {
@@ -5502,6 +5590,12 @@ int main(int argc, char* argv[]) {
 		MAPPER_StartUp();
 		DOSBOX_InitTickLoop();
 		DOSBOX_RealInit();
+
+        /* at this point: If the machine type is PC-98, and the mapper keyboard layout was "Japanese",
+         * then change the mapper layout to "Japanese PC-98" */
+        if (host_keyboard_layout == DKM_JPN && IS_PC98_ARCH)
+            SetMapperKeyboardLayout(DKM_JPN_PC98);
+
 		RENDER_Init();
 		CAPTURE_Init();
 		IO_Init();
