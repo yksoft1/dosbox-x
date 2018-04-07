@@ -1541,6 +1541,10 @@ void DOSBOX_SetupConfigSections(void) {
 	Pint->SetMinMax(1,1000000);
 	Pint->Set_help("Setting it lower than 100 will be a percentage.");
 
+	Pbool = secprop->Add_bool("use dynamic core with paging on",Property::Changeable::Always,false);
+	Pbool->Set_help("Dynamic core is NOT compatible with the way page faults in the guest are handled in DosBox-X.\n"
+			"Windows 9x may crash with paging on if dynamic core is enabled.\n");
+			
 	Pbool = secprop->Add_bool("ignore opcode 63",Property::Changeable::Always,true);
 	Pbool->Set_help("When debugging, do not report illegal opcode 0x63.\n"
 			"Enable this option to ignore spurious errors while debugging from within Windows 3.1/9x/ME");
@@ -1639,10 +1643,14 @@ void DOSBOX_SetupConfigSections(void) {
 
 	Pstring = secprop->Add_string("midiconfig",Property::Changeable::WhenIdle,"");
 	Pstring->Set_help("Special configuration options for the device driver. This is usually the id of the device you want to use.\n"
-	                  "  or in the case of coreaudio, you can specify a soundfont here.\n"
+	                  "  or in the case of coreaudio or synth, you can specify a soundfont here.\n"
 	                  "  When using a Roland MT-32 rev. 0 as midi output device, some games may require a delay in order to prevent 'buffer overflow' issues.\n"
 	                  "  In that case, add 'delaysysex', for example: midiconfig=2 delaysysex\n"
 	                  "  See the README/Manual for more details.");
+
+	Pint = secprop->Add_int("samplerate",Property::Changeable::WhenIdle,44100);
+	Pint->Set_values(rates);
+	Pint->Set_help("Sample rate for MIDI synthesizer, if applicable.");
 	
 	Pint = secprop->Add_int("mpuirq",Property::Changeable::WhenIdle,-1);
 	Pint->SetMinMax(-1,15);
