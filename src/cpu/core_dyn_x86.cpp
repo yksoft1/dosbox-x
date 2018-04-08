@@ -260,7 +260,6 @@ extern bool use_dynamic_core_with_paging;
 extern int dynamic_core_cache_block_size;
 
 static bool paging_warning = true;
-extern bool use_dynamic_core_with_paging;
 
 Bits CPU_Core_Dyn_X86_Run(void) {
     /* Dynamic core is NOT compatible with the way page faults
