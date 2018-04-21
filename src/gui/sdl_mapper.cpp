@@ -66,13 +66,14 @@ enum BB_Types {
 };
 
 enum BC_Types {
-	BC_Mod1,BC_Mod2,BC_Mod3,
+	BC_Mod1,BC_Mod2,BC_Mod3,BC_Host,
 	BC_Hold
 };
 
 #define BMOD_Mod1 0x0001
 #define BMOD_Mod2 0x0002
 #define BMOD_Mod3 0x0004
+#define BMOD_Host 0x0008
 
 #define BFLG_Hold 0x0001
 #define BFLG_Repeat 0x0004
@@ -223,6 +224,7 @@ public:
 		if (mods & BMOD_Mod1) strcat(buf," mod1");
 		if (mods & BMOD_Mod2) strcat(buf," mod2");
 		if (mods & BMOD_Mod3) strcat(buf," mod3");
+		if (mods & BMOD_Host) strcat(buf," host");
 		if (flags & BFLG_Hold) strcat(buf," hold");
 	}
 	void SetFlags(char * buf) {
@@ -231,6 +233,7 @@ public:
 			if (!strcasecmp(word,"mod1")) mods|=BMOD_Mod1;
 			if (!strcasecmp(word,"mod2")) mods|=BMOD_Mod2;
 			if (!strcasecmp(word,"mod3")) mods|=BMOD_Mod3;
+			if (!strcasecmp(word,"host")) mods|=BMOD_Host;
 			if (!strcasecmp(word,"hold")) flags|=BFLG_Hold;
 		}
 	}
@@ -1668,8 +1671,11 @@ public:
 		case BC_Mod3:
 			checked=(mapper.abind->mods&BMOD_Mod3)>0;
 			break;
-		case BC_Hold:
-			checked=(mapper.abind->flags&BFLG_Hold)>0;
+        case BC_Host:
+            checked=(mapper.abind->mods&BMOD_Host)>0;
+            break;
+        case BC_Hold:
+            checked=(mapper.abind->flags&BFLG_Hold)>0;
 			break;
 		}
 		CTextButton::Draw();
@@ -1699,6 +1705,9 @@ public:
 			break;
 		case BC_Mod3:
 			mapper.abind->mods^=BMOD_Mod3;
+			break;
+		case BC_Host:
+			mapper.abind->mods^=BMOD_Host;
 			break;
 		case BC_Hold:
 			mapper.abind->flags^=BFLG_Hold;
@@ -1861,19 +1870,26 @@ public:
 	void MakeDefaultBind(char * buf) {
 		Bitu key=0;
 		switch (defkey) {
+        case MK_nothing: *buf = 0; return;
 		case MK_f1:case MK_f2:case MK_f3:case MK_f4:
 		case MK_f5:case MK_f6:case MK_f7:case MK_f8:
 		case MK_f9:case MK_f10:case MK_f11:case MK_f12:	
 			key=SDL_SCANCODE_F1+(defkey-MK_f1);
 			break;
+        case MK_rightarrow:
+            key=SDL_SCANCODE_RIGHT;
+            break;
 		case MK_return:
 			key=SDL_SCANCODE_RETURN;
 			break;
 		case MK_kpminus:
 			key=SDL_SCANCODE_KP_MINUS;
 			break;
-		case MK_equals:
-			key=SDL_SCANCODE_EQUALS;
+        case MK_minus:
+            key=SDL_SCANCODE_MINUS;
+            break;
+        case MK_equals:
+            key=SDL_SCANCODE_EQUALS;
 			break;
 		case MK_scrolllock:
 			key=SDL_SCANCODE_SCROLLLOCK;
@@ -1899,26 +1915,55 @@ public:
 		case MK_4:
 			key=SDL_SCANCODE_4;
 			break;
+        case MK_c:
+            key=SDL_SCANCODE_C;
+            break;
+        case MK_d:
+            key=SDL_SCANCODE_D;
+            break;
+        case MK_f:
+            key=SDL_SCANCODE_F;
+            break;
+        case MK_m:
+            key=SDL_SCANCODE_M;
+            break;
+        case MK_r:
+            key=SDL_SCANCODE_R;
+            break;
+        case MK_s:
+            key=SDL_SCANCODE_S;
+            break;
+        case MK_v:
+            key=SDL_SCANCODE_V;
+            break;
+        case MK_w:
+            key=SDL_SCANCODE_W;
+            break;
         default:
             break;
 		}
-		sprintf(buf,"%s \"key %d%s%s%s\"",
+		sprintf(buf,"%s \"key %d%s%s%s%s\"",
 			entry,
 			(int)key,
 			defmod & 1 ? " mod1" : "",
 			defmod & 2 ? " mod2" : "",
-			defmod & 4 ? " mod3" : ""
+			defmod & 4 ? " mod3" : "",
+			defmod & 8 ? " host" : ""
 		);
 	}
 #else
 	void MakeDefaultBind(char * buf) {
 		Bitu key=0;
 		switch (defkey) {
+        case MK_nothing: *buf = 0; return;
 		case MK_f1:case MK_f2:case MK_f3:case MK_f4:
 		case MK_f5:case MK_f6:case MK_f7:case MK_f8:
 		case MK_f9:case MK_f10:case MK_f11:case MK_f12:	
 			key=SDLK_F1+(defkey-MK_f1);
 			break;
+        case MK_rightarrow:
+            key=SDLK_RIGHT;
+            break;
 		case MK_return:
 			key=SDLK_RETURN;
 			break;
@@ -1928,6 +1973,9 @@ public:
         case MK_kpplus:
 			key=SDLK_KP_PLUS;
 			break;
+        case MK_minus:
+            key=SDLK_MINUS;
+            break;
 		case MK_equals:
 			key=SDLK_EQUALS;
 			break;
@@ -1962,14 +2010,39 @@ public:
 			break;
 		case MK_4:
 			key=SDLK_4;
-			break;
+            break;
+        case MK_c:
+            key=SDLK_c;
+            break;
+        case MK_d:
+            key=SDLK_d;
+            break;
+        case MK_f:
+            key=SDLK_f;
+            break;
+        case MK_m:
+            key=SDLK_m;
+            break;
+        case MK_r:
+            key=SDLK_r;
+            break;
+        case MK_s:
+            key=SDLK_s;
+            break;
+        case MK_v:
+            key=SDLK_v;
+            break;
+        case MK_w:
+            key=SDLK_w;
+            break;
 		}
-		sprintf(buf,"%s \"key %d%s%s%s\"",
+		sprintf(buf,"%s \"key %d%s%s%s%s\"",
 			entry,
 			(int)key,
 			defmod & 1 ? " mod1" : "",
 			defmod & 2 ? " mod2" : "",
-			defmod & 4 ? " mod3" : ""
+			defmod & 4 ? " mod3" : "",
+			defmod & 8 ? " host" : ""
 		);
 	}
 #endif
@@ -1998,7 +2071,7 @@ static struct {
 	CBindButton * add;
 	CBindButton * del;
 	CBindButton * next;
-	CCheckButton * mod1,* mod2,* mod3,* hold;
+	CCheckButton * mod1,* mod2,* mod3,* host,* hold;
 } bind_but;
 
 
@@ -2019,6 +2092,7 @@ static void SetActiveBind(CBind * _bind) {
 		bind_but.mod1->Enable(true);
 		bind_but.mod2->Enable(true);
 		bind_but.mod3->Enable(true);
+		bind_but.host->Enable(true);
 		bind_but.hold->Enable(true);
 	} else {
 		bind_but.bind_title->Enable(false);
@@ -2027,6 +2101,7 @@ static void SetActiveBind(CBind * _bind) {
 		bind_but.mod1->Enable(false);
 		bind_but.mod2->Enable(false);
 		bind_but.mod3->Enable(false);
+		bind_but.host->Enable(false);
 		bind_but.hold->Enable(false);
 	}
 }
@@ -2122,7 +2197,12 @@ static void AddJHatButton(Bitu x,Bitu y,Bitu dx,Bitu dy,char const * const title
 
 static void AddModButton(Bitu x,Bitu y,Bitu dx,Bitu dy,char const * const title,Bitu _mod) {
 	char buf[64];
-	sprintf(buf,"mod_%d",(int)_mod);
+
+    if (_mod == 4)
+        sprintf(buf,"host");
+    else
+        sprintf(buf,"mod_%d",(int)_mod);
+
 	CModEvent * event=new CModEvent(buf,_mod);
 	CEventButton *button=new CEventButton(x,y,dx,dy,title,event);
     event->notifybutton(button);
@@ -2377,6 +2457,7 @@ static void CreateLayout(void) {
 	AddModButton(PX(0),PY(17),50,20,"Mod1",1);
 	AddModButton(PX(2),PY(17),50,20,"Mod2",2);
 	AddModButton(PX(4),PY(17),50,20,"Mod3",3);
+	AddModButton(PX(6),PY(17),50,20,"Host",4);
 	/* Create Handler buttons */
 	Bitu xpos=3;Bitu ypos=11;
 	for (CHandlerEventVector_it hit=handlergroup.begin();hit!=handlergroup.end();hit++) {
@@ -2407,7 +2488,8 @@ static void CreateLayout(void) {
 	bind_but.mod1=new CCheckButton(20,410,60,20, "mod1",BC_Mod1);
 	bind_but.mod2=new CCheckButton(20,432,60,20, "mod2",BC_Mod2);
 	bind_but.mod3=new CCheckButton(20,454,60,20, "mod3",BC_Mod3);
-	bind_but.hold=new CCheckButton(100,410,60,20,"hold",BC_Hold);
+	bind_but.host=new CCheckButton(100,410,60,20,"host",BC_Host);
+	bind_but.hold=new CCheckButton(100,432,60,20,"hold",BC_Hold);
 
 	bind_but.next=new CBindButton(250,400,50,20,"Next",BB_Next);
 
@@ -2436,6 +2518,7 @@ static SDL_Color map_pal[5]={
 
 static void CreateStringBind(char * line,bool loading=false) {
 	line=trim(line);
+    if (*line == 0) return;
 	char * eventname=StripWord(line);
 	CEvent * event;
 	for (CEventVector_it ev_it=events.begin();ev_it!=events.end();ev_it++) {
@@ -2630,11 +2713,17 @@ static void CreateDefaultBinds(void) {
 	sprintf(buffer,"mod_1 \"key %d\"",SDL_SCANCODE_LCTRL);CreateStringBind(buffer);
 	sprintf(buffer,"mod_2 \"key %d\"",SDL_SCANCODE_RALT);CreateStringBind(buffer);
 	sprintf(buffer,"mod_2 \"key %d\"",SDL_SCANCODE_LALT);CreateStringBind(buffer);
+	sprintf(buffer,"mod_3 \"key %d\"",SDL_SCANCODE_RSHIFT);CreateStringBind(buffer);
+	sprintf(buffer,"mod_3 \"key %d\"",SDL_SCANCODE_LSHIFT);CreateStringBind(buffer);
+	sprintf(buffer,"host \"key %d\"",SDL_SCANCODE_F12);CreateStringBind(buffer);
 #else
 	sprintf(buffer,"mod_1 \"key %d\"",SDLK_RCTRL);CreateStringBind(buffer);
 	sprintf(buffer,"mod_1 \"key %d\"",SDLK_LCTRL);CreateStringBind(buffer);
 	sprintf(buffer,"mod_2 \"key %d\"",SDLK_RALT);CreateStringBind(buffer);
 	sprintf(buffer,"mod_2 \"key %d\"",SDLK_LALT);CreateStringBind(buffer);
+	sprintf(buffer,"mod_3 \"key %d\"",SDLK_RSHIFT);CreateStringBind(buffer);
+	sprintf(buffer,"mod_3 \"key %d\"",SDLK_LSHIFT);CreateStringBind(buffer);
+	sprintf(buffer,"host \"key %d\"",SDLK_F12);CreateStringBind(buffer);
 #endif
 
 	for (CHandlerEventVector_it hit=handlergroup.begin();hit!=handlergroup.end();hit++) {
@@ -3345,7 +3434,7 @@ void MAPPER_StartUp() {
 
 	Prop_path* pp = section->Get_path("mapperfile");
 	mapper.filename = pp->realpath;
-	MAPPER_AddHandler(&MAPPER_Run,MK_f1,MMOD1,"mapper","Mapper");
+	MAPPER_AddHandler(&MAPPER_Run,MK_m,MMODHOST,"mapper","Mapper");
 }
 
 void MAPPER_Shutdown() {
