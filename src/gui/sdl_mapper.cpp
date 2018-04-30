@@ -2060,6 +2060,7 @@ static struct {
 	CCaptionButton *  bind_title;
 	CCaptionButton *  selected;
 	CCaptionButton *  action;
+	CCaptionButton *  dbg2;
 	CCaptionButton *  dbg;
 	CBindButton * save;
 	CBindButton * exit;   
@@ -2544,17 +2545,19 @@ static void CreateLayout(void) {
 	bind_but.host=new CCheckButton(100,410,60,20,"host",BC_Host);
 	bind_but.hold=new CCheckButton(100,432,60,20,"hold",BC_Hold);
 
-	bind_but.next=new CBindButton(250,400,50,20,"Next",BB_Next);
+	bind_but.add=new CBindButton(20,384,50,20,"Add",BB_Add);
+	bind_but.del=new CBindButton(70,384,50,20,"Del",BB_Del);
+	bind_but.next=new CBindButton(120,384,50,20,"Next",BB_Next);
 
-	bind_but.add=new CBindButton(250,380,50,20,"Add",BB_Add);
-	bind_but.del=new CBindButton(300,380,50,20,"Del",BB_Del);
+	bind_but.save=new CBindButton(180,440,50,20,"Save",BB_Save);
+	bind_but.exit=new CBindButton(230,440,50,20,"Exit",BB_Exit);
+	bind_but.cap=new CBindButton(280,440,50,20,"Capt",BB_Capture);
 
-	bind_but.save=new CBindButton(400,440,50,20,"Save",BB_Save);
-	bind_but.exit=new CBindButton(450,440,50,20,"Exit",BB_Exit);
-	bind_but.cap=new CBindButton(500,440,50,20,"Capt",BB_Capture);
-
-	bind_but.dbg=new CCaptionButton(180,460,460,20); // right below the Save button
+	bind_but.dbg = new CCaptionButton(180, 462, 460, 20); // right below the Save button
 	bind_but.dbg->Change("(event debug)");
+
+	bind_but.dbg2 = new CCaptionButton(330, 440, 310, 20); // right next to the Save button
+	bind_but.dbg2->Change("");
 
 	bind_but.bind_title->Change("Bind Title");
 
@@ -3025,6 +3028,28 @@ void BIND_MappingEvents(void) {
 
 				LOG(LOG_GUI,LOG_DEBUG)("Mapper keyboard event: %s",tmp);
 				bind_but.dbg->Change("%s",tmp);
+
+				tmpl = 0;
+#if defined(WIN32)
+# if defined(C_SDL2)
+# else
+				{
+					char nm[256];
+
+					nm[0] = 0;
+#if !defined(HX_DOS) /* I assume HX DOS doesn't bother with keyboard scancode names */
+					GetKeyNameText(s.scancode << 16,nm,sizeof(nm)-1);
+#endif
+
+					tmpl = sprintf(tmp, "Win32: VK=0x%x kn=%s",(unsigned int)s.win32_vk,nm);
+				}
+# endif
+#endif
+				while (tmpl < (310 / 8)) tmp[tmpl++] = ' ';
+				assert(tmpl < sizeof(tmp));
+				tmp[tmpl] = 0;
+				bind_but.dbg2->Change("%s", tmp);
+
 				event_count++;
 			}
 			/* fall through to mapper UI processing */
