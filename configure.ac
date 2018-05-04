@@ -1,5 +1,5 @@
 dnl Init.
-AC_INIT(dosbox-x,0.82.5,[https://github.com/joncampbell123/dosbox-x/issues],[],[http://dosbox-x.software])
+AC_INIT(dosbox-x,0.82.7,[https://github.com/joncampbell123/dosbox-x/issues],[],[http://dosbox-x.software])
 AC_PREREQ(2.60)
 AC_CONFIG_SRCDIR(README)
 
@@ -131,9 +131,7 @@ AC_CHECK_CXXFLAGS([ -std=gnu++11 ], [  ], [
 ])
 
 if test x$warn_cpp0x = x1; then
-    AC_MSG_ERROR([ C++0x is considered deprecated. Please use a C++11 compiler.
-C++0x support will be removed at a future date entirely.
-To disable this error, remove or comment out line 133-137 of configure.ac, run autogen.sh and try again. ])
+    AC_MSG_ERROR([ Your compiler must support C++11 or better ])
 fi
 
 dnl This is how the build script can specify a HX DOS extender target
@@ -714,4 +712,7 @@ chmod +x make-rpm.sh
 
 # HACK: Write all PACKAGE defines to vs2015/config_package.h so Windows builds are kept in sync
 grep -E 'PACKAGE|VERSION' config.h >vs2015/config_package.h
+
+# update the build time as well
+./update-build-timestamp.pl
 
