@@ -5311,11 +5311,6 @@ int main(int argc, char* argv[]) {
 		if (control->opt_console)
 			DOSBox_ShowConsole();
 
-#if defined(WIN32) && !defined(C_SDL2)
-		/* -- menu */
-		MainMenu = LoadMenu(GetModuleHandle(NULL), MAKEINTRESOURCE(IDR_MENU));
-#endif
-
 		/* -- Handle some command line options */
 		if (control->opt_eraseconf || control->opt_resetconf)
 			eraseconfigfile();
@@ -5603,6 +5598,36 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+        /* stock top-level menu items */
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"MainMenu");
+            item.set_text("Main");
+        }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CpuMenu");
+            item.set_text("CPU");
+        }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoMenu");
+            item.set_text("Video");
+        }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"SoundMenu");
+            item.set_text("Sound");
+        }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"DOSMenu");
+            item.set_text("DOS");
+        }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CaptureMenu");
+            item.set_text("Capture");
+        }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"DriveMenu");
+            item.set_text("Drive");
+        }
+
 #if (HAVE_D3D9_H) && defined(WIN32)
 		D3D_reconfigure();
 #endif
@@ -5737,23 +5762,36 @@ int main(int argc, char* argv[]) {
         GUI_ResetResize(true);
 #endif
 
-        bool reboot_dos;
-		bool run_machine;
-        bool wait_debugger;
-		bool reboot_machine;
-		bool dos_kernel_shutdown;
+        void ConstructMenu(void);
+        ConstructMenu();
 
-fresh_boot:
-        reboot_dos = false;
-		run_machine = false;
-        wait_debugger = false;
-		reboot_machine = false;
-		dos_kernel_shutdown = false;
+        mainMenu.dump_log_debug(); /*DEBUG*/
 
-#if defined(WIN32) && !defined(C_SDL2)
+        mainMenu.rebuild();
+
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+		/* -- menu */
+		MainMenu = mainMenu.getWinMenu();
+        DOSBox_SetMenu();
+#endif
+
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
 		int Reflect_Menu(void);
 		Reflect_Menu();
 #endif
+
+        bool reboot_dos;
+        bool run_machine;
+        bool wait_debugger;
+        bool reboot_machine;
+        bool dos_kernel_shutdown;
+
+fresh_boot:
+        reboot_dos = false;
+        run_machine = false;
+        wait_debugger = false;
+        reboot_machine = false;
+        dos_kernel_shutdown = false;
 
 		/* NTS: CPU reset handler, and BIOS init, has the instruction pointer poised to run through BIOS initialization,
 		 *      which will then "boot" into the DOSBox kernel, and then the shell, by calling VM_Boot_DOSBox_Kernel() */
@@ -6019,7 +6057,19 @@ fresh_boot:
 	}
 
 	LOG::Exit();
+
+#if defined(WIN32) && !defined(C_SDL2)
+# if !defined(HX_DOS)
+	ShowWindow(GetHWND(), SW_HIDE);
+	SDL1_hax_SetMenu(NULL);/* detach menu from window, or else Windows will destroy the menu out from under the C++ class */
+# endif
+#endif
+
 	SDL_Quit();//Let's hope sdl will quit as well when it catches an exception
+
+	mainMenu.unbuild();
+	mainMenu.clear_all_menu_items();
+
 	return 0;
 }
 

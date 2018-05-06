@@ -108,16 +108,50 @@ typedef std::vector<CEvent *>::iterator CEventVector_it;
 typedef std::vector<CHandlerEvent *>::iterator CHandlerEventVector_it;
 typedef std::vector<CBindGroup *>::iterator CBindGroup_it;
 
+#include <map>
+
+static std::map<std::string, size_t> name_to_events;
+
+class CEvent;
+
+CEvent *get_mapper_event_by_name(const std::string &x);
+
 class CEvent {
 public:
-	CEvent(char const * const _entry) {
-		safe_strncpy(entry,_entry,16);
+    enum event_type {
+        event_t=0,
+        handler_event_t
+    };
+public:
+	CEvent(char const * const _entry,const enum event_type _type = event_t) {
+		safe_strncpy(entry,_entry,sizeof(entry));
+
+        {
+            if (name_to_events.find(entry) != name_to_events.end())
+                E_Exit("Mapper: Event \"%s\" already defined",entry);
+        }
+
+        name_to_events[entry] = events.size();
+
 		events.push_back(this);
 		bindlist.clear();
         active=false;
 		activity=0;
 		current_value=0;
+        type = _type;
+
+        assert(get_mapper_event_by_name(entry) == this);
 	}
+    virtual std::string GetBindMenuText(void);
+    void update_menu_shortcut(void) {
+        if (!eventname.empty()) {
+            DOSBoxMenu::item& item = mainMenu.get_item(std::string("mapper_") + std::string(eventname));
+            std::string str = GetBindMenuText();
+            item.set_shortcut_text(str);
+            item.refresh_item(mainMenu);
+//            LOG_MSG("%s",str.c_str());
+        }
+    }
 	void AddBind(CBind * bind);
 	virtual ~CEvent();
 	virtual void Active(bool yesno) {
@@ -134,6 +168,8 @@ public:
 	}
 	char * GetName(void) { return entry; }
 	virtual bool IsTrigger(void)=0;
+    std::string eventname;
+    enum event_type type;
 	CBindList bindlist;
     bool active;
 protected:
@@ -141,6 +177,19 @@ protected:
 	char entry[16];
 	Bits current_value;
 };
+
+CEvent *get_mapper_event_by_name(const std::string &x) {
+    auto i = name_to_events.find(x);
+
+    if (i != name_to_events.end()) {
+        if (i->second >= events.size())
+            E_Exit("Mapper: name to events contains out of range index for \"%s\"",x.c_str());
+
+        return events[i->second];
+    }
+
+    return NULL;
+}
 
 /* class for events which can be ON/OFF only: key presses, joystick buttons, joystick hat */
 class CTriggeredEvent : public CEvent {
@@ -208,16 +257,26 @@ public:
 
 class CBind {
 public:
+    enum CBindType {
+        bind_t=0,
+        keybind_t
+    };
+public:
 	virtual ~CBind () {
 		list->remove(this);
 	}
-	CBind(CBindList * _list) {
+	CBind(CBindList * _list,enum CBindType _type = bind_t) {
 		list=_list;
 		_list->push_back(this);
 		mods=flags=0;
 		event=0;
 		active=holding=false;
+        type = _type;
 	}
+    virtual std::string GetModifierText(void);
+    virtual std::string GetBindMenuText(void) {
+        return GetModifierText();
+    }
 	void AddFlags(char * buf) {
 		if (mods & BMOD_Mod1) strcat(buf," mod1");
 		if (mods & BMOD_Mod2) strcat(buf," mod2");
@@ -282,6 +341,8 @@ public:
 	CEvent * event;
 	CBindList * list;
 	bool active,holding;
+
+    enum CBindType type;
 };
 
 CEvent::~CEvent() {
@@ -527,7 +588,7 @@ class CKeyBindGroup;
 
 class CKeyBind : public CBind {
 public:
-	CKeyBind(CBindList * _list,SDLKey _key) : CBind(_list) {
+	CKeyBind(CBindList * _list,SDLKey _key) : CBind(_list, CBind::keybind_t) {
 		key = _key;
 	}
 	virtual ~CKeyBind() {}
@@ -545,9 +606,46 @@ public:
 		sprintf(buf,"key %d",MapSDLCode((Bitu)key));
 #endif
 	}
+    virtual std::string GetBindMenuText(void) {
+        const char *s;
+        std::string r,m;
+
+#if defined(C_SDL2)
+        s = SDL_GetScancodeName(key);
+#else
+		s = SDL_GetKeyName(MapSDLCode((Bitu)key));
+#endif
+        if (s != NULL) r = s;
+
+        m = GetModifierText();
+        if (!m.empty()) r = m + "+" + r;
+
+        return r;
+    }
 public:
 	SDLKey key;
 };
+
+std::string CEvent::GetBindMenuText(void) {
+    std::string r;
+
+    if (bindlist.empty())
+        return std::string();
+
+    for (auto i=bindlist.begin();i!=bindlist.end();i++) {
+        CBind *b = *i;
+        if (b == NULL) continue;
+        if (b->type != CBind::keybind_t) continue;
+
+        CKeyBind *kb = reinterpret_cast<CKeyBind*>(b);
+        if (kb == NULL) continue;
+
+        r += kb->GetBindMenuText();
+        break;
+    }
+
+    return r;
+}
 
 class CKeyBindGroup : public  CBindGroup {
 public:
@@ -1623,6 +1721,7 @@ public:
 			}
 			if (mapper.abindit!=mapper.aevent->bindlist.end()) SetActiveBind(*(mapper.abindit));
 			else SetActiveBind(0);
+            mapper.aevent->update_menu_shortcut();
 			break;
 		case BB_Next:
 			if (mapper.abindit!=mapper.aevent->bindlist.end()) 
@@ -1710,6 +1809,7 @@ public:
 			break;
 		}
 		mapper.redraw=true;
+        mapper.aevent->update_menu_shortcut();
 	}
 protected:
 	BC_Types type;
@@ -1816,7 +1916,6 @@ protected:
 	Bitu stick,hat,dir;
 };
 
-
 class CModEvent : public CTriggeredEvent {
 public:
 	CModEvent(char const * const _entry,Bitu _wmod) : CTriggeredEvent(_entry), notify_button(NULL) {
@@ -1838,6 +1937,22 @@ protected:
 	Bitu wmod;
 };
 
+static CModEvent* mod_event[8] = {NULL};
+
+std::string CBind::GetModifierText(void) {
+    std::string r,t;
+
+    for (size_t m=4/*Host key first*/;m >= 1;m--) {
+        if ((mods & (1 << (m - 1))) && mod_event[m] != NULL) {
+            t = mod_event[m]->GetBindMenuText();
+            if (!r.empty()) r += "+";
+            r += t;
+        }
+    }
+
+    return r;
+}
+
 class CHandlerEvent : public CTriggeredEvent {
 public:
 	CHandlerEvent(char const * const _entry,MAPPER_Handler * _handler,MapKeys _key,Bitu _mod,char const * const _buttonname) : CTriggeredEvent(_entry), notify_button(NULL) {
@@ -1846,6 +1961,7 @@ public:
 		defkey=_key;
 		buttonname=_buttonname;
 		handlergroup.push_back(this);
+        type = handler_event_t;
 	}
 	virtual ~CHandlerEvent() {}
 	virtual void Active(bool yesno) {
@@ -2046,14 +2162,26 @@ public:
         notify_button = n;
     }
     CTextButton *notify_button;
+	MAPPER_Handler * handler;
 protected:
 	MapKeys defkey;
 	Bitu defmod;
-	MAPPER_Handler * handler;
 public:
 	const char * buttonname;
 };
 
+void MAPPER_TriggerEventByName(const std::string name) {
+    CEvent *event = get_mapper_event_by_name(name);
+    if (event != NULL) {
+        if (event->type == CEvent::handler_event_t) {
+            CHandlerEvent *he = reinterpret_cast<CHandlerEvent*>(event);
+            if (he->handler != NULL) {
+                he->handler(true);
+                he->handler(false);
+            }
+        }
+    }
+}
 
 static struct {
 	CCaptionButton *  event_title;
@@ -2203,6 +2331,9 @@ static void AddModButton(Bitu x,Bitu y,Bitu dx,Bitu dy,char const * const title,
 	CModEvent * event=new CModEvent(buf,_mod);
 	CEventButton *button=new CEventButton(x,y,dx,dy,title,event);
     event->notifybutton(button);
+
+    assert(_mod < 8);
+    mod_event[_mod] = event;
 }
 
 struct KeyBlock {
@@ -2573,6 +2704,8 @@ static SDL_Color map_pal[5]={
 };
 
 static void CreateStringBind(char * line,bool loading=false) {
+    std::string o_line = line;
+
 	line=trim(line);
     if (*line == 0) return;
 	char * eventname=StripWord(line);
@@ -2602,6 +2735,7 @@ foundevent:
 			if (bind) {
 				event->AddBind(bind);
 				bind->SetFlags(bindline);
+                event->update_menu_shortcut();
 				break;
 			}
 		}
@@ -2832,15 +2966,35 @@ static void CreateDefaultBinds(void) {
 	sprintf(buffer,"jhat_0_0_3 \"stick_0 hat 0 8\" ");CreateStringBind(buffer);
 }
 
-void MAPPER_AddHandler(MAPPER_Handler * handler,MapKeys key,Bitu mods,char const * const eventname,char const * const buttonname) {
-	//Check if it already exists=> if so return.
-	for(CHandlerEventVector_it it=handlergroup.begin();it!=handlergroup.end();it++)
-		if(strcmp((*it)->buttonname,buttonname) == 0) return;
+void MAPPER_AddHandler(MAPPER_Handler * handler,MapKeys key,Bitu mods,char const * const eventname,char const * const buttonname,DOSBoxMenu::item **ret_menuitem) {
+    if (ret_menuitem != NULL)
+        *ret_menuitem = NULL;
 
-	char tempname[27];
-	strcpy(tempname,"hand_");
-	strcat(tempname,eventname);
-	CHandlerEvent *event = new CHandlerEvent(tempname,handler,key,mods,buttonname);
+    char tempname[27];
+    strcpy(tempname,"hand_");
+    strcat(tempname,eventname);
+
+    //Check if it already exists=> if so return.
+    for(CHandlerEventVector_it it=handlergroup.begin();it!=handlergroup.end();it++) {
+        if(strcmp((*it)->buttonname,buttonname) == 0) {
+            if (ret_menuitem != NULL)
+                *ret_menuitem = &mainMenu.get_item(std::string("mapper_") + std::string(eventname));
+
+            return;
+        }
+    }
+
+    CHandlerEvent *event = new CHandlerEvent(tempname,handler,key,mods,buttonname);
+    event->eventname = eventname;
+
+    /* The mapper now automatically makes menu items for mapper events */
+    DOSBoxMenu::item &menuitem = mainMenu.alloc_item(DOSBoxMenu::item_type_id, std::string("mapper_") + std::string(eventname));
+    menuitem.set_mapper_event(tempname);
+
+    if (ret_menuitem == NULL)
+        menuitem.set_text(buttonname);
+    else
+        *ret_menuitem = &menuitem;
 
     if (mapper_addhandler_create_buttons) {
         // and a button in the mapper UI
@@ -3074,6 +3228,7 @@ void BIND_MappingEvents(void) {
                     mapper.aevent->AddBind(newbind);
                     SetActiveEvent(mapper.aevent);
                     mapper.addbind=false;
+                    mapper.aevent->update_menu_shortcut();
                     break;
                 }
             }
@@ -3387,6 +3542,11 @@ void MAPPER_Init(void) {
 #endif
 		}
 	}
+
+    /* and then the menu items need to be updated */
+    for (auto &ev : events) {
+        if (ev != NULL) ev->update_menu_shortcut();
+    }
 }
 //Somehow including them at the top conflicts with something in setup.h
 #ifdef C_X11_XKB
@@ -3537,7 +3697,15 @@ void MAPPER_StartUp() {
 
 	Prop_path* pp = section->Get_path("mapperfile");
 	mapper.filename = pp->realpath;
-	MAPPER_AddHandler(&MAPPER_Run,MK_m,MMODHOST,"mapper","Mapper");
+
+    {
+        DOSBoxMenu::item *itemp = NULL;
+
+        MAPPER_AddHandler(&MAPPER_Run,MK_m,MMODHOST,"mapper","Mapper",&itemp);
+        itemp->set_accelerator(DOSBoxMenu::accelerator('m'));
+        itemp->set_description("Bring up the mapper UI");
+        itemp->set_text("Mapper");
+    }
 }
 
 void MAPPER_Shutdown() {
@@ -3547,6 +3715,7 @@ void MAPPER_Shutdown() {
 			events[i] = NULL;
 		}
 	}
+    name_to_events.clear();
 	events.clear();
 
 	for (size_t i=0;i < buttons.size();i++) {

@@ -30,6 +30,590 @@
 #include "timer.h"
 #include "inout.h"
 
+const DOSBoxMenu::mapper_event_t DOSBoxMenu::unassigned_mapper_event; /* empty std::string */
+
+DOSBoxMenu::DOSBoxMenu() {
+}
+
+DOSBoxMenu::~DOSBoxMenu() {
+    unbuild();
+    clear_all_menu_items();
+}
+
+DOSBoxMenu::displaylist::displaylist() {
+}
+
+DOSBoxMenu::displaylist::~displaylist() {
+}
+        
+bool DOSBoxMenu::item_exists(const std::string &name) {
+    auto i = name_map.find(name);
+
+    if (i == name_map.end())
+       return false;
+
+    return item_exists(i->second);
+}
+
+bool DOSBoxMenu::item_exists(const item_handle_t i) {
+    if (i == unassigned_item_handle)
+        return false;
+    else if (i >= master_list.size())
+        return false;
+
+    item &ret = master_list[(size_t)i];
+
+    if (!ret.status.allocated || ret.master_id == unassigned_item_handle)
+        return false;
+    else if (ret.master_id != i)
+        return false;
+
+    return true;
+}
+
+DOSBoxMenu::item& DOSBoxMenu::get_item(const std::string &name) {
+    auto i = name_map.find(name);
+
+    if (i == name_map.end()) /* TODO: Need a sentinel value to say not found */
+        E_Exit("DOSBoxMenu::get_item() no such item \"%s\" found",name.c_str());
+
+    return get_item(i->second);
+}
+
+DOSBoxMenu::item& DOSBoxMenu::get_item(const item_handle_t i) {
+    if (i == unassigned_item_handle)
+        E_Exit("DOSBoxMenu::get_item() attempt to get unassigned handle");
+    else if (i >= master_list.size())
+        E_Exit("DOSBoxMenu::get_item() attempt to get out of range handle");
+
+    item &ret = master_list[(size_t)i];
+
+    if (!ret.status.allocated || ret.master_id == unassigned_item_handle)
+        E_Exit("DOSBoxMenu::get_item() attempt to read unallocated item");
+    else if (ret.master_id != i)
+        E_Exit("DOSBoxMenu::get_item() ID mismatch");
+
+    return ret;
+}
+
+DOSBoxMenu::item& DOSBoxMenu::alloc_item(const enum item_type_t type,const std::string &name) {
+    if (type >= MAX_id)
+        E_Exit("DOSBoxMenu::alloc_item() illegal menu type value");
+
+    if (name_map.find(name) != name_map.end())
+        E_Exit("DOSBoxMenu::alloc_item() name '%s' already taken",name.c_str());
+
+    while (master_list_alloc < master_list.size()) {
+        if (!master_list[master_list_alloc].status.allocated) {
+            name_map[name] = master_list_alloc;
+            return master_list[master_list_alloc].allocate(master_list_alloc,type,name);
+        }
+
+        master_list_alloc++;
+    }
+
+    if (master_list_alloc >= master_list_limit)
+        E_Exit("DOSBoxMenu::alloc_item() no slots are free");
+
+    size_t newsize = master_list.size() + (master_list.size() / 2);
+    if (newsize < 64) newsize = 64;
+    if (newsize > master_list_limit) newsize = master_list_limit;
+    master_list.resize(newsize);
+
+    assert(master_list_alloc < master_list.size());
+
+    name_map[name] = master_list_alloc;
+    return master_list[master_list_alloc].allocate(master_list_alloc,type,name);
+}
+
+void DOSBoxMenu::delete_item(const item_handle_t i) {
+    if (i == unassigned_item_handle)
+        E_Exit("DOSBoxMenu::delete_item() attempt to get unassigned handle");
+    else if (i >= master_list.size())
+        E_Exit("DOSBoxMenu::delete_item() attempt to get out of range handle");
+
+    {
+        auto it = name_map.find(master_list[i].name);
+        if (it != name_map.end()) {
+            if (it->second != i) E_Exit("DOSBoxMenu::delete_item() master_id mismatch");
+            name_map.erase(it);
+        }
+    }
+
+    master_list[i].deallocate();
+    master_list_alloc = i;
+}
+
+const char *DOSBoxMenu::TypeToString(const enum item_type_t type) {
+    switch (type) {
+        case item_type_id:              return "Item";
+        case submenu_type_id:           return "Submenu";
+        case separator_type_id:         return "Separator";
+        case vseparator_type_id:        return "VSeparator";
+    };
+
+    return "";
+}
+
+void DOSBoxMenu::dump_log_displaylist(DOSBoxMenu::displaylist &ls, unsigned int indent) {
+    std::string prep;
+
+    for (unsigned int i=0;i < indent;i++)
+        prep += "+ ";
+
+    for (auto &id : ls.disp_list) {
+        DOSBoxMenu::item &item = get_item(id);
+
+        if (!item.is_allocated()) {
+            LOG_MSG("%s (NOT ALLOCATED!!!)",prep.c_str());
+            continue;
+        }
+
+        LOG_MSG("%sid=%u type=\"%s\" name=\"%s\" text=\"%s\"",
+            prep.c_str(),
+            (unsigned int)item.master_id,
+            TypeToString(item.type),
+            item.name.c_str(),
+            item.text.c_str());
+
+        if (item.type == submenu_type_id)
+            dump_log_displaylist(item.display_list, indent+1);
+    }
+}
+
+void DOSBoxMenu::dump_log_debug(void) {
+    LOG_MSG("Menu dump log (%p)",(void*)this);
+    LOG_MSG("---- Master list ----");
+    for (auto &id : master_list) {
+        if (id.is_allocated()) {
+            LOG_MSG("+ id=%u type=\"%s\" name=\"%s\" text=\"%s\" shortcut=\"%s\" desc=\"%s\"",
+                (unsigned int)id.master_id,
+                TypeToString(id.type),
+                id.name.c_str(),
+                id.text.c_str(),
+                id.shortcut_text.c_str(),
+                id.description.c_str());
+
+            if (!id.get_mapper_event().empty())
+                LOG_MSG("+ + mapper_event=\"%s\"",id.get_mapper_event().c_str());
+        }
+    }
+    LOG_MSG("---- display list ----");
+    dump_log_displaylist(display_list, 1);
+}
+
+void DOSBoxMenu::clear_all_menu_items(void) {
+    for (auto &id : master_list) {
+        if (id.is_allocated())
+            id.deallocate();
+    }
+    master_list_alloc = 0;
+    master_list.clear();
+    name_map.clear();
+}
+
+DOSBoxMenu::item::item() {
+}
+
+DOSBoxMenu::item::~item() {
+}
+
+DOSBoxMenu::item &DOSBoxMenu::item::allocate(const item_handle_t id,const enum item_type_t new_type,const std::string &new_name) {
+    if (master_id != unassigned_item_handle || status.allocated)
+        E_Exit("DOSBoxMenu::item::allocate() called on item already allocated");
+
+    status.allocated = 1;
+    name = new_name;
+    type = new_type;
+    master_id = id;
+    return *this;
+}
+
+void DOSBoxMenu::item::deallocate(void) {
+    if (master_id == unassigned_item_handle || !status.allocated)
+        E_Exit("DOSBoxMenu::item::deallocate() called on item already deallocated");
+
+    master_id = unassigned_item_handle;
+    status.allocated = 0;
+    status.changed = 1;
+    shortcut_text.clear();
+    description.clear();
+    text.clear();
+    name.clear();
+}
+
+void DOSBoxMenu::displaylist_append(DOSBoxMenu::displaylist &ls,DOSBoxMenu::item &item) {
+    if (item.status.in_use)
+        E_Exit("DOSBoxMenu::displaylist_append() item already in use");
+
+    ls.disp_list.push_back(item.master_id);
+    item.status.in_use = true;
+    ls.order_changed = true;
+}
+
+void DOSBoxMenu::displaylist_remove(DOSBoxMenu::displaylist &ls,DOSBoxMenu::item &item) {
+    if (!item.status.in_use)
+        E_Exit("DOSBoxMenu::displaylist_remove() item not in use");
+
+    for (auto i=ls.disp_list.begin();i!=ls.disp_list.end();i++) {
+        if (*i == item.master_id) {
+            ls.disp_list.erase(i);
+            break;
+        }
+    }
+
+    item.status.in_use = false;
+    ls.order_changed = true;
+}
+
+void DOSBoxMenu::displaylist_clear(DOSBoxMenu::displaylist &ls) {
+    for (auto &id : ls.disp_list) {
+        if (id != DOSBoxMenu::unassigned_item_handle) {
+            id = DOSBoxMenu::unassigned_item_handle;
+        }
+    }
+
+    ls.disp_list.clear();
+    ls.items_changed = true;
+    ls.order_changed = true;
+}
+
+void DOSBoxMenu::rebuild(void) {
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU /* Windows menu handle */
+    if (winMenu == NULL) {
+        if (!winMenuInit())
+            return;
+    }
+#endif
+}
+
+void DOSBoxMenu::unbuild(void) {
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU /* Windows menu handle */
+    winMenuDestroy();
+#endif
+}
+
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU /* Windows menu handle */
+std::string DOSBoxMenu::item::winConstructMenuText(void) {
+    std::string r;
+
+    /* copy text, converting '&' to '&&' for Windows.
+     * TODO: Use accelerator to place '&' for underline */
+    for (auto i=text.begin();i!=text.end();i++) {
+        char c = *i;
+
+        if (c == '&') {
+            r += "&&";
+        }
+        else {
+            r += c;
+        }
+    }
+
+    /* then the shortcut text */
+    if (!shortcut_text.empty()) {
+        r += "\t";
+
+        for (auto i=shortcut_text.begin();i!=shortcut_text.end();i++) {
+            char c = *i;
+
+            if (c == '&') {
+                r += "&&";
+            }
+            else {
+                r += c;
+            }
+        }
+    }
+
+    return r;
+}
+
+void DOSBoxMenu::item::winAppendMenu(HMENU handle) {
+    if (type == separator_type_id) {
+        AppendMenu(handle, MF_MENUBREAK, 0, NULL);
+    }
+    else if (type == vseparator_type_id) {
+        AppendMenu(handle, MF_MENUBARBREAK, 0, NULL);
+    }
+    else if (type == submenu_type_id) {
+        if (winMenu != NULL)
+            AppendMenu(handle, MF_POPUP | MF_STRING, (uintptr_t)winMenu, winConstructMenuText().c_str());
+    }
+    else if (type == item_type_id) {
+        unsigned int attr = MF_STRING;
+
+        attr |= (status.checked) ? MF_CHECKED : MF_UNCHECKED;
+        attr |= (status.enabled) ? MF_ENABLED : (MF_DISABLED | MF_GRAYED);
+
+        AppendMenu(handle, attr, (uintptr_t)(master_id + winMenuMinimumID), winConstructMenuText().c_str());
+    }
+}
+
+bool DOSBoxMenu::winMenuSubInit(DOSBoxMenu::item &p_item) {
+    if (p_item.winMenu == NULL) {
+        p_item.winMenu = CreatePopupMenu();
+        if (p_item.winMenu != NULL) {
+            for (auto id : p_item.display_list.disp_list) {
+                DOSBoxMenu::item &item = get_item(id);
+
+                /* if a submenu, make the submenu */
+                if (item.type == submenu_type_id) {
+                    item.parent_id = p_item.master_id;
+                    winMenuSubInit(item);
+                }
+
+                item.winAppendMenu(p_item.winMenu);
+            }
+        }
+    }
+
+    return true;
+}
+
+bool DOSBoxMenu::winMenuInit(void) {
+    if (winMenu == NULL) {
+        winMenu = CreateMenu();
+        if (winMenu == NULL) return false;
+
+        /* top level */
+        for (auto id : display_list.disp_list) {
+            DOSBoxMenu::item &item = get_item(id);
+
+            /* if a submenu, make the submenu */
+            if (item.type == submenu_type_id) {
+                item.parent_id = unassigned_item_handle;
+                winMenuSubInit(item);
+            }
+
+            item.winAppendMenu(winMenu);
+        }
+    }
+
+    return true;
+}
+
+void DOSBoxMenu::winMenuDestroy(void) {
+    if (winMenu != NULL) {
+        /* go through all menu items, and clear the menu handle */
+        for (auto &id : master_list)
+            id.winMenu = NULL;
+
+        /* destroy the menu.
+         * By MSDN docs it destroys submenus automatically */
+        DestroyMenu(winMenu);
+        winMenu = NULL;
+    }
+}
+
+HMENU DOSBoxMenu::getWinMenu(void) const {
+    return winMenu;
+}
+
+/* call this from WM_COMMAND */
+bool DOSBoxMenu::mainMenuWM_COMMAND(unsigned int id) {
+    if (id < winMenuMinimumID) return false;
+    id -= winMenuMinimumID;
+
+    if (id >= master_list.size()) return false;
+
+    item &item = master_list[id];
+    if (!item.status.allocated || item.master_id == unassigned_item_handle) return false;
+
+    dispatchItemCommand(item);
+    return true;
+}
+#endif
+
+void MAPPER_TriggerEventByName(const std::string name);
+
+void DOSBoxMenu::item::refresh_item(DOSBoxMenu &menu) {
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU /* Windows menu handle */
+    if (menu.winMenu != NULL && status.in_use && status.changed) {
+        HMENU phandle = NULL;
+
+        if (parent_id != unassigned_item_handle)
+            phandle = menu.get_item(parent_id).winMenu;
+        else
+            phandle = menu.winMenu;
+
+		if (phandle != NULL) {
+			if (type == separator_type_id) {
+				/* none */
+			}
+			else if (type == vseparator_type_id) {
+				/* none */
+			}
+			else if (type == submenu_type_id) {
+				/* TODO: Can't change by ID, have to change by position */
+			}
+			else if (type == item_type_id) {
+				unsigned int attr = MF_STRING;
+
+				attr |= (status.checked) ? MF_CHECKED : MF_UNCHECKED;
+				attr |= (status.enabled) ? MF_ENABLED : (MF_DISABLED | MF_GRAYED);
+
+				ModifyMenu(phandle, (uintptr_t)(master_id + winMenuMinimumID),
+					attr | MF_BYCOMMAND, (uintptr_t)(master_id + winMenuMinimumID),
+					winConstructMenuText().c_str());
+			}
+		}
+    }
+
+    status.changed = false;
+#endif
+}
+
+void DOSBoxMenu::dispatchItemCommand(item &item) {
+    if (item.callback_func)
+        item.callback_func(this,&item);
+
+    if (item.mapper_event != unassigned_mapper_event)
+        MAPPER_TriggerEventByName(item.mapper_event);
+}
+
+/* this is THE menu */
+DOSBoxMenu mainMenu;
+
+/* top level menu ("") */
+static const char *def_menu__toplevel[] = {
+    "MainMenu",
+    "CpuMenu",
+    "VideoMenu",
+    "SoundMenu",
+    "DOSMenu",
+    "CaptureMenu",
+    "DriveMenu",
+    NULL
+};
+
+/* main menu ("MainMenu") */
+static const char *def_menu_main[] = {
+    "mapper_mapper",
+    "mapper_gui",
+    "--",
+    "mapper_capmouse",
+    "mapper_pause",
+    "--",
+    "mapper_reset",
+    "mapper_restart",
+    "--",
+    "mapper_shutdown",
+    NULL
+};
+
+/* cpu menu ("CpuMenu") */
+static const char *def_menu_cpu[] = {
+    "mapper_speedlock2", /* NTS: "mapper_speedlock" doesn't work for a menu item because it requires holding the key */
+    "--",
+    "mapper_cycleup",
+    "mapper_cycledown",
+    "--",
+    "mapper_cycauto",
+    "--",
+    "mapper_normal",
+    "mapper_full",
+    "mapper_simple",
+#if (C_DYNAMIC_X86)
+    "mapper_dynamic",
+#endif
+    NULL
+};
+
+/* video menu ("VideoMenu") */
+static const char *def_menu_video[] = {
+    "mapper_fullscr",
+    "mapper_resetsize",
+    NULL
+};
+
+/* sound menu ("SoundMenu") */
+static const char *def_menu_sound[] = {
+    "mapper_volup",
+    "mapper_voldown",
+    NULL
+};
+
+
+/* capture menu ("CaptureMenu") */
+static const char *def_menu_capture[] = {
+    "mapper_scrshot",
+    "--",
+    "mapper_video",
+    "mapper_recwave",
+    "mapper_recmtwave",
+    "mapper_caprawopl",
+    "mapper_caprawmidi",
+    NULL
+};
+
+static DOSBoxMenu::item_handle_t separator_alloc = 0;
+static std::vector<DOSBoxMenu::item_handle_t> separators;
+
+static std::string separator_id(const DOSBoxMenu::item_handle_t r) {
+    char tmp[32];
+
+    sprintf(tmp,"%u",(unsigned int)r);
+    return std::string("_separator_") + std::string(tmp);
+}
+
+static DOSBoxMenu::item &separator_get(void) {
+    DOSBoxMenu::item_handle_t r;
+
+    assert(separator_alloc <= separators.size());
+    if (separator_alloc == separators.size()) {
+        DOSBoxMenu::item &nitem = mainMenu.alloc_item(DOSBoxMenu::separator_type_id, separator_id(separator_alloc));
+        separators.push_back(nitem.get_master_id());
+    }
+
+    assert(separator_alloc < separators.size());
+    r = separators[separator_alloc++];
+
+    return mainMenu.get_item(r);
+}
+
+void ConstructSubMenu(DOSBoxMenu::item &item, const char * const * list) {
+    for (size_t i=0;list[i] != NULL;i++) {
+        const char *ref = list[i];
+
+        if (!strcmp(ref,"--")) {
+            mainMenu.displaylist_append(
+                item.display_list, separator_get());
+        }
+        else if (mainMenu.item_exists(ref)) {
+            mainMenu.displaylist_append(
+                item.display_list, mainMenu.get_item(ref));
+        }
+    }
+}
+
+void ConstructMenu(void) {
+    mainMenu.displaylist_clear(mainMenu.display_list);
+    separator_alloc = 0;
+
+    /* top level */
+    for (size_t i=0;def_menu__toplevel[i] != NULL;i++)
+        mainMenu.displaylist_append(
+            mainMenu.display_list,
+            mainMenu.get_item(def_menu__toplevel[i]));
+
+    /* main menu */
+    ConstructSubMenu(mainMenu.get_item("MainMenu"), def_menu_main);
+
+    /* cpu menu */
+    ConstructSubMenu(mainMenu.get_item("CpuMenu"), def_menu_cpu);
+
+    /* video menu */
+    ConstructSubMenu(mainMenu.get_item("VideoMenu"), def_menu_video);
+
+    /* sound menu */
+    ConstructSubMenu(mainMenu.get_item("SoundMenu"), def_menu_sound);
+
+
+    /* capture menu */
+    ConstructSubMenu(mainMenu.get_item("CaptureMenu"), def_menu_capture);
+}
+
 extern int NonUserResizeCounter;
 
 extern bool dos_kernel_disabled;
@@ -796,6 +1380,8 @@ void DOSBox_SetMenu(void) {
 #if !defined(HX_DOS)
 	if(!menu.gui) return;
 
+    if (MainMenu == NULL) return;
+
 	LOG(LOG_MISC,LOG_DEBUG)("Win32: loading and attaching menu resource to DOSBox's window");
 
 	menu.toggle=true;
@@ -956,6 +1542,9 @@ int Reflect_Menu(void) {
 #if !defined(HX_DOS)
 	extern bool Mouse_Drv;
 	static char name[9];
+
+    // TODO
+    return 0;
 
 	if (!menu.gui) return 0;
 	HMENU m_handle = GetMenu(GetHWND());
@@ -1935,6 +2524,7 @@ void MSG_WM_COMMAND_handle(SDL_SysWMmsg &Message) {
 	if (!menu.gui || GetSetSDLValue(1, "desktop.fullscreen", 0)) return;
 	if (!GetMenu(GetHWND())) return;
 	if (Message.msg != WM_COMMAND) return;
+    if (mainMenu.mainMenuWM_COMMAND(Message.wParam)) return;
 
 	switch (LOWORD(Message.wParam)) {
 	case ID_USESCANCODES: {
