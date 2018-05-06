@@ -719,6 +719,9 @@ void PauseDOSBox(bool pressed) {
 
 	if (!pressed) return;
 
+	/* reflect in the menu that we're paused now */
+	mainMenu.get_item("mapper_pause").check(true).refresh_item(mainMenu);
+
     void MAPPER_ReleaseAllKeys(void);
     MAPPER_ReleaseAllKeys();
 
@@ -741,7 +744,7 @@ void PauseDOSBox(bool pressed) {
 		SDL_WaitEvent(&event);    // since we're not polling, cpu usage drops to 0.
 #ifdef __WIN32__
   #if !defined(C_SDL2)
-		if (event.type==SDL_SYSWMEVENT && event.syswm.msg->msg==WM_COMMAND && event.syswm.msg->wParam==ID_PAUSE) {
+		if (event.type==SDL_SYSWMEVENT && event.syswm.msg->msg == WM_COMMAND && event.syswm.msg->wParam == (mainMenu.get_item("mapper_pause").get_master_id()+DOSBoxMenu::winMenuMinimumID)) {
 			paused=false;
 			GFX_SetTitle(-1,-1,-1,false);	
 			break;
@@ -788,6 +791,9 @@ void PauseDOSBox(bool pressed) {
 
 	// redraw screen (ex. fullscreen - pause - alt+tab x2 - unpause)
 	if (sdl.draw.callback) (sdl.draw.callback)( GFX_CallBackReset );
+
+	/* reflect in the menu that we're paused now */
+	mainMenu.get_item("mapper_pause").check(false).refresh_item(mainMenu);
 }
 
 #if defined(C_SDL2)
@@ -1947,6 +1953,9 @@ void GFX_CaptureMouse(void) {
 		if (sdl.mouse.autoenable || !sdl.mouse.autolock) SDL_ShowCursor(SDL_ENABLE);
 	}
         mouselocked=sdl.mouse.locked;
+
+	/* keep the menu updated */
+	mainMenu.get_item("mapper_capmouse").check(sdl.mouse.locked).refresh_item(mainMenu);
 }
 
 void GFX_UpdateSDLCaptureState(void) {
@@ -2679,6 +2688,8 @@ void ResetSystem(bool pressed) {
 bool has_GUI_StartUp = false;
 
 static void GUI_StartUp() {
+	DOSBoxMenu::item *item;
+
 	if (has_GUI_StartUp) return;
 	has_GUI_StartUp = true;
 
@@ -2897,11 +2908,21 @@ static void GUI_StartUp() {
 #if defined(__WIN32__) && !defined(C_SDL2)
 	MAPPER_AddHandler(ToggleMenu,MK_return,MMOD1|MMOD2,"togglemenu","ToggleMenu");
 #endif // WIN32
-    MAPPER_AddHandler(ResetSystem, MK_r, MMODHOST, "reset", "Reset"); /* Host+R (Host+CTRL+R acts funny on my Linux system) */
-	MAPPER_AddHandler(KillSwitch,MK_f9,MMOD1,"shutdown","ShutDown"); /* KEEP: Most DOSBox-X users may have muscle memory for this */
-	MAPPER_AddHandler(CaptureMouse,MK_f10,MMOD1,"capmouse","Cap Mouse"); /* KEEP: Most DOSBox-X users may have muscle memory for this */
-	MAPPER_AddHandler(SwitchFullScreen,MK_f,MMODHOST,"fullscr","Fullscreen");
-	MAPPER_AddHandler(Restart,MK_nothing,0,"restart","Restart"); /* This is less useful, and now has no default binding */
+    MAPPER_AddHandler(ResetSystem, MK_r, MMODHOST, "reset", "Reset", &item); /* Host+R (Host+CTRL+R acts funny on my Linux system) */
+	item->set_text("Reset guest system");
+
+	MAPPER_AddHandler(KillSwitch,MK_f9,MMOD1,"shutdown","ShutDown", &item); /* KEEP: Most DOSBox-X users may have muscle memory for this */
+	item->set_text("Quit");
+
+	MAPPER_AddHandler(CaptureMouse,MK_f10,MMOD1,"capmouse","Cap Mouse", &item); /* KEEP: Most DOSBox-X users may have muscle memory for this */
+	item->set_text("Capture mouse");
+
+	MAPPER_AddHandler(SwitchFullScreen,MK_f,MMODHOST,"fullscr","Fullscreen", &item);
+	item->set_text("Toggle fullscreen");
+
+	MAPPER_AddHandler(Restart,MK_nothing,0,"restart","Restart", &item); /* This is less useful, and now has no default binding */
+	item->set_text("Restart DOSBox-X");
+
 	void PasteClipboard(bool bPressed); // emendelson from dbDOS adds MMOD2 to this for Ctrl-Alt-F5 for PasteClipboard
 	MAPPER_AddHandler(PasteClipboard, MK_nothing, 0, "paste", "Paste Clipboard"); //end emendelson
 #if C_DEBUG
@@ -2911,8 +2932,11 @@ static void GUI_StartUp() {
 	MAPPER_AddHandler(&PauseDOSBox, MK_pause, MMOD2, "pause", "Pause");
 #endif
 #if !defined(C_SDL2)
-	MAPPER_AddHandler(&GUI_Run, MK_nothing, 0, "gui", "ShowGUI");
-	MAPPER_AddHandler(&GUI_ResetResize, MK_nothing, 0, "resetsize", "ResetSize");
+	MAPPER_AddHandler(&GUI_Run, MK_nothing, 0, "gui", "ShowGUI", &item);
+	item->set_text("Configuration GUI");
+
+	MAPPER_AddHandler(&GUI_ResetResize, MK_nothing, 0, "resetsize", "ResetSize", &item);
+	item->set_text("Reset window size");
 #endif
 	/* Get Keyboard state of numlock and capslock */
 #if defined(C_SDL2)
