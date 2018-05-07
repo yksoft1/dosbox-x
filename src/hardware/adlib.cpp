@@ -696,11 +696,15 @@ void OPL_SaveRawEvent(bool pressed) {
 		LOG_MSG("Preparing to capture Raw OPL, will start with first note played.");
 		module->capture = new Adlib::Capture( &module->cache );
 	}
+
+	mainMenu.get_item("mapper_caprawopl").check(module->capture != NULL).refresh_item(mainMenu);
 }
 
 namespace Adlib {
 
 Module::Module( Section* configuration ) : Module_base(configuration) {
+	DOSBoxMenu::item *item;
+
 	reg.dual[0] = 0;
 	reg.dual[1] = 0;
 	reg.normal = 0;
@@ -762,7 +766,8 @@ Module::Module( Section* configuration ) : Module_base(configuration) {
 	WriteHandler[2].Install(base+8,OPL_Write,IO_MB, 2);
 	ReadHandler[2].Install(base+8,OPL_Read,IO_MB, 1);
 
-	MAPPER_AddHandler(OPL_SaveRawEvent,MK_nothing,0,"caprawopl","Cap OPL");
+	MAPPER_AddHandler(OPL_SaveRawEvent,MK_nothing,0,"caprawopl","Cap OPL",&item);
+	item->set_text("Record FM (OPL) output");
 }
 
 Module::~Module() {

@@ -41,7 +41,6 @@ void MountDrive_2(char drive, const char drive2[DOS_PATHLENGTH], std::string dri
 void MENU_Check_Drive(HMENU handle, int cdrom, int floppy, int local, int image, int automount, int umount, char drive);
 bool MENU_SetBool(std::string secname, std::string value);
 void MENU_swapstereo(bool enabled);
-void GUI_Shortcut(int select);
 void* GetSetSDLValue(int isget, std::string target, void* setval);
 void Go_Boot(const char boot_drive[_MAX_DRIVE]);
 void Go_Boot2(const char boot_drive[_MAX_DRIVE]);
@@ -106,6 +105,8 @@ extern void GetDefaultSize(void);
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NULL
 #endif
 
+void GUI_Shortcut(int select);
+
 #define DOSBOXMENU_ACCELMARK_STR        "\x01"
 #define DOSBOXMENU_ACCELMARK_CHAR       '\x01'
 
@@ -129,7 +130,7 @@ class DOSBoxMenu {
         };
     public:
         typedef uint16_t                item_handle_t;
-        typedef void                  (*callback_t)(DOSBoxMenu * const,item * const);
+        typedef bool                  (*callback_t)(DOSBoxMenu * const,item * const);
         typedef std::string             mapper_event_t;     /* event name */
     public:
         class displaylist {
@@ -203,6 +204,9 @@ class DOSBoxMenu {
                 item&                   allocate(const item_handle_t id,const enum item_type_t type,const std::string &name);
                 void                    deallocate(void);
             public:
+                inline const std::string &get_name(void) const {
+                    return name;
+                }
                 inline item_handle_t get_master_id(void) const {
                     return master_id;
                 }
@@ -328,6 +332,7 @@ class DOSBoxMenu {
         bool                            item_exists(const std::string &name);
         item&                           get_item(const item_handle_t i);
         item&                           get_item(const std::string &name);
+        item_handle_t                   get_item_id_by_name(const std::string &name);
         item&                           alloc_item(const enum item_type_t type,const std::string &name);
         void                            delete_item(const item_handle_t i);
         void                            clear_all_menu_items(void);
@@ -359,8 +364,7 @@ class DOSBoxMenu {
     public:
         static constexpr size_t         master_list_limit = 4096;
     public:
-        void                            displaylist_append(displaylist &ls,DOSBoxMenu::item &item);
-        void                            displaylist_remove(displaylist &ls,DOSBoxMenu::item &item);
+        void                            displaylist_append(displaylist &ls,const DOSBoxMenu::item_handle_t item_id);
         void                            displaylist_clear(displaylist &ls);
 };
 

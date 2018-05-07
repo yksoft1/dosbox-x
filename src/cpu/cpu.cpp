@@ -170,6 +170,107 @@ void CPU_Core_Dyn_X86_SetFPUMode(bool dh_fpu);
 void CPU_Core_Dyn_X86_Cache_Reset(void);
 #endif
 
+void menu_update_cputype(void) {
+	Section_prop * cpu_section = static_cast<Section_prop *>(control->GetSection("cpu"));
+	const std::string cpu_sec_type = cpu_section->Get_string("cputype");
+
+    bool is486 =
+        (CPU_ArchitectureType == CPU_ARCHTYPE_486OLD) ||
+        (CPU_ArchitectureType == CPU_ARCHTYPE_486NEW);
+
+    mainMenu.get_item("cputype_auto").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_MIXED).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_8086").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_8086 && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_8086_prefetch").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_8086 && (cpudecoder == &CPU_Core_Prefetch_Run)).
+        enable(cpudecoder == &CPU_Core_Normal_Run || cpudecoder == &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_80186").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_80186 && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_80186_prefetch").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_80186 && (cpudecoder == &CPU_Core_Prefetch_Run)).
+        enable(cpudecoder == &CPU_Core_Normal_Run || cpudecoder == &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_286").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_286 && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_286_prefetch").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_286 && (cpudecoder == &CPU_Core_Prefetch_Run)).
+        enable(cpudecoder == &CPU_Core_Normal_Run || cpudecoder == &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_386").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_386 && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_386_prefetch").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_386 && (cpudecoder == &CPU_Core_Prefetch_Run)).
+        enable(cpudecoder == &CPU_Core_Normal_Run || cpudecoder == &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_486").
+        check(is486 && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_486_prefetch").
+        check(is486 && (cpudecoder == &CPU_Core_Prefetch_Run)).
+        enable(cpudecoder == &CPU_Core_Normal_Run || cpudecoder == &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_pentium").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_PENTIUM).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_pentium_mmx").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_P55CSLOW).
+        refresh_item(mainMenu);
+    mainMenu.get_item("cputype_pentium_pro").
+        check(CPU_ArchitectureType == CPU_ARCHTYPE_PPROSLOW).
+        refresh_item(mainMenu);
+}
+
+void menu_update_core(void) {
+	Section_prop * cpu_section = static_cast<Section_prop *>(control->GetSection("cpu"));
+	const std::string cpu_sec_type = cpu_section->Get_string("cputype");
+    bool allow_dynamic = false;
+
+    (void)cpu_section;
+    (void)cpu_sec_type;
+    (void)allow_dynamic;
+
+    /* cannot select Dynamic core if prefetch cpu types are in use */
+    allow_dynamic = (strstr(cpu_sec_type.c_str(),"_prefetch") == NULL);
+
+    mainMenu.get_item("mapper_normal").
+        check(cpudecoder == &CPU_Core_Normal_Run || cpudecoder == &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("mapper_simple").
+        check(cpudecoder == &CPU_Core_Simple_Run).
+        enable(cpudecoder != &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+    mainMenu.get_item("mapper_full").
+        check(cpudecoder == &CPU_Core_Full_Run).
+        enable(cpudecoder != &CPU_Core_Prefetch_Run).
+        refresh_item(mainMenu);
+#if (C_DYNAMIC_X86)
+    mainMenu.get_item("mapper_dynamic").
+        check(cpudecoder == &CPU_Core_Dyn_X86_Run).
+        enable(allow_dynamic && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+#endif
+}
+
+void menu_update_autocycle(void) {
+    DOSBoxMenu::item &item = mainMenu.get_item("mapper_cycauto");
+    if (CPU_CycleAutoAdjust)
+        item.set_text("Auto cycles [max]");
+    else if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CYCLES)
+        item.set_text("Auto cycles [auto]");
+    else
+        item.set_text("Auto cycles [off]");
+
+    item.check(CPU_CycleAutoAdjust || (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CYCLES));
+    item.refresh_item(mainMenu);
+}
+
 /* called to signal an NMI. */
 
 /* NTS: From the Intel 80386 programmer's reference manual:
@@ -2052,6 +2153,7 @@ void CPU_SET_CRX(Bitu cr,Bitu value) {
 						printed_cycles_auto_info = true;
 						LOG_MSG("DOSBox switched to max cycles, because of the setting: cycles=auto. If the game runs too fast try a fixed cycles amount in DOSBox's options.");
 					}
+                    menu_update_autocycle();
 				} else {
 					GFX_SetTitle(-1,-1,-1,false);
 				}
@@ -2674,20 +2776,22 @@ void CPU_CycleDecrease(bool pressed) {
 
 static void CPU_ToggleAutoCycles(bool pressed) {
     if (!pressed)
-	return;
+        return;
+
     Section* sec=control->GetSection("cpu");
-    if(sec) {
-	std::string tmp("cycles=");
-	if(CPU_CycleAutoAdjust) {
-	    std::ostringstream str;
-	    str << "fixed " << CPU_CyclesSet;
-	    tmp.append(str.str());
-	} else if(CPU_AutoDetermineMode&CPU_AUTODETERMINE_CYCLES) {
-	    tmp.append("max");
-	} else {
-	    tmp.append("auto");
-	}
-	sec->HandleInputline(tmp);
+    if (sec) {
+        std::string tmp("cycles=");
+        if (CPU_CycleAutoAdjust) {
+            std::ostringstream str;
+            str << "fixed " << CPU_CyclesSet;
+            tmp.append(str.str());
+        } else if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CYCLES) {
+            tmp.append("max");
+        } else {
+            tmp.append("auto");
+        }
+
+        sec->HandleInputline(tmp);
     }
 }
 
@@ -2806,6 +2910,24 @@ PageHandler* weitek_memio_cb(MEM_CalloutObject &co,Bitu phys_page) {
     return &weitek_pagehandler;
 }
 
+bool CpuType_Auto(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    Section* sec=control->GetSection("cpu");
+    if (sec) sec->HandleInputline("cputype=auto");
+    return true;
+}
+
+bool CpuType_ByName(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    const char *name = menuitem->get_name().c_str();
+
+    /* name should be cputype_... */
+    if (!strncmp(name,"cputype_",8)) name += 8;
+    else abort();
+
+    Section* sec=control->GetSection("cpu");
+    if (sec) sec->HandleInputline(std::string("cputype=")+name);
+    return true;
+}
+
 class CPU: public Module_base {
 private:
 	static bool inited;
@@ -2889,6 +3011,37 @@ public:
 		MAPPER_AddHandler(CPU_ToggleDynamicCore,MK_nothing,0,"dynamic","DynCore",&item);
 		item->set_text("Dynamic core");
 #endif
+
+        /* these are not mapper shortcuts, and probably should not be mapper shortcuts */
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_auto").
+            set_text("Auto").set_callback_function(CpuType_Auto);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_8086").
+            set_text("8086").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_8086_prefetch").
+            set_text("8086 with prefetch").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_80186").
+            set_text("80186").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_80186_prefetch").
+            set_text("80186 with prefetch").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_286").
+            set_text("286").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_286_prefetch").
+            set_text("286 with prefetch").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_386").
+            set_text("386").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_386_prefetch").
+            set_text("386 with prefetch").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_486").
+            set_text("486").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_486_prefetch").
+            set_text("486 with prefetch").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_pentium").
+            set_text("Pentium").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_pentium_mmx").
+            set_text("Pentium MMX").set_callback_function(CpuType_ByName);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"cputype_pentium_pro").
+            set_text("Pentium Pro").set_callback_function(CpuType_ByName);
+
 		Change_Config(configuration);	
 		CPU_JMP(false,0,0,0);					//Setup the first cpu core
 	}
@@ -2989,6 +3142,8 @@ public:
 			CPU_CycleAutoAdjust=false;
 		}
 
+        menu_update_autocycle();
+
 		enable_fpu=section->Get_bool("fpu");
 		cpu_rep_max=section->Get_int("interruptible rep string op");
 		ignore_undefined_msr=section->Get_bool("ignore undefined msr");
@@ -3019,9 +3174,9 @@ public:
 #endif
 		} else {
 			strcpy(core_mode,"normal");
+			cpudecoder=&CPU_Core_Normal_Run;
 			LOG_MSG("CPU:Unknown core type %s, switching back to normal.",core.c_str());
 		}
-  
 
 #if (C_DYNAMIC_X86)
 		CPU_Core_Dyn_X86_Cache_Init((core == "dynamic") || (core == "dynamic_nodhfpu"));
@@ -3165,6 +3320,12 @@ public:
 		if(CPU_CycleDown <= 0) CPU_CycleDown = 20;
 
         if (enable_cmpxchg8b && CPU_ArchitectureType >= CPU_ARCHTYPE_PENTIUM) LOG_MSG("Pentium CMPXCHG8B emulation is enabled");
+
+		menu_update_core();
+		menu_update_cputype();
+
+        void CPU_Core_Prefetch_reset(void);
+        CPU_Core_Prefetch_reset();
 
 		if (CPU_CycleAutoAdjust) GFX_SetTitle(CPU_CyclePercUsed,-1,-1,false);
 		else GFX_SetTitle(CPU_CycleMax,-1,-1,false);

@@ -266,6 +266,11 @@ static Bit32u Fetchd() {
 
 #define EALookupTable (core.ea_table)
 
+void CPU_Core_Prefetch_reset(void) {
+    pq_valid=false;
+    prefetch_init(0);
+}
+
 Bits CPU_Core_Prefetch_Run(void) {
 	bool invalidate_pq=false;
 

@@ -620,6 +620,8 @@ void CAPTURE_VideoEvent(bool pressed) {
 	} else {
 		CaptureState |= CAPTURE_VIDEO;
 	}
+
+	mainMenu.get_item("mapper_video").check(!!(CaptureState & CAPTURE_VIDEO)).refresh_item(mainMenu);
 }
 
 extern uint32_t GFX_palette32bpp[256];
@@ -1589,6 +1591,8 @@ void CAPTURE_MTWaveEvent(bool pressed) {
     else {
         CaptureState |= CAPTURE_MULTITRACK_WAVE;
     }
+
+	mainMenu.get_item("mapper_recmtwave").check(!!(CaptureState & CAPTURE_MULTITRACK_WAVE)).refresh_item(mainMenu);
 }
 
 void CAPTURE_WaveEvent(bool pressed) {
@@ -1610,6 +1614,8 @@ void CAPTURE_WaveEvent(bool pressed) {
     else {
         CaptureState |= CAPTURE_WAVE;
     }
+
+	mainMenu.get_item("mapper_recwave").check(!!(CaptureState & CAPTURE_WAVE)).refresh_item(mainMenu);
 }
 
 /* MIDI capturing */
@@ -1698,6 +1704,8 @@ void CAPTURE_MidiEvent(bool pressed) {
 	} else {
 		LOG_MSG("Stopped capturing raw midi before any data arrived.");
 	}
+
+	mainMenu.get_item("mapper_caprawmidi").check(!!(CaptureState & CAPTURE_MIDI)).refresh_item(mainMenu);
 }
 
 void CAPTURE_Destroy(Section *sec) {
@@ -1711,6 +1719,8 @@ void CAPTURE_Destroy(Section *sec) {
 }
 
 void CAPTURE_Init() {
+	DOSBoxMenu::item *item;
+
 	LOG(LOG_MISC,LOG_DEBUG)("Initializing screenshot and A/V capture system");
 
 	Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
@@ -1760,12 +1770,21 @@ void CAPTURE_Init() {
 	CaptureState = 0; // make sure capture is off
 
 	// mapper shortcuts for capture
-	MAPPER_AddHandler(CAPTURE_WaveEvent,MK_w,MMOD3|MMODHOST,"recwave","Rec Wave");
-	MAPPER_AddHandler(CAPTURE_MTWaveEvent,MK_nothing,0,"recmtwave","Rec MTWav");
-	MAPPER_AddHandler(CAPTURE_MidiEvent,MK_nothing,0,"caprawmidi","Cap MIDI");
+	MAPPER_AddHandler(CAPTURE_WaveEvent,MK_w,MMOD3|MMODHOST,"recwave","Rec Wave", &item);
+	item->set_text("Record audio to WAV");
+
+	MAPPER_AddHandler(CAPTURE_MTWaveEvent,MK_nothing,0,"recmtwave","Rec MTWav", &item);
+	item->set_text("Record audio to multi-track AVI");
+
+	MAPPER_AddHandler(CAPTURE_MidiEvent,MK_nothing,0,"caprawmidi","Cap MIDI", &item);
+	item->set_text("Record MIDI output");
+
 #if (C_SSHOT)
-	MAPPER_AddHandler(CAPTURE_ScreenShotEvent,MK_s,MMOD3|MMODHOST,"scrshot","Screenshot");
-	MAPPER_AddHandler(CAPTURE_VideoEvent,MK_v,MMOD3|MMODHOST,"video","Video");
+	MAPPER_AddHandler(CAPTURE_ScreenShotEvent,MK_s,MMOD3|MMODHOST,"scrshot","Screenshot", &item);
+	item->set_text("Take screenshot");
+
+	MAPPER_AddHandler(CAPTURE_VideoEvent,MK_v,MMOD3|MMODHOST,"video","Video", &item);
+	item->set_text("Record video to AVI");
 #endif
 
 	AddExitFunction(AddExitFunctionFuncPair(CAPTURE_Destroy),true);

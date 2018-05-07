@@ -4814,11 +4814,23 @@ void CheckNumLockState(void) {
 
 extern bool log_keyboard_scan_codes;
 
+bool showconsole_init = false;
+
+bool DEBUG_IsDebuggerConsoleVisible(void);
+
 void DOSBox_ShowConsole() {
 #if defined(WIN32) && !defined(HX_DOS)
 	CONSOLE_SCREEN_BUFFER_INFO csbi;
 	COORD crd;
 	HWND hwnd;
+
+	/* if the debugger has already taken the console, do nothing */
+	if (DEBUG_IsDebuggerConsoleVisible())
+		return;
+
+	/* if WE have already opened the console, do nothing */
+	if (showconsole_init)
+		return;
 
 	/* Microsoft Windows: Allocate a console and begin spewing to it.
 	   DOSBox is compiled on Windows platforms as a Win32 application, and therefore, no console. */
@@ -4836,6 +4848,8 @@ void DOSBox_ShowConsole() {
 	freopen("CONIN$", "r", stdin);
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
+
+	showconsole_init = true;
 #endif
 }
 
@@ -5264,6 +5278,60 @@ bool VM_PowerOn() {
 	return true;
 }
 
+bool show_console_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    DOSBox_ShowConsole();
+	mainMenu.get_item("show_console").check(true).refresh_item(mainMenu);
+    return true;
+}
+
+bool wait_on_error_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+	sdl.wait_on_error = !sdl.wait_on_error;
+	mainMenu.get_item("wait_on_error").check(sdl.wait_on_error).refresh_item(mainMenu);
+	return true;
+}
+
+bool autolock_mouse_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+	sdl.mouse.autoenable = !sdl.mouse.autoenable;
+	mainMenu.get_item("auto_lock_mouse").check(sdl.mouse.autoenable).refresh_item(mainMenu);
+	return true;
+}
+
+void SetCyclesCount_mapper_shortcut_RunInternal(void) {
+#if !defined(C_SDL2)
+	void MAPPER_ReleaseAllKeys(void);
+	MAPPER_ReleaseAllKeys();
+
+	GFX_LosingFocus();
+
+	GUI_Shortcut(16);
+
+	void MAPPER_ReleaseAllKeys(void);
+	MAPPER_ReleaseAllKeys();
+
+	GFX_LosingFocus();
+#endif
+}
+
+void SetCyclesCount_mapper_shortcut_RunEvent(Bitu /*val*/) {
+	KEYBOARD_ClrBuffer();	//Clear buffer
+	GFX_LosingFocus();		//Release any keys pressed (buffer gets filled again).
+	SetCyclesCount_mapper_shortcut_RunInternal();
+}
+
+void SetCyclesCount_mapper_shortcut(bool pressed) {
+	if (!pressed) return;
+	PIC_AddEvent(SetCyclesCount_mapper_shortcut_RunEvent, 0.0001f);	//In case mapper deletes the key object that ran it
+}
+
+void AspectRatio_mapper_shortcut(bool pressed) {
+	if (!pressed) return;
+
+	if (!GFX_GetPreventFullscreen()) {
+		SetVal("render", "aspect", render.aspect ? "false" : "true");
+		mainMenu.get_item("mapper_aspratio").check(render.aspect).refresh_item(mainMenu);
+	}
+}
+
 //extern void UI_Init(void);
 int main(int argc, char* argv[]) {
     CommandLine com_line(argc,argv);
@@ -5630,6 +5698,14 @@ int main(int argc, char* argv[]) {
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CpuMenu");
             item.set_text("CPU");
+            {
+                DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CpuCoreMenu");
+                item.set_text("CPU core");
+            }
+            {
+                DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CpuTypeMenu");
+                item.set_text("CPU type");
+            }
         }
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoMenu");
@@ -5763,6 +5839,18 @@ int main(int argc, char* argv[]) {
 		 * memory layout. */
 		Init_MemHandles();
 
+		/* more */
+		{
+			DOSBoxMenu::item *item;
+
+			MAPPER_AddHandler(&SetCyclesCount_mapper_shortcut, MK_nothing, 0, "editcycles", "EditCycles", &item);
+			item->set_text("Edit cycles");
+
+			MAPPER_AddHandler(&AspectRatio_mapper_shortcut, MK_nothing, 0, "aspratio", "AspRatio", &item);
+			item->set_text("Fit to aspect ratio");
+			item->check(render.aspect);
+		}
+
 		/* finally, the mapper */
 		MAPPER_Init();
 
@@ -5771,6 +5859,11 @@ int main(int argc, char* argv[]) {
 			LOG(LOG_MISC,LOG_DEBUG)("Running mapper interface, during startup, as instructed");
 			MAPPER_RunInternal();
 		}
+
+        /* more */
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"show_console").set_text("Show console").set_callback_function(show_console_menu_callback);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wait_on_error").set_text("Wait on error").set_callback_function(wait_on_error_menu_callback).check(sdl.wait_on_error);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"auto_lock_mouse").set_text("Autolock mouse").set_callback_function(autolock_mouse_menu_callback).check(sdl.mouse.autoenable);
 
 		/* The machine just "powered on", and then reset finished */
 		if (!VM_PowerOn()) E_Exit("VM failed to power on");

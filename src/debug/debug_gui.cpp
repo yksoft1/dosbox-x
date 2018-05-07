@@ -27,6 +27,7 @@
 #include "support.h"
 #include "control.h"
 #include "regs.h"
+#include "menu.h"
 #include "debug.h"
 #include "debug_inc.h"
 
@@ -514,7 +515,13 @@ void DBGUI_NextWindowIfActiveHidden(void) {
         DBGUI_NextWindow();
 }
 
+bool DEBUG_IsDebuggerConsoleVisible(void) {
+	return (dbg.win_main != NULL);
+}
+
 void DBGUI_StartUp(void) {
+	mainMenu.get_item("show_console").check(true).refresh_item(mainMenu);
+
 	LOG(LOG_MISC,LOG_DEBUG)("DEBUG GUI startup");
 	/* Start the main window */
 	dbg.win_main=initscr();
