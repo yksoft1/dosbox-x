@@ -3676,6 +3676,7 @@ godefault:
 	return;
 #endif
 }
+#endif
 
 void* GetSetSDLValue(int isget, std::string target, void* setval) {
 	if (target == "wait_on_error") {
@@ -3746,7 +3747,6 @@ void* GetSetSDLValue(int isget, std::string target, void* setval) {
 #endif
 	}
 }
-#endif
 
 #if defined(C_SDL2)
 static const SDL_TouchID no_touch_id = (SDL_TouchID)(~0ULL);
@@ -4001,14 +4001,17 @@ void GFX_Events() {
 							break;
 						case ID_WIN_SYSMENU_RESTOREMENU:
                             /* prevent removing the menu in 3Dfx mode */
-                            if (!GFX_GetPreventFullscreen())
-                                DOSBox_SetMenu();
+							if (!GFX_GetPreventFullscreen()) {
+								DOSBox_SetMenu();
+								mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
+							}
 							break;
 						case ID_WIN_SYSMENU_TOGGLEMENU:
 							/* prevent removing the menu in 3Dfx mode */
 							if (!GFX_GetPreventFullscreen())
 							{
 								if (menu.toggle) DOSBox_NoMenu(); else DOSBox_SetMenu();
+								mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
 							}
 							break;
 					}
@@ -5300,6 +5303,71 @@ bool autolock_mouse_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * co
 	return true;
 }
 
+bool doublebuf_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+    SetVal("sdl", "fulldouble", (GetSetSDLValue(1, "desktop.doublebuf", 0)) ? "false" : "true"); res_init();
+    mainMenu.get_item("doublebuf").check(!!GetSetSDLValue(1, "desktop.doublebuf", 0)).refresh_item(mainMenu);
+    return true;
+}
+
+bool is_always_on_top(void) {
+#if defined(_WIN32) && !defined(C_SDL2)
+	DWORD dwExStyle = ::GetWindowLong(GetHWND(), GWL_EXSTYLE);
+	return !!(dwExStyle & WS_EX_TOPMOST);
+#else
+    return false;
+#endif
+}
+
+#if defined(_WIN32) && !defined(C_SDL2)
+extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
+#endif
+
+void toggle_always_on_top(void) {
+#if defined(_WIN32) && !defined(C_SDL2)
+    bool cur = is_always_on_top();
+	sdl1_hax_set_topmost(!cur);
+#endif
+}
+
+bool alwaysontop_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+    toggle_always_on_top();
+    mainMenu.get_item("alwaysontop").check(is_always_on_top()).refresh_item(mainMenu);
+    return true;
+}
+
+bool sendkey_preset_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+    if (menuitem->get_name() == "sendkey_ctrlesc") {
+        KEYBOARD_AddKey(KBD_leftctrl, true);
+        KEYBOARD_AddKey(KBD_esc, true);
+        KEYBOARD_AddKey(KBD_leftctrl, false);
+        KEYBOARD_AddKey(KBD_esc, false);
+    }
+    else if (menuitem->get_name() == "sendkey_alttab") {
+        KEYBOARD_AddKey(KBD_leftalt, true);
+        KEYBOARD_AddKey(KBD_tab, true);
+        KEYBOARD_AddKey(KBD_leftalt, false);
+        KEYBOARD_AddKey(KBD_tab, false);
+    }
+    else if (menuitem->get_name() == "sendkey_winlogo") {
+        KEYBOARD_AddKey(KBD_lwindows, true);
+        KEYBOARD_AddKey(KBD_lwindows, false);
+    }
+    else if (menuitem->get_name() == "sendkey_winmenu") {
+        KEYBOARD_AddKey(KBD_rwinmenu, true);
+        KEYBOARD_AddKey(KBD_rwinmenu, false);
+    }
+    else if (menuitem->get_name() == "sendkey_cad") {
+        KEYBOARD_AddKey(KBD_leftctrl, true);
+        KEYBOARD_AddKey(KBD_leftalt, true);
+        KEYBOARD_AddKey(KBD_delete, true);
+        KEYBOARD_AddKey(KBD_leftctrl, false);
+        KEYBOARD_AddKey(KBD_leftalt, false);
+        KEYBOARD_AddKey(KBD_delete, false);
+    }
+
+	return true;
+}
+
 void SetCyclesCount_mapper_shortcut_RunInternal(void) {
 #if !defined(C_SDL2)
 	void MAPPER_ReleaseAllKeys(void);
@@ -5334,6 +5402,15 @@ void AspectRatio_mapper_shortcut(bool pressed) {
 		SetVal("render", "aspect", render.aspect ? "false" : "true");
 		mainMenu.get_item("mapper_aspratio").check(render.aspect).refresh_item(mainMenu);
 	}
+}
+
+void HideMenu_mapper_shortcut(bool pressed) {
+	if (!pressed) return;
+
+    void ToggleMenu(bool pressed);
+    ToggleMenu(true);
+
+    mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
 }
 
 //extern void UI_Init(void);
@@ -5698,6 +5775,10 @@ int main(int argc, char* argv[]) {
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"MainMenu");
             item.set_text("Main");
+            {
+                DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"MainSendKey");
+                item.set_text("Send Key");
+            }
         }
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CpuMenu");
@@ -5853,6 +5934,10 @@ int main(int argc, char* argv[]) {
 			MAPPER_AddHandler(&AspectRatio_mapper_shortcut, MK_nothing, 0, "aspratio", "AspRatio", &item);
 			item->set_text("Fit to aspect ratio");
 			item->check(render.aspect);
+
+			MAPPER_AddHandler(&HideMenu_mapper_shortcut, MK_nothing, 0, "togmenu", "TogMenu", &item);
+			item->set_text("Hide/show menu bar");
+			item->check(!menu.toggle);
 		}
 
 		/* finally, the mapper */
@@ -5868,6 +5953,13 @@ int main(int argc, char* argv[]) {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"show_console").set_text("Show console").set_callback_function(show_console_menu_callback);
 		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"wait_on_error").set_text("Wait on error").set_callback_function(wait_on_error_menu_callback).check(sdl.wait_on_error);
 		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"auto_lock_mouse").set_text("Autolock mouse").set_callback_function(autolock_mouse_menu_callback).check(sdl.mouse.autoenable);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_ctrlesc").set_text("Ctrl+Esc").set_callback_function(sendkey_preset_menu_callback);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_alttab").set_text("Alt+Tab").set_callback_function(sendkey_preset_menu_callback);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_winlogo").set_text("Logo key").set_callback_function(sendkey_preset_menu_callback);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_winmenu").set_text("Menu key").set_callback_function(sendkey_preset_menu_callback);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_cad").set_text("Ctrl+Alt+Del").set_callback_function(sendkey_preset_menu_callback);
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, "desktop.doublebuf", 0));
+		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
 
 		/* The machine just "powered on", and then reset finished */
 		if (!VM_PowerOn()) E_Exit("VM failed to power on");
@@ -5894,6 +5986,10 @@ int main(int argc, char* argv[]) {
 		/* -- menu */
 		MainMenu = mainMenu.getWinMenu();
         DOSBox_SetMenu();
+#endif
+#if defined(MACOSX)
+	void sdl_hax_macosx_setmenu(void *nsMenu);
+	sdl_hax_macosx_setmenu(mainMenu.getNsMenu());
 #endif
 
 #if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
@@ -6184,6 +6280,10 @@ fresh_boot:
 	ShowWindow(GetHWND(), SW_HIDE);
 	SDL1_hax_SetMenu(NULL);/* detach menu from window, or else Windows will destroy the menu out from under the C++ class */
 # endif
+#endif
+#if defined(MACOSX)
+	void sdl_hax_macosx_setmenu(void *nsMenu);
+	sdl_hax_macosx_setmenu(NULL);
 #endif
 
 	SDL_Quit();//Let's hope sdl will quit as well when it catches an exception

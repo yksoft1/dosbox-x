@@ -97,10 +97,13 @@ extern void GetDefaultSize(void);
 #endif
 
 /* menu interface mode */
-#define DOSBOXMENU_NULL     (0)
-#define DOSBOXMENU_HMENU    (1)
+#define DOSBOXMENU_NULL     (0)     /* nothing */
+#define DOSBOXMENU_HMENU    (1)     /* Windows HMENU resources */
+#define DOSBOXMENU_NSMENU   (2)     /* Mac OS X NSMenu / NSMenuItem resources */
 #if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
 # define DOSBOXMENU_TYPE    DOSBOXMENU_HMENU
+#elif defined(MACOSX)
+# define DOSBOXMENU_TYPE    DOSBOXMENU_NSMENU
 #else
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NULL
 #endif
@@ -117,6 +120,9 @@ void GUI_Shortcut(int select);
 #define MENU_DOSBOXMENU_H
 
 class DOSBoxMenu {
+    public:
+        DOSBoxMenu(const DOSBoxMenu &src) = delete;             /* don't copy me */
+        DOSBoxMenu(const DOSBoxMenu &&src) = delete;            /* don't move me */
     public:
         class item;
     public:
@@ -199,7 +205,13 @@ class DOSBoxMenu {
                 void                    winAppendMenu(HMENU handle);
                 std::string             winConstructMenuText(void);
 #endif
-
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
+            protected:
+		void*			nsMenuItem = NULL;
+                void*                   nsMenu = NULL;
+            protected:
+                void                    nsAppendMenu(void *nsMenu);
+#endif
             protected:
                 item&                   allocate(const item_handle_t id,const enum item_type_t type,const std::string &name);
                 void                    deallocate(void);
@@ -239,6 +251,12 @@ class DOSBoxMenu {
                 }
             public:
                 void refresh_item(DOSBoxMenu &menu);
+		inline bool has_changed(void) const {
+			return status.changed;
+		}
+		void clear_changed(void) {
+			status.changed = false;
+		}
             public:
                 inline item &check(const bool f=true) {
                     if (status.checked != f) {
@@ -249,7 +267,10 @@ class DOSBoxMenu {
 
                     return *this;
                 }
-            public:
+		inline bool is_checked(void) const {
+			return status.checked;
+		}
+	    public:
                 inline item &enable(const bool f=true) {
                     if (status.enabled != f) {
                         status.enabled  = f;
@@ -259,6 +280,9 @@ class DOSBoxMenu {
 
                     return *this;
                 }
+		inline bool is_enabled(void) const {
+			return status.enabled;
+		}
             public:
                 inline item_type_t get_type(void) const {
                     return type;
@@ -358,6 +382,18 @@ class DOSBoxMenu {
         bool                            mainMenuWM_COMMAND(unsigned int id);
     public:
         static constexpr unsigned int   winMenuMinimumID = 0x1000;
+#endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X NSMenu / NSMenuItem handle */
+    protected:
+        void*                           nsMenu = NULL;
+        bool                            nsMenuInit(void);
+        void                            nsMenuDestroy(void);
+        bool                            nsMenuSubInit(DOSBoxMenu::item &item);
+    public:
+        void*                           getNsMenu(void) const;
+        bool                            mainMenuAction(unsigned int id);
+    public:
+        static constexpr unsigned int   nsMenuMinimumID = 0x1000;
 #endif
     public:
         void                            dispatchItemCommand(item &item);

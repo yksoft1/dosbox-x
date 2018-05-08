@@ -30,6 +30,20 @@
 #include "timer.h"
 #include "inout.h"
 
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
+void sdl_hax_nsMenuAddApplicationMenu(void *nsMenu);
+void *sdl_hax_nsMenuItemFromTag(void *nsMenu, unsigned int tag);
+void sdl_hax_nsMenuItemUpdateFromItem(void *nsMenuItem, DOSBoxMenu::item &item);
+void sdl_hax_nsMenuItemSetTag(void *nsMenuItem, unsigned int id);
+void sdl_hax_nsMenuItemSetSubmenu(void *nsMenuItem,void *nsMenu);
+void sdl_hax_nsMenuAddItem(void *nsMenu,void *nsMenuItem);
+void* sdl_hax_nsMenuAllocSeparator(void);
+void* sdl_hax_nsMenuAlloc(const char *initWithText);
+void sdl_hax_nsMenuRelease(void *nsMenu);
+void* sdl_hax_nsMenuItemAlloc(const char *initWithText);
+void sdl_hax_nsMenuItemRelease(void *nsMenuItem);
+#endif
+
 const DOSBoxMenu::mapper_event_t DOSBoxMenu::unassigned_mapper_event; /* empty std::string */
 
 DOSBoxMenu::DOSBoxMenu() {
@@ -281,13 +295,134 @@ void DOSBoxMenu::rebuild(void) {
             return;
     }
 #endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
+    if (nsMenu == NULL) {
+        if (!nsMenuInit())
+            return;
+    }
+#endif
 }
 
 void DOSBoxMenu::unbuild(void) {
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU /* Windows menu handle */
     winMenuDestroy();
 #endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
+    nsMenuDestroy();
+#endif
 }
+
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
+bool DOSBoxMenu::mainMenuAction(unsigned int id) {
+    if (id < nsMenuMinimumID) return false;
+    id -= nsMenuMinimumID;
+
+    if (id >= master_list.size()) return false;
+
+    item &item = master_list[id];
+    if (!item.status.allocated || item.master_id == unassigned_item_handle) return false;
+
+    dispatchItemCommand(item);
+    return true;
+}
+
+void DOSBoxMenu::item::nsAppendMenu(void* parent_nsMenu) {
+    if (type == separator_type_id) {
+	sdl_hax_nsMenuAddItem(parent_nsMenu, sdl_hax_nsMenuAllocSeparator());
+    }
+    else if (type == vseparator_type_id) {
+	sdl_hax_nsMenuAddItem(parent_nsMenu, sdl_hax_nsMenuAllocSeparator());
+    }
+    else if (type == submenu_type_id) {
+	if (nsMenu != NULL) {
+		// NTS: You have to make a menu ITEM who's submenu is the submenu object
+		nsMenuItem = sdl_hax_nsMenuItemAlloc(text.c_str());
+
+		sdl_hax_nsMenuItemSetTag(nsMenuItem, master_id + nsMenuMinimumID);
+		sdl_hax_nsMenuItemSetSubmenu(nsMenuItem, nsMenu);
+		sdl_hax_nsMenuAddItem(parent_nsMenu, nsMenuItem);
+		sdl_hax_nsMenuItemUpdateFromItem(nsMenuItem, *this);
+		sdl_hax_nsMenuItemRelease(nsMenuItem);
+	}
+    }
+    else if (type == item_type_id) {
+	nsMenuItem = sdl_hax_nsMenuItemAlloc(text.c_str());
+
+	sdl_hax_nsMenuItemSetTag(nsMenuItem, master_id + nsMenuMinimumID);
+	sdl_hax_nsMenuAddItem(parent_nsMenu, nsMenuItem);
+	sdl_hax_nsMenuItemUpdateFromItem(nsMenuItem, *this);
+	sdl_hax_nsMenuItemRelease(nsMenuItem);
+    }
+}
+
+bool DOSBoxMenu::nsMenuSubInit(DOSBoxMenu::item &p_item) {
+    if (p_item.nsMenu == NULL) {
+        p_item.nsMenu = sdl_hax_nsMenuAlloc(p_item.get_text().c_str());
+        if (p_item.nsMenu != NULL) {
+            for (auto id : p_item.display_list.disp_list) {
+                DOSBoxMenu::item &item = get_item(id);
+
+                /* if a submenu, make the submenu */
+                if (item.type == submenu_type_id) {
+                    item.parent_id = p_item.master_id;
+                    nsMenuSubInit(item);
+                }
+
+                item.nsAppendMenu(p_item.nsMenu);
+            }
+        }
+    }
+
+    return true;
+}
+
+bool DOSBoxMenu::nsMenuInit(void) {
+    if (nsMenu == NULL) {
+        if ((nsMenu = sdl_hax_nsMenuAlloc("")) == NULL)
+            return false;
+
+	/* For whatever reason, Mac OS X will always make the first top level menu
+	   the Application menu and will put the name of the app there NO MATTER WHAT */
+	sdl_hax_nsMenuAddApplicationMenu(nsMenu);
+
+        /* top level */
+        for (auto id : display_list.disp_list) {
+            DOSBoxMenu::item &item = get_item(id);
+
+            /* if a submenu, make the submenu */
+            if (item.type == submenu_type_id) {
+                item.parent_id = unassigned_item_handle;
+                nsMenuSubInit(item);
+            }
+
+            item.nsAppendMenu(nsMenu);
+        }
+
+	/* release our handle on the nsMenus. Mac OS X will keep them alive with it's
+	   reference until the menu is destroyed at which point all items and submenus
+	   will be automatically destroyed */
+	for (auto &id : master_list) {
+		if (id.nsMenu != NULL) {
+		    sdl_hax_nsMenuRelease(id.nsMenu);
+		    id.nsMenu = NULL;
+		}
+	}
+    }
+
+    return true;
+}
+
+void DOSBoxMenu::nsMenuDestroy(void) {
+    if (nsMenu != NULL) {
+        sdl_hax_nsMenuRelease(nsMenu);
+        nsMenu = NULL;
+    }
+}
+
+void* DOSBoxMenu::getNsMenu(void) const {
+	return nsMenu;
+}
+#endif
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU /* Windows menu handle */
 std::string DOSBoxMenu::item::winConstructMenuText(void) {
@@ -458,6 +593,10 @@ void DOSBoxMenu::item::refresh_item(DOSBoxMenu &menu) {
 
     status.changed = false;
 #endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
+    if (nsMenuItem != NULL)
+	    sdl_hax_nsMenuItemUpdateFromItem(nsMenuItem, *this);
+#endif
 }
 
 void DOSBoxMenu::dispatchItemCommand(item &item) {
@@ -488,12 +627,16 @@ static const char *def_menu_main[] = {
     "mapper_mapper",
     "mapper_gui",
 	"--",
+    "MainSendKey",
+	"--",
 	"wait_on_error",
 #if C_DEBUG
 	"--",
 	"mapper_debugger",
 #endif
+#ifndef MACOSX
     "show_console",
+#endif
     "--",
     "mapper_capmouse",
 	"auto_lock_mouse",
@@ -505,6 +648,17 @@ static const char *def_menu_main[] = {
 	"mapper_restart",
     "--",
     "mapper_shutdown",
+    NULL
+};
+
+/* main -> send key menu ("MenuSendKey") */
+static const char *def_menu_main_sendkey[] = {
+    "sendkey_ctrlesc",
+    "sendkey_alttab",
+    "sendkey_winlogo",
+    "sendkey_winmenu",
+    "--",
+    "sendkey_cad",
     NULL
 };
 
@@ -559,6 +713,11 @@ static const char *def_menu_video[] = {
 	"mapper_aspratio",
 	"--",
 	"mapper_fullscr",
+	"--",
+    "alwaysontop",
+    "doublebuf",
+	"--",
+    "mapper_togmenu",
 	"--",
 	"mapper_resetsize",
     NULL
@@ -646,6 +805,9 @@ void ConstructMenu(void) {
 
     /* main menu */
     ConstructSubMenu(mainMenu.get_item("MainMenu").get_master_id(), def_menu_main);
+
+    /* main sendkey menu */
+    ConstructSubMenu(mainMenu.get_item("MainSendKey").get_master_id(), def_menu_main_sendkey);
 
     /* cpu menu */
     ConstructSubMenu(mainMenu.get_item("CpuMenu").get_master_id(), def_menu_cpu);
@@ -1439,6 +1601,7 @@ void DOSBox_SetMenu(void) {
 	menu.toggle=true;
     NonUserResizeCounter=1;
 	SDL1_hax_SetMenu(MainMenu);
+	mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
 
 	Reflect_Menu();
 
@@ -1456,6 +1619,7 @@ void DOSBox_NoMenu(void) {
 	menu.toggle=false;
     NonUserResizeCounter=1;
 	SDL1_hax_SetMenu(NULL);
+	mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
 	RENDER_CallBack( GFX_CallBackReset );
 
     void DOSBox_SetSysMenu(void);
@@ -3506,5 +3670,7 @@ void MSG_WM_COMMAND_handle(SDL_SysWMmsg &Message) {
 }
 #else
 void DOSBox_SetSysMenu(void) {
+}
+void ToggleMenu(bool pressed) {
 }
 #endif
