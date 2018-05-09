@@ -724,9 +724,13 @@ static const char *def_menu_video[] = {
 	"--",
 #ifndef MACOSX
     "mapper_togmenu",
+# if !defined(C_SDL2)
 	"--",
+# endif
 #endif
+#if !defined(C_SDL2)
 	"mapper_resetsize",
+#endif
     NULL
 };
 
@@ -3770,14 +3774,75 @@ void DOSBoxMenu::layoutMenu(void) {
     }
 
     for (auto i=display_list.disp_list.begin();i!=display_list.disp_list.end();i++)
-        get_item(*i).placeItemFinal(*this, /*finalwidth*/x, /*toplevel*/true);
+        get_item(*i).placeItemFinal(*this, /*finalwidth*/x - menuBox.x, /*toplevel*/true);
+
+    for (auto i=display_list.disp_list.begin();i!=display_list.disp_list.end();i++)
+        get_item(*i).layoutSubmenu(*this, /*toplevel*/true);
 
     LOG_MSG("Layout complete");
+}
+
+void DOSBoxMenu::item::layoutSubmenu(DOSBoxMenu &menu, bool isTopLevel) {
+    int x, y, maxx;
+
+    x = screenBox.x;
+    y = screenBox.y;
+
+    if (isTopLevel) {
+        y += textBox.h;
+    }
+    else {
+        x += screenBox.w;
+    }
+
+    popupBox.x = x;
+    popupBox.y = y;
+
+    maxx = x;
+    for (auto i=display_list.disp_list.begin();i!=display_list.disp_list.end();i++) {
+        DOSBoxMenu::item &item = menu.get_item(*i);
+
+        item.placeItem(menu, x, y, /*toplevel*/false);
+        y += item.screenBox.h;
+
+        if (maxx < (item.screenBox.x + item.screenBox.w))
+            maxx = (item.screenBox.x + item.screenBox.w);
+    }
+
+    for (auto i=display_list.disp_list.begin();i!=display_list.disp_list.end();i++)
+        menu.get_item(*i).placeItemFinal(menu, /*finalwidth*/maxx - popupBox.x, /*toplevel*/false);
+
+    for (auto i=display_list.disp_list.begin();i!=display_list.disp_list.end();i++)
+        menu.get_item(*i).layoutSubmenu(menu, /*toplevel*/false);
+
+    popupBox.w = maxx - popupBox.x;
+    popupBox.h = y - popupBox.y;
+
+    /* 1 pixel border, top */
+    if (!isTopLevel) {
+        borderTop = true;
+        popupBox.y -= 1;
+        popupBox.h += 1;
+    }
+    else {
+        borderTop = false;
+    }
+    /* 1 pixel border, left */
+    popupBox.x -= 1;
+    popupBox.w += 1;
+    /* 1 pixel border, right */
+    popupBox.w += 1;
+    /* 1 pixel border, bottom */
+    popupBox.h += 1;
 }
 
 void DOSBoxMenu::item::placeItemFinal(DOSBoxMenu &menu,int finalwidth,bool isTopLevel) {
     if (type < separator_type_id) {
         int x = 0,rx = 0;
+
+        if (!isTopLevel) {
+            screenBox.w = finalwidth;
+        }
 
         /* from the left */
         checkBox.x = x;
@@ -3793,6 +3858,10 @@ void DOSBoxMenu::item::placeItemFinal(DOSBoxMenu &menu,int finalwidth,bool isTop
 
         rx -= shortBox.w;
         shortBox.x = rx;
+
+        if (!isTopLevel) {
+            screenBox.w = finalwidth;
+        }
 
         /* check */
         if (x > rx) LOG_MSG("placeItemFinal warning: text and shorttext overlap by %d pixels",x-rx);

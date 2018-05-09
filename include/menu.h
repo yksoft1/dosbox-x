@@ -108,6 +108,8 @@ extern void GetDefaultSize(void);
 # define DOSBOXMENU_TYPE    DOSBOXMENU_HMENU
 #elif defined(MACOSX)
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NSMENU
+#elif defined(C_SDL2) /* SDL 2.x only */
+# define DOSBOXMENU_TYPE    DOSBOXMENU_SDLDRAW
 #elif !defined(C_SDL2) /* SDL 1.x only */
 # define DOSBOXMENU_TYPE    DOSBOXMENU_SDLDRAW
 #else
@@ -153,7 +155,7 @@ class DOSBoxMenu {
                                         ~displaylist();
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
             public:
-                void                    DrawDisplayList(DOSBoxMenu &menu);
+                void                    DrawDisplayList(DOSBoxMenu &menu,bool updateScreen=true);
                 item_handle_t           itemFromPoint(DOSBoxMenu &menu,int x,int y);
 #endif
             protected:
@@ -235,6 +237,7 @@ class DOSBoxMenu {
                 bool                    needRedraw = false;
                 bool                    itemHilight = false;
                 bool                    itemVisible = false;
+                bool                    borderTop = false;
             public:
                 void                    removeFocus(DOSBoxMenu &menu);
                 void                    removeHover(DOSBoxMenu &menu);
@@ -244,7 +247,10 @@ class DOSBoxMenu {
                 void                    setHilight(DOSBoxMenu &menu,bool hi=true);
                 void                    placeItem(DOSBoxMenu &menu,int x,int y,bool isTopLevel=false);
                 void                    placeItemFinal(DOSBoxMenu &menu,int finalwidth,bool isTopLevel=false);
+                void                    layoutSubmenu(DOSBoxMenu &menu, bool isTopLevel=false);
+                void                    updateScreenFromPopup(DOSBoxMenu &menu);
                 void                    updateScreenFromItem(DOSBoxMenu &menu);
+                void                    drawBackground(DOSBoxMenu &menu);
 #endif
             protected:
                 item&                   allocate(const item_handle_t id,const enum item_type_t type,const std::string &name);
@@ -461,7 +467,7 @@ class DOSBoxMenu {
         size_t                          screenWidth = 320;
     public:
         static constexpr size_t         fontCharWidth = 8;
-        static constexpr size_t         fontCharHeight = 14;
+        static constexpr size_t         fontCharHeight = 16;
 #endif
     public:
         void                            dispatchItemCommand(item &item);
