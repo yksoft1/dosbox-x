@@ -17,8 +17,11 @@
  */
 
 #include <string>
+#include "config.h"
 #include "menudef.h"
 void SetVal(const std::string secname, std::string preval, const std::string val);
+
+#include <SDL_video.h>
 
 #ifdef __WIN32__
 #include "programs.h"
@@ -100,10 +103,13 @@ extern void GetDefaultSize(void);
 #define DOSBOXMENU_NULL     (0)     /* nothing */
 #define DOSBOXMENU_HMENU    (1)     /* Windows HMENU resources */
 #define DOSBOXMENU_NSMENU   (2)     /* Mac OS X NSMenu / NSMenuItem resources */
+#define DOSBOXMENU_SDLDRAW  (3)     /* menus that WE draw on the SDL surface */
 #if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
 # define DOSBOXMENU_TYPE    DOSBOXMENU_HMENU
 #elif defined(MACOSX)
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NSMENU
+#elif !defined(C_SDL2) /* SDL 1.x only */
+# define DOSBOXMENU_TYPE    DOSBOXMENU_SDLDRAW
 #else
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NULL
 #endif
@@ -145,6 +151,11 @@ class DOSBoxMenu {
             public:
                                         displaylist();
                                         ~displaylist();
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+            public:
+                void                    DrawDisplayList(DOSBoxMenu &menu);
+                item_handle_t           itemFromPoint(DOSBoxMenu &menu,int x,int y);
+#endif
             protected:
                 bool                    items_changed = false;
                 bool                    order_changed = false;
@@ -207,10 +218,33 @@ class DOSBoxMenu {
 #endif
 #if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* Mac OS X menu handle */
             protected:
-		void*			nsMenuItem = NULL;
+                void*                   nsMenuItem = NULL;
                 void*                   nsMenu = NULL;
             protected:
                 void                    nsAppendMenu(void *nsMenu);
+#endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+            protected:
+                SDL_Rect                screenBox;      /* absolute screen coords */
+                SDL_Rect                checkBox;       /* relative to screenbox */
+                SDL_Rect                textBox;        /* relative to screenbox */
+                SDL_Rect                shortBox;       /* relative to screenbox */
+                SDL_Rect                popupBox;       /* absolute screen coords */
+                bool                    boxInit = false;
+                bool                    itemHover = false;
+                bool                    needRedraw = false;
+                bool                    itemHilight = false;
+                bool                    itemVisible = false;
+            public:
+                void                    removeFocus(DOSBoxMenu &menu);
+                void                    removeHover(DOSBoxMenu &menu);
+                void                    drawMenuItem(DOSBoxMenu &menu);
+                void                    showItem(DOSBoxMenu &menu,bool show=true);
+                void                    setHover(DOSBoxMenu &menu,bool ho=true);
+                void                    setHilight(DOSBoxMenu &menu,bool hi=true);
+                void                    placeItem(DOSBoxMenu &menu,int x,int y,bool isTopLevel=false);
+                void                    placeItemFinal(DOSBoxMenu &menu,int finalwidth,bool isTopLevel=false);
+                void                    updateScreenFromItem(DOSBoxMenu &menu);
 #endif
             protected:
                 item&                   allocate(const item_handle_t id,const enum item_type_t type,const std::string &name);
@@ -251,12 +285,12 @@ class DOSBoxMenu {
                 }
             public:
                 void refresh_item(DOSBoxMenu &menu);
-		inline bool has_changed(void) const {
-			return status.changed;
-		}
-		void clear_changed(void) {
-			status.changed = false;
-		}
+                inline bool has_changed(void) const {
+                    return status.changed;
+                }
+                void clear_changed(void) {
+                    status.changed = false;
+                }
             public:
                 inline item &check(const bool f=true) {
                     if (status.checked != f) {
@@ -267,10 +301,10 @@ class DOSBoxMenu {
 
                     return *this;
                 }
-		inline bool is_checked(void) const {
-			return status.checked;
-		}
-	    public:
+                inline bool is_checked(void) const {
+                    return status.checked;
+                }
+            public:
                 inline item &enable(const bool f=true) {
                     if (status.enabled != f) {
                         status.enabled  = f;
@@ -280,9 +314,9 @@ class DOSBoxMenu {
 
                     return *this;
                 }
-		inline bool is_enabled(void) const {
-			return status.enabled;
-		}
+                inline bool is_enabled(void) const {
+                    return status.enabled;
+                }
             public:
                 inline item_type_t get_type(void) const {
                     return type;
@@ -394,6 +428,40 @@ class DOSBoxMenu {
         bool                            mainMenuAction(unsigned int id);
     public:
         static constexpr unsigned int   nsMenuMinimumID = 0x1000;
+#endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+    public:
+        bool                            needRedraw = false;
+        bool                            menuVisible = false;
+        item_handle_t                   menuUserAttentionAt = unassigned_item_handle;
+        item_handle_t                   menuUserHoverAt = unassigned_item_handle;
+    public:
+        SDL_Rect                        menuBox = {0,0,0,0};
+    public:
+        inline bool isVisible(void) const {
+            return menuVisible;
+        }
+        inline bool needsRedraw(void) const {
+            return needRedraw;
+        }
+        inline void setRedraw(void) {
+            needRedraw = true;
+        }
+        inline void clearRedraw(void) {
+            needRedraw = false;
+        }
+    public:
+        void                            showMenu(bool show=true);
+        void                            removeHover(void);
+        void                            removeFocus(void);
+        void                            updateRect(void);
+        void                            layoutMenu(void);
+    public:
+        size_t                          menuBarHeight = (14 + 2);
+        size_t                          screenWidth = 320;
+    public:
+        static constexpr size_t         fontCharWidth = 8;
+        static constexpr size_t         fontCharHeight = 14;
 #endif
     public:
         void                            dispatchItemCommand(item &item);
