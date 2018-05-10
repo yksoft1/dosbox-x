@@ -637,7 +637,7 @@ static const char *def_menu_main[] = {
 	"--",
 	"mapper_debugger",
 #endif
-#ifndef MACOSX
+#if !defined(MACOSX) && !defined(LINUX) && !defined(HX_DOS)
     "show_console",
 #endif
     "--",
@@ -648,8 +648,10 @@ static const char *def_menu_main[] = {
     "--",
     "mapper_reset",
 	"--",
+#if !defined(HX_DOS)
 	"mapper_restart",
     "--",
+#endif
     "mapper_shutdown",
     NULL
 };
@@ -694,7 +696,7 @@ static const char *def_menu_cpu_type[] = {
     "cputype_486_prefetch",
     "cputype_pentium",
     "cputype_pentium_mmx",
-    "cputype_pentium_pro",
+    "cputype_ppro_slow",
     NULL
 };
 
@@ -704,7 +706,9 @@ static const char *def_menu_cpu[] = {
     "--",
     "mapper_cycleup",
     "mapper_cycledown",
+#if !defined(C_SDL2)
 	"mapper_editcycles",
+#endif
     "--",
     "CpuCoreMenu",
     "CpuTypeMenu",
@@ -713,22 +717,28 @@ static const char *def_menu_cpu[] = {
 
 /* video menu ("VideoMenu") */
 static const char *def_menu_video[] = {
+#if !defined(C_SDL2)
 	"mapper_aspratio",
 	"--",
+#endif
+#if !defined(C_SDL2)
 	"mapper_fullscr",
 	"--",
-#ifndef MACOSX
+#endif
+#if !defined(MACOSX) && !defined(LINUX) && !defined(C_SDL2) && !defined(HX_DOS)
     "alwaysontop",
 #endif
+#if !defined(C_SDL2)
     "doublebuf",
 	"--",
+#endif
 #ifndef MACOSX
     "mapper_togmenu",
-# if !defined(C_SDL2)
+# if !defined(C_SDL2) && !defined(HX_DOS)
 	"--",
 # endif
 #endif
-#if !defined(C_SDL2)
+#if !defined(C_SDL2) && !defined(HX_DOS)
 	"mapper_resetsize",
 #endif
     NULL
@@ -744,8 +754,10 @@ static const char *def_menu_sound[] = {
 
 /* capture menu ("CaptureMenu") */
 static const char *def_menu_capture[] = {
+#if defined(C_SSHOT)
     "mapper_scrshot",
     "--",
+#endif
     "mapper_video",
     "mapper_recwave",
     "mapper_recmtwave",
@@ -893,7 +905,68 @@ MENU_Block menu;
 unsigned int hdd_defsize=16000;
 char hdd_size[20]="";
 
-#if defined(WIN32) && !defined(C_SDL2)
+#if !(defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS))
+bool OpenGL_using(void);
+
+void DOSBox_SetMenu(void) {
+# if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+    /* FIXME: SDL menu is NOT AVAILABLE if OpenGL surface is used */
+    if (!OpenGL_using()) {
+        menu.toggle=true;
+        mainMenu.showMenu();
+        mainMenu.setRedraw();
+        GFX_ResetScreen();
+    }
+# endif
+}
+
+void DOSBox_NoMenu(void) {
+# if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+    /* FIXME: SDL menu is NOT AVAILABLE if OpenGL surface is used */
+    if (!OpenGL_using()) {
+        menu.toggle=false;
+        mainMenu.showMenu(false);
+        mainMenu.setRedraw();
+        GFX_ResetScreen();
+    }
+# endif
+}
+
+int Reflect_Menu(void) {
+    return 0;
+}
+
+void DOSBox_RefreshMenu(void) {
+}
+
+void DOSBox_CheckOS(int &id, int &major, int &minor) {
+    id=major=minor=0;
+}
+
+# if defined(HX_DOS)
+HWND GetHWND(void) {
+	SDL_SysWMinfo wmi;
+	SDL_VERSION(&wmi.version);
+
+	if(!SDL_GetWMInfo(&wmi)) {
+		return NULL;
+	}
+	return wmi.window;
+}
+
+HWND GetSurfaceHWND(void) {
+	SDL_SysWMinfo wmi;
+	SDL_VERSION(&wmi.version);
+
+	if (!SDL_GetWMInfo(&wmi)) {
+		return NULL;
+	}
+	return wmi.child_window;
+}
+# endif
+#endif
+
+#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
 #include <shlobj.h>
 
 extern void RENDER_CallBack( GFX_CallBackFunctions_t function );
@@ -3683,6 +3756,25 @@ void MSG_WM_COMMAND_handle(SDL_SysWMmsg &Message) {
 void DOSBox_SetSysMenu(void) {
 }
 void ToggleMenu(bool pressed) {
+    bool GFX_GetPreventFullscreen(void);
+
+    /* prevent removing the menu in 3Dfx mode */
+    if (GFX_GetPreventFullscreen())
+        return;
+
+    menu.resizeusing=true;
+	int width, height; bool fullscreen;
+	void GFX_GetSize(int &width, int &height, bool &fullscreen);
+	GFX_GetSize(width, height, fullscreen);
+    if(!menu.gui || !pressed || fullscreen) return;
+	if(!menu.toggle) {
+		menu.toggle=true;
+		DOSBox_SetMenu();
+	} else {
+		menu.toggle=false;
+		DOSBox_NoMenu();
+	}
+	DOSBox_SetSysMenu();
 }
 #endif
 

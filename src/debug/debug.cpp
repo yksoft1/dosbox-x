@@ -2350,7 +2350,7 @@ void DEBUG_Enable(bool pressed) {
 		return;
 	static bool showhelp=false;
 
-#ifdef MACOSX
+#if defined(MACOSX) || defined(LINUX)
 	/* Mac OS X does not have a console for us to just allocate on a whim like Windows does.
 	   So the debugger interface is useless UNLESS the user has started us from a terminal
 	   (whether over SSH or from the Terminal app). */
@@ -2360,7 +2360,11 @@ void DEBUG_Enable(bool pressed) {
 	    allow = false;
 
     if (!allow) {
+# if defined(MACOSX)
 	    LOG_MSG("Debugger in Mac OS X is not available unless you start DOSBox-X from a terminal or from the Terminal application");
+# else
+	    LOG_MSG("Debugger is not available unless you start DOSBox-X from a terminal");
+# endif
 	    return;
     }
 #endif
@@ -2987,10 +2991,13 @@ void DEBUG_Init() {
 
     AddVMEventFunction(VM_EVENT_DOS_INIT_SHELL_READY,AddVMEventFunctionFuncPair(DEBUG_DOSStartUp));
 
-#ifdef MACOSX
+#if defined(MACOSX) || defined(LINUX)
 	/* Mac OS X does not have a console for us to just allocate on a whim like Windows does.
 	   So the debugger interface is useless UNLESS the user has started us from a terminal
-	   (whether over SSH or from the Terminal app). */
+	   (whether over SSH or from the Terminal app).
+       
+       Linux/X11 also does not have a console we can allocate on a whim. You either run
+       this program from XTerm for the debugger, or not. */
     bool allow = true;
 
     if (!isatty(0) || !isatty(1) || !isatty(2))

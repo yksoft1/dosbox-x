@@ -83,6 +83,11 @@ extern void GetDefaultSize(void);
 
 #else
 
+void DOSBox_CheckOS(int &id, int &major, int &minor);
+void DOSBox_RefreshMenu(void);
+void DOSBox_SetMenu(void);
+void DOSBox_NoMenu(void);
+
 // dummy Win32 functions for less #ifdefs
 #define GetHWND() (0)
 #define SetMenu(a,b)
@@ -90,10 +95,6 @@ extern void GetDefaultSize(void);
 #define GetMenu(a) (0)
 
 // menu.cpp replacements; the optimizer will completely remove code based on these
-#define DOSBox_SetMenu()
-#define DOSBox_NoMenu()
-#define DOSBox_RefreshMenu()
-#define DOSBox_CheckOS(a, b, c) do { (a)=0; (b)=0; (c)=0; } while(0)
 #define VER_PLATFORM_WIN32_NT (1)
 #define DOSBox_Kor() !strncmp("ko", getenv("LANG"), 2) // dirty hack.
 
@@ -162,6 +163,10 @@ class DOSBoxMenu {
                 bool                    items_changed = false;
                 bool                    order_changed = false;
                 std::vector<item_handle_t> disp_list;
+            public:
+                const std::vector<item_handle_t> &get_disp_list(void) const {
+                    return disp_list;
+                }
         };
     public:
         static constexpr item_handle_t  unassigned_item_handle = ((item_handle_t)(0xFFFFU)); 
@@ -463,11 +468,13 @@ class DOSBoxMenu {
         void                            updateRect(void);
         void                            layoutMenu(void);
     public:
-        size_t                          menuBarHeight = (14 + 2);
+        size_t                          menuBarHeight = (16 + 1);
         size_t                          screenWidth = 320;
     public:
         static constexpr size_t         fontCharWidth = 8;
         static constexpr size_t         fontCharHeight = 16;
+        static constexpr size_t         dropshadowX = 8;
+        static constexpr size_t         dropshadowY = 8;
 #endif
     public:
         void                            dispatchItemCommand(item &item);

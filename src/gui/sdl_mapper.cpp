@@ -1721,7 +1721,6 @@ public:
 			}
 			if (mapper.abindit!=mapper.aevent->bindlist.end()) SetActiveBind(*(mapper.abindit));
 			else SetActiveBind(0);
-            mapper.aevent->update_menu_shortcut();
 			break;
 		case BB_Next:
 			if (mapper.abindit!=mapper.aevent->bindlist.end()) 
@@ -1809,7 +1808,6 @@ public:
 			break;
 		}
 		mapper.redraw=true;
-        mapper.aevent->update_menu_shortcut();
 	}
 protected:
 	BC_Types type;
@@ -2051,6 +2049,9 @@ public:
         case MK_w:
             key=SDL_SCANCODE_W;
             break;
+        case MK_escape:
+            key=SDL_SCANCODE_ESCAPE;
+            break;
         default:
             break;
 		}
@@ -2146,6 +2147,9 @@ public:
             break;
         case MK_w:
             key=SDLK_w;
+            break;
+        case MK_escape:
+            key=SDLK_ESCAPE;
             break;
 		}
 		sprintf(buf,"%s \"key %d%s%s%s%s\"",
@@ -3495,6 +3499,11 @@ void MAPPER_RunInternal() {
 #endif
 //	KEYBOARD_ClrBuffer();
 	GFX_LosingFocus();
+
+    /* and then the menu items need to be updated */
+    for (auto &ev : events) {
+        if (ev != NULL) ev->update_menu_shortcut();
+    }
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     mainMenu.rebuild();
