@@ -752,6 +752,19 @@ static const char *def_menu_video_output[] = {
     NULL
 };
 
+/* video vsync menu ("VideoVsyncMenu") */
+static const char *def_menu_video_vsync[] = {
+#if !defined(C_SDL2)
+    "vsync_on",
+    "vsync_force",
+    "vsync_host",
+    "vsync_off",
+    "--",
+    "vsync_set_syncrate",
+#endif
+    NULL
+};
+
 /* video overscan menu ("VideoOverscanMenu") */
 static const char *def_menu_video_overscan[] = {
     "overscan_0",
@@ -822,6 +835,9 @@ static const char *def_menu_video[] = {
     "scaler_forced",
     "VideoScalerMenu",
     "VideoOutputMenu",
+#if !defined(C_SDL2)
+    "VideoVsyncMenu",
+#endif
     "VideoOverscanMenu",
     "VideoCompatMenu",
     "VideoPC98Menu",
@@ -832,6 +848,9 @@ static const char *def_menu_video[] = {
 static const char *def_menu_sound[] = {
     "mapper_volup",
     "mapper_voldown",
+    "--",
+    "mixer_mute",
+    "mixer_swapstereo",
     NULL
 };
 
@@ -962,6 +981,9 @@ void ConstructMenu(void) {
 
     /* video output menu */
     ConstructSubMenu(mainMenu.get_item("VideoOutputMenu").get_master_id(), def_menu_video_output);
+
+    /* video vsync menu */
+    ConstructSubMenu(mainMenu.get_item("VideoVsyncMenu").get_master_id(), def_menu_video_vsync);
 
     /* video overscan menu */
     ConstructSubMenu(mainMenu.get_item("VideoOverscanMenu").get_master_id(), def_menu_video_overscan);
@@ -3967,6 +3989,20 @@ void DOSBoxMenu::removeFocus(void) {
     }
 }
 
+void DOSBoxMenu::setScale(size_t s) {
+    if (s == 0) s = 1;
+    if (s > 2) s = 2;
+
+    if (fontCharScale != s) {
+        fontCharScale = s;
+        menuBarHeight = menuBarHeightBase * fontCharScale;
+        fontCharWidth = fontCharWidthBase * fontCharScale;
+        fontCharHeight = fontCharHeightBase * fontCharScale;
+        updateRect();
+        layoutMenu();
+    }
+}
+
 void DOSBoxMenu::removeHover(void) {
     if (menuUserHoverAt != unassigned_item_handle) {
         get_item(menuUserHoverAt).removeHover(*this);
@@ -4036,7 +4072,7 @@ void DOSBoxMenu::item::layoutSubmenu(DOSBoxMenu &menu, bool isTopLevel) {
 
             item.screenBox.x = x;
             item.screenBox.y = popupBox.y;
-            item.screenBox.w = 5;
+            item.screenBox.w = 5 * menu.fontCharScale;
             item.screenBox.h = y - popupBox.y;
 
             minx = maxx = x = item.screenBox.x + item.screenBox.w;
@@ -4102,7 +4138,7 @@ void DOSBoxMenu::item::placeItemFinal(DOSBoxMenu &menu,int finalwidth,bool isTop
         /* from the right */
         rx = screenBox.w;
 
-        rx -= fontCharWidth;
+        rx -= menu.fontCharWidth;
 
         rx -= shortBox.w;
         shortBox.x = rx;
@@ -4134,18 +4170,18 @@ void DOSBoxMenu::item::placeItem(DOSBoxMenu &menu,int x,int y,bool isTopLevel) {
         screenBox.x = x;
         screenBox.y = y;
         screenBox.w = 0;
-        screenBox.h = fontCharHeight;
+        screenBox.h = menu.fontCharHeight;
 
         checkBox.x = 0;
         checkBox.y = 0;
-        checkBox.w = fontCharWidth;
-        checkBox.h = fontCharHeight;
+        checkBox.w = menu.fontCharWidth;
+        checkBox.h = menu.fontCharHeight;
         screenBox.w += checkBox.w;
 
         textBox.x = 0;
         textBox.y = 0;
-        textBox.w = fontCharWidth * text.length();
-        textBox.h = fontCharHeight;
+        textBox.w = menu.fontCharWidth * text.length();
+        textBox.h = menu.fontCharHeight;
         screenBox.w += textBox.w;
 
         shortBox.x = 0;
@@ -4153,19 +4189,19 @@ void DOSBoxMenu::item::placeItem(DOSBoxMenu &menu,int x,int y,bool isTopLevel) {
         shortBox.w = 0;
         shortBox.h = 0;
         if (!isTopLevel && !shortcut_text.empty()) {
-            screenBox.w += fontCharWidth;
-            shortBox.w += fontCharWidth * shortcut_text.length();
-            shortBox.h = fontCharHeight;
+            screenBox.w += menu.fontCharWidth;
+            shortBox.w += menu.fontCharWidth * shortcut_text.length();
+            shortBox.h = menu.fontCharHeight;
             screenBox.w += shortBox.w;
         }
 
-        screenBox.w += fontCharWidth;
+        screenBox.w += menu.fontCharWidth;
     }
     else {
         screenBox.x = x;
         screenBox.y = y;
-        screenBox.w = fontCharWidth * 2;
-        screenBox.h = 5;
+        screenBox.w = menu.fontCharWidth * 2;
+        screenBox.h = 5 * menu.fontCharScale;
 
         checkBox.x = 0;
         checkBox.y = 0;

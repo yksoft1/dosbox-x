@@ -1347,10 +1347,62 @@ void MenuDrawTextChar(int x,int y,unsigned char c,Bitu color) {
     }
 }
 
+void MenuDrawTextChar2x(int x,int y,unsigned char c,Bitu color) {
+    static const unsigned int fontHeight = 16;
+
+    if (x < 0 || y < 0 || (x+8) > sdl.surface->w || (y+fontHeight) > sdl.surface->h)
+        return;
+
+    unsigned char *bmp = (unsigned char*)int10_font_16 + (c * fontHeight);
+    unsigned char *scan;
+    uint32_t *row;
+
+    assert(sdl.surface->pixels != NULL);
+
+    scan  = (unsigned char*)sdl.surface->pixels;
+    scan += y * sdl.surface->pitch;
+    scan += x * ((sdl.surface->format->BitsPerPixel+7)/8);
+
+    for (unsigned int row=0;row < (fontHeight*2);row++) {
+        unsigned char rb = bmp[row>>1U];
+
+        if (sdl.surface->format->BitsPerPixel == 32) {
+            uint32_t *dp = (uint32_t*)scan;
+            for (unsigned int colm=0x80;colm != 0;colm >>= 1) {
+                if (rb & colm) {
+                    *dp++ = (uint32_t)color;
+                    *dp++ = (uint32_t)color;
+                }
+                else {
+                    dp += 2;
+                }
+            }
+        }
+        else if (sdl.surface->format->BitsPerPixel == 16) {
+            uint16_t *dp = (uint16_t*)scan;
+            for (unsigned int colm=0x80;colm != 0;colm >>= 1) {
+                if (rb & colm) {
+                    *dp++ = (uint16_t)color;
+                    *dp++ = (uint16_t)color;
+                }
+                else {
+                    dp += 2;
+                }
+            }
+        }
+
+        scan += sdl.surface->pitch;
+    }
+}
+
 void MenuDrawText(int x,int y,const char *text,Bitu color) {
     while (*text != 0) {
-        MenuDrawTextChar(x,y,(unsigned char)(*text++),color);
-        x += DOSBoxMenu::fontCharWidth;
+        if (mainMenu.fontCharScale >= 2)
+            MenuDrawTextChar2x(x,y,(unsigned char)(*text++),color);
+        else
+            MenuDrawTextChar(x,y,(unsigned char)(*text++),color);
+
+        x += mainMenu.fontCharWidth;
     }
 }
 
@@ -1394,7 +1446,7 @@ void DOSBoxMenu::item::drawMenuItem(DOSBoxMenu &menu) {
         MenuDrawText(screenBox.x+shortBox.x, screenBox.y+shortBox.y, shortcut_text.c_str(), fgshortcolor);
 
     if (type == submenu_type_id && borderTop/*not toplevel*/)
-        MenuDrawText(screenBox.x+screenBox.w - DOSBoxMenu::fontCharWidth - 1, screenBox.y+textBox.y, "\x10", fgcheckcolor);
+        MenuDrawText(screenBox.x+screenBox.w - mainMenu.fontCharWidth - 1, screenBox.y+textBox.y, "\x10", fgcheckcolor);
 
     if (type == separator_type_id)
         MenuDrawRect(screenBox.x, screenBox.y + (screenBox.h/2), screenBox.w, 1, fgcolor);
@@ -1596,6 +1648,23 @@ dosurface:
 			sdl.clip.x=0;
             sdl.clip.y=0;
 
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+            /* scale the menu bar if the window is large enough */
+            {
+                Bitu consider_height = menu.maxwindow ? currentWindowHeight : height;
+                Bitu consider_width = menu.maxwindow ? currentWindowWidth : width;
+                Bitu final_height = max(max(consider_height,userResizeWindowHeight),(Bitu)(sdl.clip.y+sdl.clip.h));
+                Bitu final_width = max(max(consider_width,userResizeWindowWidth),(Bitu)(sdl.clip.x+sdl.clip.w));
+                Bitu scale = 1;
+
+                while ((final_width/scale) >= (640*2) && (final_height/scale) >= (400*2))
+                    scale++;
+
+                LOG_MSG("menuScale=%lu",(unsigned long)scale);
+                mainMenu.setScale(scale);
+            }
+#endif
+
 			/* center the screen in the window */
 			{
                 int menuheight = 0;
@@ -1604,6 +1673,18 @@ dosurface:
 #endif
                 Bitu consider_height = menu.maxwindow ? currentWindowHeight : (height + menuheight + (sdl.overscan_width * 2));
                 Bitu consider_width = menu.maxwindow ? currentWindowWidth : (width + (sdl.overscan_width * 2));
+
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+                if (mainMenu.isVisible()) {
+                    /* enforce a minimum 640x400 surface size.
+                     * the menus are useless below 640x400 */
+                    if (consider_width < (640+(sdl.overscan_width * 2)))
+                        consider_width = (640+(sdl.overscan_width * 2));
+                    if (consider_height < (400+(sdl.overscan_width * 2)+menuheight))
+                        consider_height = (400+(sdl.overscan_width * 2)+menuheight);
+                }
+#endif
+
                 int final_height = max(max(consider_height,userResizeWindowHeight),(Bitu)(sdl.clip.y+sdl.clip.h)) - menuheight - (sdl.overscan_width * 2);
                 int final_width = max(max(consider_width,userResizeWindowWidth),(Bitu)(sdl.clip.x+sdl.clip.w)) - (sdl.overscan_width * 2);
 				int ax = (final_width - (sdl.clip.x + sdl.clip.w)) / 2;
@@ -1922,8 +2003,8 @@ dosurface:
 			}
 		}
 		else {
-			int final_height = max(sdl.clip.h, userResizeWindowHeight);
-			int final_width = max(sdl.clip.w, userResizeWindowWidth);
+			int final_height = max((Bitu)sdl.clip.h, userResizeWindowHeight);
+			int final_width = max((Bitu)sdl.clip.w, userResizeWindowWidth);
 
 			window_width = final_width;
 			window_height = final_height;
@@ -5244,7 +5325,7 @@ void SDL_SetupConfigSection() {
 #ifdef __WIN32__
 # if defined(HX_DOS)
 		Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "surface"); /* HX DOS should stick to surface */
-# elif defined(__MINGW32__)
+# elif defined(__MINGW32__) && !(HAVE_D3D9_H)
 		Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "opengl"); /* MinGW builds do not yet have Direct3D */
 # else
 		Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "direct3d");
@@ -6078,6 +6159,22 @@ bool scaler_forced_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * cons
     return true;
 }
 
+void MENU_swapstereo(bool enabled);
+bool MENU_get_swapstereo(void);
+
+bool mixer_swapstereo_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    MENU_swapstereo(!MENU_get_swapstereo());
+    return true;
+}
+
+void MENU_mute(bool enabled);
+bool MENU_get_mute(void);
+
+bool mixer_mute_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    MENU_mute(!MENU_get_mute());
+    return true;
+}
+
 bool vid_pc98_5mhz_gdc_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     if (IS_PC98_ARCH) {
         void gdc_5mhz_mode_update_vars(void);
@@ -6243,6 +6340,33 @@ void UpdateOverscanMenu(void) {
         sprintf(tmp,"overscan_%zu",i);
         mainMenu.get_item(tmp).check(sdl.overscan_width == i).refresh_item(mainMenu);
     }
+}
+
+bool vsync_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+#if !defined(C_SDL2)
+    const char *val = menuitem->get_name().c_str();
+    if (!strncmp(val,"vsync_",6))
+        val += 6;
+    else
+        return true;
+
+	SetVal("vsync", "vsyncmode", val);
+
+	void change_output(int output);
+	change_output(8);
+
+    VGA_Vsync VGA_Vsync_Decode(const char *vsyncmodestr);
+    void VGA_VsyncUpdateMode(VGA_Vsync vsyncmode);
+	VGA_VsyncUpdateMode(VGA_Vsync_Decode(val));
+#endif
+    return true;
+}
+
+bool vsync_set_syncrate_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+#if !defined(C_SDL2)
+    GUI_Shortcut(17);
+#endif
+    return true;
 }
 
 bool output_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
@@ -6902,6 +7026,21 @@ int main(int argc, char* argv[]) {
                     set_callback_function(output_menu_callback);
             }
             {
+                DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoVsyncMenu");
+                item.set_text("V-Sync");
+
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"vsync_on").set_text("On").
+                    set_callback_function(vsync_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"vsync_force").set_text("Force").
+                    set_callback_function(vsync_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"vsync_host").set_text("Host").
+                    set_callback_function(vsync_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"vsync_off").set_text("Off").
+                    set_callback_function(vsync_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"vsync_set_syncrate").set_text("Set syncrate").
+                    set_callback_function(vsync_set_syncrate_menu_callback);
+            }
+            {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoOverscanMenu");
                 item.set_text("Overscan");
 
@@ -6942,6 +7081,13 @@ int main(int argc, char* argv[]) {
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"SoundMenu");
             item.set_text("Sound");
+
+            {
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"mixer_swapstereo").set_text("Swap stereo").
+                    set_callback_function(mixer_swapstereo_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"mixer_mute").set_text("Mute").
+                    set_callback_function(mixer_mute_menu_callback);
+            }
         }
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"DOSMenu");
@@ -7109,6 +7255,12 @@ int main(int argc, char* argv[]) {
 		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, "desktop.doublebuf", 0));
 		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
 		mainMenu.alloc_item(DOSBoxMenu::item_type_id,"showdetails").set_text("Show details").set_callback_function(showdetails_menu_callback).check(!menu.hidecycles);
+
+        bool MENU_get_swapstereo(void);
+        mainMenu.get_item("mixer_swapstereo").check(MENU_get_swapstereo()).refresh_item(mainMenu);
+
+        bool MENU_get_mute(void);
+        mainMenu.get_item("mixer_mute").check(MENU_get_mute()).refresh_item(mainMenu);
 
         mainMenu.get_item("scaler_forced").check(render.scale.forced);
 
