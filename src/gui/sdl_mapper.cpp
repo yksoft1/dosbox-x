@@ -34,6 +34,7 @@
 #include "pic.h"
 #include "control.h"
 #include "joystick.h"
+#include "keymap.h"
 #include "support.h"
 #include "mapper.h"
 #include "setup.h"
@@ -706,7 +707,50 @@ public:
 			return 0; // ignore up event
 		}
 #endif
-		if (event->type==SDL_KEYDOWN) ActivateBindList(&lists[key],0x7fff,true);
+
+#if !defined(C_SDL2)
+        /* HACK: As requested on the issue tracker, on US keyboards, remap the Windows menu key
+         *       to the "Ro" key.
+         *
+         *       If the user has un-bound the Ro key, then allow the menu key to go through
+         *       unmodified.
+         *
+         * TODO: I understand that later PC-9821 systems (post Windows 95, prior to the platform's
+         *       demise) actually did have Windows and Windows Menu keys.
+         *
+         *       I also understand from "Undocumented PC-98" that the actual keyboards for backwards
+         *       compat reasons will not send these key codes unless a byte is sent to the keyboard
+         *       on Windows 95 startup to tell the keyboard that it can send those keys.
+         *
+         *       This would explain why if you boot a PC-9821 system into Windows 95 "Safe mode"
+         *       the Windows key does not work.
+         *
+         *       So later on, this remap should disable itself IF that byte is sent to signal
+         *       Windows 95 is running and the Windows keys should be enabled. */
+        if (IS_PC98_ARCH && host_keyboard_layout != DKM_JPN && key == SDLK_MENU) {
+            CEvent *x = get_mapper_event_by_name("key_jp_ro");
+            bool RoMenuRemap = false;
+
+            if (x != NULL) {
+                if (!x->bindlist.empty()) {
+                    RoMenuRemap = true;
+
+                    /* but, if the Ro key has been bound to Menu, do not remap */
+                    auto &i = x->bindlist.front();
+                    if (i->type == CBind::keybind_t) {
+                        auto ik = reinterpret_cast<CKeyBind*>(i);
+                        RoMenuRemap = false;
+                        if (ik->key == SDLK_JP_RO)
+                            RoMenuRemap = true;
+                    }
+                }
+            }
+
+            if (RoMenuRemap) key = SDLK_JP_RO;
+        }
+#endif
+
+        if (event->type==SDL_KEYDOWN) ActivateBindList(&lists[key],0x7fff,true);
 		else DeactivateBindList(&lists[key],true);
 		return 0;
 	}
