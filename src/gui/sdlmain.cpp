@@ -1466,8 +1466,10 @@ void DOSBoxMenu::displaylist::DrawDisplayList(DOSBoxMenu &menu,bool updateScreen
     }
 }
 
+bool DOSBox_isMenuVisible(void);
+
 void GFX_DrawSDLMenu(DOSBoxMenu &menu,DOSBoxMenu::displaylist &dl) {
-    if (menu.needsRedraw() && !sdl.updating && !sdl.desktop.fullscreen) {
+    if (menu.needsRedraw() && DOSBox_isMenuVisible() && !sdl.updating && !sdl.desktop.fullscreen) {
         if (SDL_MUSTLOCK(sdl.surface))
             SDL_LockSurface(sdl.surface);
 
@@ -1689,6 +1691,8 @@ dosurface:
                 int final_width = max(max(consider_width,userResizeWindowWidth),(Bitu)(sdl.clip.x+sdl.clip.w)) - (sdl.overscan_width * 2);
 				int ax = (final_width - (sdl.clip.x + sdl.clip.w)) / 2;
 				int ay = (final_height - (sdl.clip.y + sdl.clip.h)) / 2;
+                if (ax < 0) ax = 0;
+                if (ay < 0) ay = 0;
 				sdl.clip.x += ax + sdl.overscan_width;
 				sdl.clip.y += ay + sdl.overscan_width;
 //				sdl.clip.w = currentWindowWidth - sdl.clip.x;
@@ -2930,19 +2934,21 @@ void GFX_EndUpdate( const Bit16u *changedLines ) {
 		break;
 #endif
 	default:
-		break;
-	}
+        break;
+    }
 
-    sdl.must_redraw_all = false;
+    if (changedLines != NULL) {
+        sdl.must_redraw_all = false;
 
-    if (changedLines != NULL && sdl.deferred_resize) {
-        sdl.deferred_resize = false;
+        if (changedLines != NULL && sdl.deferred_resize) {
+            sdl.deferred_resize = false;
 #if defined(C_SDL2)
 #else
-        void GFX_RedrawScreen(Bit32u nWidth, Bit32u nHeight);
+            void GFX_RedrawScreen(Bit32u nWidth, Bit32u nHeight);
 
-        GFX_RedrawScreen(sdl.draw.width, sdl.draw.height);
+            GFX_RedrawScreen(sdl.draw.width, sdl.draw.height);
 #endif
+        }
     }
 }
 
@@ -3382,17 +3388,20 @@ static void RedrawScreen(Bit32u nWidth, Bit32u nHeight) {
 	height=sdl.draw.height;
 #endif
 	void RENDER_CallBack( GFX_CallBackFunctions_t function );
+#if 0
 	while (sdl.desktop.fullscreen) {
 		int temp_size;
 		temp_size=render.scale.size;
 		if(!sdl.desktop.fullscreen) { render.scale.size=temp_size; RENDER_CallBack( GFX_CallBackReset); return; }
     }
+#endif
 #ifdef WIN32
 	if(menu.resizeusing) {
 		RENDER_CallBack( GFX_CallBackReset);
 		return;
 	}
 #endif
+#if 0 /* FIXME: This code misbehaves when doublescan=false on Linux/X11 */
 	if((Bitu)nWidth == (Bitu)width && (Bitu)nHeight == (Bitu)height) {
 		RENDER_CallBack( GFX_CallBackReset);
 		return;
@@ -3438,6 +3447,7 @@ static void RedrawScreen(Bit32u nWidth, Bit32u nHeight) {
 				break;
 		}
 	}
+#endif
     RENDER_CallBack( GFX_CallBackReset);
 }
 
@@ -3515,14 +3525,8 @@ static void HandleVideoResize(void * event) {
     if (NonUserResizeCounter > 0)
         NonUserResizeCounter--;
 
-    if (sdl.updating && !GFX_MustActOnResize()) {
-        /* act on resize when updating is complete */
-        sdl.deferred_resize = true;
-    }
-    else {
-        sdl.deferred_resize = false;
-        RedrawScreen(ResizeEvent->w, ResizeEvent->h);
-    }
+    /* act on resize when updating is complete */
+    sdl.deferred_resize = true;
 
 /*	if(sdl.desktop.want_type!=SCREEN_DIRECT3D) {
 		HWND hwnd=GetHWND();
