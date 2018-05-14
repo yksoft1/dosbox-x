@@ -621,7 +621,6 @@ static const char *def_menu__toplevel[] = {
     "SoundMenu",
     "DOSMenu",
     "CaptureMenu",
-    "DriveMenu",
     NULL
 };
 
@@ -844,6 +843,32 @@ static const char *def_menu_video[] = {
     NULL
 };
 
+/* DOS menu ("DOSMenu") */
+static const char *def_menu_dos[] = {
+    "DOSMouseMenu",
+    "--",
+    "DOSPC98Menu",
+    NULL
+};
+
+/* DOS mouse menu ("DOSMouseMenu") */
+static const char *def_menu_dos_mouse[] = {
+    "dos_mouse_enable_int33",
+    "dos_mouse_y_axis_reverse",
+#if !defined(C_SDL2)
+    "--",
+    "dos_mouse_sensitivity",
+#endif
+    NULL
+};
+
+/* DOS pc-98 menu ("DOSPC98Menu") */
+static const char *def_menu_dos_pc98[] = {
+    "dos_pc98_pit_4mhz",
+    "dos_pc98_pit_5mhz",
+    NULL
+};
+
 /* sound menu ("SoundMenu") */
 static const char *def_menu_sound[] = {
     "mapper_volup",
@@ -997,6 +1022,15 @@ void ConstructMenu(void) {
     /* sound menu */
     ConstructSubMenu(mainMenu.get_item("SoundMenu").get_master_id(), def_menu_sound);
 
+    /* DOS menu */
+    ConstructSubMenu(mainMenu.get_item("DOSMenu").get_master_id(), def_menu_dos);
+
+    /* DOS mouse menu */
+    ConstructSubMenu(mainMenu.get_item("DOSMouseMenu").get_master_id(), def_menu_dos_mouse);
+
+    /* DOS PC-98 menu */
+    ConstructSubMenu(mainMenu.get_item("DOSPC98Menu").get_master_id(), def_menu_dos_pc98);
+
     /* capture menu */
     ConstructSubMenu(mainMenu.get_item("CaptureMenu").get_master_id(), def_menu_capture);
 }
@@ -1014,7 +1048,7 @@ void SetScaleForced(bool forced)
 {
 	render.scale.forced = forced;
 	RENDER_CallBack(GFX_CallBackReset);
-    mainMenu.get_item("scaler_forced").check(render.scale.forced);
+    mainMenu.get_item("scaler_forced").check(render.scale.forced).refresh_item(mainMenu);
 }
 
 // Sets the scaler to use.
@@ -1091,7 +1125,7 @@ bool DOSBox_isMenuVisible(void) {
 void DOSBox_SetMenu(void) {
 # if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     /* FIXME: SDL menu is NOT AVAILABLE if OpenGL surface is used */
-    if (!OpenGL_using()) {
+    {
         menu.toggle=true;
         mainMenu.showMenu();
         mainMenu.setRedraw();
@@ -1103,7 +1137,7 @@ void DOSBox_SetMenu(void) {
 void DOSBox_NoMenu(void) {
 # if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     /* FIXME: SDL menu is NOT AVAILABLE if OpenGL surface is used */
-    if (!OpenGL_using()) {
+    {
         menu.toggle=false;
         mainMenu.showMenu(false);
         mainMenu.setRedraw();
@@ -4198,6 +4232,9 @@ void DOSBoxMenu::item::placeItem(DOSBoxMenu &menu,int x,int y,bool isTopLevel) {
             shortBox.h = menu.fontCharHeight;
             screenBox.w += shortBox.w;
         }
+
+        if (!isTopLevel && type == submenu_type_id)
+            screenBox.w += menu.fontCharWidth;
 
         screenBox.w += menu.fontCharWidth;
     }

@@ -24,6 +24,7 @@
 #include "regs.h"
 #include "control.h"
 #include "shell.h"
+#include "menu.h"
 #include "callback.h"
 #include "support.h"
 #include "builtin.h"
@@ -959,6 +960,7 @@ void SHELL_Init() {
 	env_write+=2;
 	MEM_BlockWrite(env_write,full_name,(Bitu)(strlen(full_name)+1));
 
+    extern bool Mouse_Vertical;
 	extern bool Mouse_Drv;
 	Mouse_Drv = true;
 
