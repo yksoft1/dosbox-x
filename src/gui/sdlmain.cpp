@@ -2066,6 +2066,8 @@ dosurface:
 		}
 		sdl.opengl.pitch=width*4;
 
+		glBindTexture(GL_TEXTURE_2D,0);
+
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
         if (SDLDrawGenFontTextureInit) {
             glDeleteTextures(1,&SDLDrawGenFontTexture);
@@ -2139,6 +2141,8 @@ dosurface:
 		glEnd();
 		glEndList();
 
+		glBindTexture(GL_TEXTURE_2D,0);
+
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
         void GFX_DrawSDLMenu(DOSBoxMenu &menu,DOSBoxMenu::displaylist &dl);
         mainMenu.setRedraw();
@@ -2146,10 +2150,15 @@ dosurface:
 
 //      FIXME: Why do we have to reinitialize the font texture?
         /*if (!SDLDrawGenFontTextureInit) */{
+            GLuint err;
+
+            glGetError(); /* read and discard last error */
+
             SDLDrawGenFontTexture = (GLuint)(~0UL);
             glGenTextures(1,&SDLDrawGenFontTexture);
-            if (SDLDrawGenFontTexture == (GLuint)(~0UL) || glGetError() != 0) {
-                LOG_MSG("WARNING: Unable to make font texture");
+            if (SDLDrawGenFontTexture == (GLuint)(~0UL) || (err=glGetError()) != 0) {
+                LOG_MSG("WARNING: Unable to make font texture. id=%llu err=%lu",
+                    (unsigned long long)SDLDrawGenFontTexture,(unsigned long)err);
             }
             else {
                 LOG_MSG("font texture id=%lu will make %u x %u",
@@ -2192,7 +2201,7 @@ dosurface:
                     }
                 }
 
-                glBindTexture(GL_TEXTURE_2D, sdl.opengl.texture);
+                glBindTexture(GL_TEXTURE_2D,0);
             }
         }
 #endif
@@ -7882,7 +7891,7 @@ int main(int argc, char* argv[]) {
 
         mainMenu.rebuild();
 
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
 		/* -- menu */
 		MainMenu = mainMenu.getWinMenu();
         DOSBox_SetMenu();
@@ -7898,7 +7907,7 @@ int main(int argc, char* argv[]) {
         mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
 #endif
 
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
 		int Reflect_Menu(void);
 		Reflect_Menu();
 #endif

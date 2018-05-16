@@ -1115,15 +1115,17 @@ MENU_Block menu;
 unsigned int hdd_defsize=16000;
 char hdd_size[20]="";
 
-#if !(defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS))
-bool OpenGL_using(void);
-
 bool DOSBox_isMenuVisible(void) {
     return menu.toggle;
 }
 
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
+extern "C" void SDL1_hax_SetMenu(HMENU menu);
+extern HMENU MainMenu;
+#endif
+
 void DOSBox_SetMenu(void) {
-# if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     /* FIXME: SDL menu is NOT AVAILABLE if OpenGL surface is used */
     {
         menu.toggle=true;
@@ -1131,11 +1133,32 @@ void DOSBox_SetMenu(void) {
         mainMenu.setRedraw();
         GFX_ResetScreen();
     }
-# endif
+#endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
+	if(!menu.gui) return;
+
+    if (MainMenu == NULL) return;
+
+	LOG(LOG_MISC,LOG_DEBUG)("Win32: loading and attaching menu resource to DOSBox's window");
+
+	menu.toggle=true;
+    NonUserResizeCounter=1;
+	SDL1_hax_SetMenu(MainMenu);
+	mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
+
+	Reflect_Menu();
+
+	if(menu.startup) {
+		RENDER_CallBack( GFX_CallBackReset );
+	}
+
+    void DOSBox_SetSysMenu(void);
+    DOSBox_SetSysMenu();
+#endif
 }
 
 void DOSBox_NoMenu(void) {
-# if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     /* FIXME: SDL menu is NOT AVAILABLE if OpenGL surface is used */
     {
         menu.toggle=false;
@@ -1143,8 +1166,46 @@ void DOSBox_NoMenu(void) {
         mainMenu.setRedraw();
         GFX_ResetScreen();
     }
-# endif
+#endif
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
+	if(!menu.gui) return;
+	menu.toggle=false;
+    NonUserResizeCounter=1;
+	SDL1_hax_SetMenu(NULL);
+	mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
+	RENDER_CallBack( GFX_CallBackReset );
+
+    void DOSBox_SetSysMenu(void);
+    DOSBox_SetSysMenu();
+#endif
 }
+
+void ToggleMenu(bool pressed) {
+    bool GFX_GetPreventFullscreen(void);
+
+    /* prevent removing the menu in 3Dfx mode */
+    if (GFX_GetPreventFullscreen())
+        return;
+
+    menu.resizeusing=true;
+	int width, height; bool fullscreen;
+	void GFX_GetSize(int &width, int &height, bool &fullscreen);
+	GFX_GetSize(width, height, fullscreen);
+    if(!menu.gui || !pressed || fullscreen) return;
+	if(!menu.toggle) {
+		menu.toggle=true;
+		DOSBox_SetMenu();
+	} else {
+		menu.toggle=false;
+		DOSBox_NoMenu();
+	}
+
+    void DOSBox_SetSysMenu(void);
+	DOSBox_SetSysMenu();
+}
+
+#if !(defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS))
+bool OpenGL_using(void);
 
 int Reflect_Menu(void) {
     return 0;
@@ -1885,45 +1946,6 @@ void DOSBox_SetSysMenu(void) {
 #endif
 }
 
-extern "C" void SDL1_hax_SetMenu(HMENU menu);
-extern HMENU MainMenu;
-
-void DOSBox_SetMenu(void) {
-#if !defined(HX_DOS)
-	if(!menu.gui) return;
-
-    if (MainMenu == NULL) return;
-
-	LOG(LOG_MISC,LOG_DEBUG)("Win32: loading and attaching menu resource to DOSBox's window");
-
-	menu.toggle=true;
-    NonUserResizeCounter=1;
-	SDL1_hax_SetMenu(MainMenu);
-	mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
-
-	Reflect_Menu();
-
-	if(menu.startup) {
-		RENDER_CallBack( GFX_CallBackReset );
-	}
-
-    void DOSBox_SetSysMenu(void);
-    DOSBox_SetSysMenu();
-#endif
-}
-
-void DOSBox_NoMenu(void) {
-	if(!menu.gui) return;
-	menu.toggle=false;
-    NonUserResizeCounter=1;
-	SDL1_hax_SetMenu(NULL);
-	mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
-	RENDER_CallBack( GFX_CallBackReset );
-
-    void DOSBox_SetSysMenu(void);
-    DOSBox_SetSysMenu();
-}
-
 void DOSBox_CheckOS(int &id, int &major, int &minor) {
 	OSVERSIONINFO osi;
 	ZeroMemory(&osi, sizeof(OSVERSIONINFO));
@@ -1943,7 +1965,7 @@ bool DOSBox_Kor(void) {
 }
 
 void DOSBox_RefreshMenu(void) {
-#if !defined(HX_DOS)
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
     int width, height; bool fullscreen;
     void GFX_GetSize(int &width, int &height, bool &fullscreen);
     GFX_GetSize(width,height,fullscreen);
@@ -1972,7 +1994,7 @@ void DOSBox_RefreshMenu(void) {
 }
 
 void DOSBox_RefreshMenu2(void) {
-#if !defined(HX_DOS)
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
 	if(!menu.gui) return;
    int width, height; bool fullscreen;
    void GFX_GetSize(int &width, int &height, bool &fullscreen);
@@ -1998,28 +2020,6 @@ void DOSBox_RefreshMenu2(void) {
     void DOSBox_SetSysMenu(void);
     DOSBox_SetSysMenu();
 #endif
-}
-
-void ToggleMenu(bool pressed) {
-    bool GFX_GetPreventFullscreen(void);
-
-    /* prevent removing the menu in 3Dfx mode */
-    if (GFX_GetPreventFullscreen())
-        return;
-
-    menu.resizeusing=true;
-	int width, height; bool fullscreen;
-	void GFX_GetSize(int &width, int &height, bool &fullscreen);
-	GFX_GetSize(width, height, fullscreen);
-    if(!menu.gui || !pressed || fullscreen) return;
-	if(!menu.toggle) {
-		menu.toggle=true;
-		DOSBox_SetMenu();
-	} else {
-		menu.toggle=false;
-		DOSBox_NoMenu();
-	}
-	DOSBox_SetSysMenu();
 }
 
 void MENU_Check_Drive(HMENU handle, int cdrom, int floppy, int local, int image, int automount, int umount, char drive) {
@@ -3009,7 +3009,7 @@ void reflectmenu_INITMENU_cb() {
 }
 
 void MSG_WM_COMMAND_handle(SDL_SysWMmsg &Message) {
-#if !defined(HX_DOS)
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
 	bool GFX_GetPreventFullscreen(void);
 
 	if (!menu.gui || GetSetSDLValue(1, "desktop.fullscreen", 0)) return;
@@ -3945,27 +3945,6 @@ void MSG_WM_COMMAND_handle(SDL_SysWMmsg &Message) {
 }
 #else
 void DOSBox_SetSysMenu(void) {
-}
-void ToggleMenu(bool pressed) {
-    bool GFX_GetPreventFullscreen(void);
-
-    /* prevent removing the menu in 3Dfx mode */
-    if (GFX_GetPreventFullscreen())
-        return;
-
-    menu.resizeusing=true;
-	int width, height; bool fullscreen;
-	void GFX_GetSize(int &width, int &height, bool &fullscreen);
-	GFX_GetSize(width, height, fullscreen);
-    if(!menu.gui || !pressed || fullscreen) return;
-	if(!menu.toggle) {
-		menu.toggle=true;
-		DOSBox_SetMenu();
-	} else {
-		menu.toggle=false;
-		DOSBox_NoMenu();
-	}
-	DOSBox_SetSysMenu();
 }
 #endif
 
