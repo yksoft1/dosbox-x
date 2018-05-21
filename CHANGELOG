@@ -1,4 +1,23 @@
 0.82.7 (next)
+  - Added code to auto-detect the VirtualBox display driver
+    in Windows build, because OpenGL output doesn't work
+    in Windows XP under VirtualBox. The change will switch
+    the default output to "surface" if VirtualBox is detected,
+    else will retain the "opengl" default. This change applies
+    only to MinGW builds and not HX DOS or main VS2017 builds.
+  - Added PC-98 INT DCh emulation for function call that
+    writes a char to the screen, allowing Eve Burst Error
+    to clear the function row
+  - Added command line option to allow skipping the 1-second
+    wait in the BIOS startup screen.
+  - SDL2 builds now support use of the SDL drawn menu with
+    a touchscreen device.
+  - Fixed up SDL2 support code to compile correctly on
+    Mac OS X.
+  - Fixed up SDL2 compilation to automatically use the
+    SDL2 library on the system, or if that is not available,
+    use the SDL2 library in-tree. There are no plans to make
+    modifications to the in-tree SDL2 code.
   - Added code to read and discard OpenGL error code before
     creating font texture, to avoid false failure handling.
     This fixes font rendering on Windows MinGW builds when

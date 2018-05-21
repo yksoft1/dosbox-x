@@ -2548,7 +2548,7 @@ static Bitu INT18_PC98_Handler(void) {
                 }
                 else if ((reg_dh & 0xFC) == 0x28) { /* 8x16 kanji */
                     i = (reg_bx << 4) + reg_cx + 2;
-                    mem_writew(i-2,0x0202);
+                    mem_writew(i-2,0x0102);
                     for (r=0;r < 16;r++) {
                         o = (((((reg_dl & 0x7F)*128)+((reg_dh - 0x20) & 0x7F))*16)+r)*2;
 
@@ -3063,7 +3063,7 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
             while (size > 0) {
                 accsize = size > unitsize ? unitsize : size;
 
-                if (floppy->Read_Sector(fdc_head[drive],fdc_cyl[drive],fdc_sect[drive],PC98_BIOS_FLOPPY_BUFFER) != 0) {
+                if (floppy->Read_Sector(fdc_head[drive],fdc_cyl[drive],fdc_sect[drive],PC98_BIOS_FLOPPY_BUFFER,unitsize) != 0) {
                     CALLBACK_SCF(true);
                     reg_ah = 0x00;
                     /* TODO? Error code? */
@@ -3157,7 +3157,7 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 for (unsigned int i=0;i < accsize;i++)
                     PC98_BIOS_FLOPPY_BUFFER[i] = mem_readb(memaddr+i);
 
-                if (floppy->Write_Sector(fdc_head[drive],fdc_cyl[drive],fdc_sect[drive],PC98_BIOS_FLOPPY_BUFFER) != 0) {
+                if (floppy->Write_Sector(fdc_head[drive],fdc_cyl[drive],fdc_sect[drive],PC98_BIOS_FLOPPY_BUFFER,unitsize) != 0) {
                     CALLBACK_SCF(true);
                     reg_ah = 0x00;
                     /* TODO? Error code? */
@@ -3476,7 +3476,34 @@ static Bitu INTGEN_PC98_Handler(void) {
     return CBRET_NONE;
 }
 
+/* This interrupt should only exist while the DOS kernel is active.
+ * On actual PC-98 MS-DOS this is a direct interface to MS-DOS's built-in ANSI CON driver.
+ *
+ * CL = major function call number
+ * AL = minor function call number
+ * DX = data?? */
+extern bool dos_kernel_disabled;
+
+void PC98_INTDC_WriteChar(unsigned char b);
+
 static Bitu INTDC_PC98_Handler(void) {
+    if (dos_kernel_disabled) goto unknown;
+
+    switch (reg_cl) {
+        case 0x10:
+            if (reg_ah == 0x00) { /* CL=0x10 AL=0x00 DL=char write char to CON */
+                PC98_INTDC_WriteChar(reg_dl);
+                goto done;
+            }
+            goto unknown;
+        default: /* some compilers don't like not having a default case */
+            goto unknown;
+    };
+
+done:
+    return CBRET_NONE;
+
+unknown:
     LOG_MSG("PC-98 INT DCh unknown call AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X",
         reg_ax,
         reg_bx,
@@ -5201,6 +5228,9 @@ private:
             else                                /* 128KB */
                 memsize_real_code = 0;
 
+            void pc98_msw3_set_ramsize(const unsigned char b);
+            pc98_msw3_set_ramsize(memsize_real_code);
+
             /* CPU/Display */
             /* bit[7:7] = 486SX equivalent (?)                                                                      1=yes
              * bit[6:6] = PC-9821 Extended Graph Architecture supported (FIXME: Is this the same as having EGC?)    1=yes
@@ -6395,20 +6425,39 @@ private:
 		//       a "BIOS setup" screen where all DOSBox configuration options can be
 		//       modified, with the same look and feel of an old BIOS.
 
-		bool wait_for_user = false;
-		Bit32u lasttick=GetTicks();
-		while ((GetTicks()-lasttick)<1000) {
-            if (machine == MCH_PC98) {
-                reg_eax = 0x0100;   // sense key
-                CALLBACK_RunRealInt(0x18);
-                SETFLAGBIT(ZF,reg_bh == 0);
-            }
-            else {
-                reg_eax = 0x0100;
-                CALLBACK_RunRealInt(0x16);
+        if (!control->opt_fastbioslogo) {
+            bool wait_for_user = false;
+            Bit32u lasttick=GetTicks();
+            while ((GetTicks()-lasttick)<1000) {
+                if (machine == MCH_PC98) {
+                    reg_eax = 0x0100;   // sense key
+                    CALLBACK_RunRealInt(0x18);
+                    SETFLAGBIT(ZF,reg_bh == 0);
+                }
+                else {
+                    reg_eax = 0x0100;
+                    CALLBACK_RunRealInt(0x16);
+                }
+
+                if (!GETFLAG(ZF)) {
+                    if (machine == MCH_PC98) {
+                        reg_eax = 0x0000;   // read key
+                        CALLBACK_RunRealInt(0x18);
+                    }
+                    else {
+                        reg_eax = 0x0000;
+                        CALLBACK_RunRealInt(0x16);
+                    }
+
+                    if (reg_al == 32) { // user hit space
+                        BIOS_Int10RightJustifiedPrint(x,y,"Hit ENTER or ESC to continue                    \n"); // overprint
+                        wait_for_user = true;
+                        break;
+                    }
+                }
             }
 
-			if (!GETFLAG(ZF)) {
+            while (wait_for_user) {
                 if (machine == MCH_PC98) {
                     reg_eax = 0x0000;   // read key
                     CALLBACK_RunRealInt(0x18);
@@ -6418,26 +6467,9 @@ private:
                     CALLBACK_RunRealInt(0x16);
                 }
 
-				if (reg_al == 32) { // user hit space
-					BIOS_Int10RightJustifiedPrint(x,y,"Hit ENTER or ESC to continue                    \n"); // overprint
-					wait_for_user = true;
-					break;
-				}
-			}
-		}
-
-        while (wait_for_user) {
-            if (machine == MCH_PC98) {
-                reg_eax = 0x0000;   // read key
-                CALLBACK_RunRealInt(0x18);
+                if (reg_al == 27/*ESC*/ || reg_al == 13/*ENTER*/)
+                    break;
             }
-            else {
-                reg_eax = 0x0000;
-                CALLBACK_RunRealInt(0x16);
-            }
-
-            if (reg_al == 27/*ESC*/ || reg_al == 13/*ENTER*/)
-                break;
         }
 
         if (machine == MCH_PC98) {
