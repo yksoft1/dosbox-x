@@ -6322,38 +6322,6 @@ private:
             }
         }
 
-		if (cpu.pmode) E_Exit("BIOS error: ADAPTER ROM function called while in protected/vm86 mode");
-
-		while (adapter_scan_start < 0xF0000) {
-			if (AdapterROM_Read(adapter_scan_start,&size)) {
-				Bit16u segm = (Bit16u)(adapter_scan_start >> 4);
-
-				LOG(LOG_MISC,LOG_DEBUG)("BIOS ADAPTER ROM scan found ROM at 0x%lx (size=%lu)",(unsigned long)adapter_scan_start,size);
-
-				c1 = mem_readd(adapter_scan_start+3);
-				adapter_scan_start += size;
-				if (c1 != 0UL) {
-					LOG(LOG_MISC,LOG_DEBUG)("Running ADAPTER ROM entry point");
-
-					// step back into the callback instruction that triggered this call
-					reg_eip -= 4;
-
-					// FAR CALL into the VGA BIOS
-					CPU_CALL(false,segm,0x0003,reg_eip);
-					return CBRET_NONE;
-				}
-				else {
-					LOG(LOG_MISC,LOG_DEBUG)("FIXME: ADAPTER ROM entry point does not exist");
-				}
-			}
-			else {
-				if (IS_EGAVGA_ARCH) // supposedly newer systems only scan on 2KB boundaries by standard? right?
-					adapter_scan_start = (adapter_scan_start | 2047UL) + 1UL;
-				else // while older PC/XT systems scanned on 512-byte boundaries? right?
-					adapter_scan_start = (adapter_scan_start | 511UL) + 1UL;
-			}
-		}
-
 		LOG(LOG_MISC,LOG_DEBUG)("BIOS ADAPTER ROM scan complete");
 		return CBRET_NONE;
 	}
@@ -6395,13 +6363,6 @@ private:
 			rowheight = 8;
 			reg_eax = 6;		// 640x200 2-color
 			CALLBACK_RunRealInt(0x10);
-
-            DrawDOSBoxLogoVGA(logo_x*8,logo_y*rowheight);
-        }
-        else if (machine == MCH_CGA || machine == MCH_PCJR || machine == MCH_AMSTRAD || machine == MCH_TANDY) {
-            rowheight = 8;
-            reg_eax = 6;        // 640x200 2-color
-            CALLBACK_RunRealInt(0x10);
 
             DrawDOSBoxLogoCGA6(logo_x*8,logo_y*rowheight);
         }
