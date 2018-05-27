@@ -39,7 +39,6 @@ using namespace std;
 static bool has_LOG_Init = false;
 static bool has_LOG_EarlyInit = false;
 static bool do_LOG_stderr = false;
-static bool logBuffHasDiscarded = false;
 
 bool logBuffSuppressConsole = false;
 bool logBuffSuppressConsoleNeedUpdate = false;
@@ -48,6 +47,8 @@ _LogGroup loggrp[LOG_MAX]={{"",LOG_NORMAL},{0,LOG_NORMAL}};
 FILE* debuglog = NULL;
 
 #if C_DEBUG
+static bool logBuffHasDiscarded = false;
+
 #include <curses.h>
 
 #include <list>
@@ -207,8 +208,10 @@ void DBGUI_DrawDebugOutputLine(int y,std::string line) {
 	int maxy, maxx; getmaxyx(dbg.win_out,maxy,maxx);
     bool ellipsisEnd = false;
 
+    (void)maxy;//UNUSED
+
     /* cut the line short if it's too long for the terminal window */
-    if (line.length() > maxx) {
+    if (line.length() > (size_t)maxx) {
         line = line.substr(0,maxx-3);
         ellipsisEnd = true;
     }
@@ -355,6 +358,8 @@ static void DrawSubWinBox(WINDOW *wnd,const char *title) {
 
     getbegyx(wnd,y,x);
     getmaxyx(wnd,h,w);
+
+    (void)h;//UNUSED
 
 	if (has_colors()) {
         if (active)

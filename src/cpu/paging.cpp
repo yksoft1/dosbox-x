@@ -135,7 +135,7 @@ Bitu DEBUG_EnableDebugger(void);
 #define ACCESS_UR  2
 #define ACCESS_URW 3
 #define ACCESS_TABLEFAULT 4
-const char* const mtr[] = {"KR ","KRW","UR ","URW","PFL"};
+//const char* const mtr[] = {"KR ","KRW","UR ","URW","PFL"};
 
 // bit0 entry write
 // bit1 entry access
@@ -173,7 +173,7 @@ static const Bit8u translate_array[] = {
 #define ACMAP_RE 1
 #define ACMAP_EE 2
 
-static const char* const lnm[] = {"RW ","RE ","EE "}; // debug stuff
+//static const char* const lnm[] = {"RW ","RE ","EE "}; // debug stuff
 
 // bit0-1 ACCESS_ type
 // bit2   1=user mode
@@ -361,45 +361,45 @@ private:
 	}
 public:
 	PageFoilHandler() : PageHandler(PFLAG_INIT|PFLAG_NOCODE) {}
-	Bitu readb(PhysPt addr) {read();return 0;}
-	Bitu readw(PhysPt addr) {read();return 0;}
-	Bitu readd(PhysPt addr) {read();return 0;}
+	Bitu readb(PhysPt addr) {(void)addr;read();return 0;}
+	Bitu readw(PhysPt addr) {(void)addr;read();return 0;}
+	Bitu readd(PhysPt addr) {(void)addr;read();return 0;}
 
-	void writeb(PhysPt addr,Bitu val) {
-		work(addr);
-		// execute the write:
-		// no need to care about mpl because we won't be entered
-		// if write isn't allowed
-		mem_writeb(addr,val);
-	}
-	void writew(PhysPt addr,Bitu val) {
-		work(addr);
-		mem_writew(addr,val);
-	}
-	void writed(PhysPt addr,Bitu val) {
-		work(addr);
-		mem_writed(addr,val);
-	}
+    void writeb(PhysPt addr,Bitu val) {
+        work(addr);
+        // execute the write:
+        // no need to care about mpl because we won't be entered
+        // if write isn't allowed
+        mem_writeb(addr,val);
+    }
+    void writew(PhysPt addr,Bitu val) {
+        work(addr);
+        mem_writew(addr,val);
+    }
+    void writed(PhysPt addr,Bitu val) {
+        work(addr);
+        mem_writed(addr,val);
+    }
 
-	bool readb_checked(PhysPt addr, Bit8u * val) {read();return true;}
-	bool readw_checked(PhysPt addr, Bit16u * val) {read();return true;}
-	bool readd_checked(PhysPt addr, Bit32u * val) {read();return true;}
+    bool readb_checked(PhysPt addr, Bit8u * val) {(void)addr;(void)val;read();return true;}
+    bool readw_checked(PhysPt addr, Bit16u * val) {(void)addr;(void)val;read();return true;}
+    bool readd_checked(PhysPt addr, Bit32u * val) {(void)addr;(void)val;read();return true;}
 
-	bool writeb_checked(PhysPt addr,Bitu val) {
-		work(addr);
-			mem_writeb(addr,val);
-			return false;
-	}
-	bool writew_checked(PhysPt addr,Bitu val) {
-		work(addr);
-			mem_writew(addr,val);
-			return false;
-	}
-	bool writed_checked(PhysPt addr,Bitu val) {
-		work(addr);
-			mem_writed(addr,val);
-			return false;
-	}
+    bool writeb_checked(PhysPt addr,Bitu val) {
+        work(addr);
+        mem_writeb(addr,val);
+        return false;
+    }
+    bool writew_checked(PhysPt addr,Bitu val) {
+        work(addr);
+        mem_writew(addr,val);
+        return false;
+    }
+    bool writed_checked(PhysPt addr,Bitu val) {
+        work(addr);
+        mem_writed(addr,val);
+        return false;
+    }
 };
 
 class ExceptionPageHandler : public PageHandler {
@@ -567,18 +567,22 @@ public:
 	}
 	// returning true means an exception was triggered for these _checked functions
 	bool readb_checked(PhysPt addr, Bit8u * val) {
+        (void)val;//UNUSED
 		Exception(addr, false, true);
 		return true;
 	}
 	bool readw_checked(PhysPt addr, Bit16u * val) {
+        (void)val;//UNUSED
 		Exception(addr, false, true);
 		return true;
 			}
 	bool readd_checked(PhysPt addr, Bit32u * val) {
+        (void)val;//UNUSED
 		Exception(addr, false, true);
 		return true;
 		}
 	bool writeb_checked(PhysPt addr,Bitu val) {
+        (void)val;//UNUSED
 		Exception(addr, true, true);
 		return true;
 	}
@@ -593,6 +597,7 @@ public:
 		return true;
 	}
 	bool writed_checked(PhysPt addr,Bitu val) {
+        (void)val;//UNUSED
 		Exception(addr, true, true);
 		return true;
 	}

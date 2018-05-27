@@ -23,6 +23,8 @@ extern "C" void SDL1_hax_X11_jpfix(int ro_scan,int yen_scan);
 #endif
 
 void LinuxX11_OnTop(bool f) {
+    (void)f;
+
 #if !defined(C_SDL2)
     SDL_SysWMinfo wminfo;
     memset(&wminfo,0,sizeof(wminfo));
@@ -60,6 +62,7 @@ void LinuxX11_OnTop(bool f) {
 }
 
 char *LinuxX11_KeySymName(Uint32 x) {
+    (void)x;
 #if !defined(C_SDL2)
     SDL_SysWMinfo wminfo;
     memset(&wminfo,0,sizeof(wminfo));
@@ -243,7 +246,7 @@ void Linux_GetDesktopResolution(int *width,int *height) {
 			LOG_MSG("GetDesktopResolution reading X11 desktop resolution");
 
 			Window rootWindow = DefaultRootWindow(wminfo.info.x11.display);
-			if (rootWindow >= 0) {
+			if (rootWindow != 0) {
 				XWindowAttributes rootWinAttr;
 
 				memset(&rootWinAttr,0,sizeof(rootWinAttr));

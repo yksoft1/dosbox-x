@@ -75,6 +75,7 @@ Bit64u			ffmpeg_video_frame_last_time = 0;
 int             ffmpeg_yuv_format_choice = -1;  // -1 default  4 = 444   2 = 422   0 = 420
 
 AVPixelFormat ffmpeg_choose_pixfmt(const int x) {
+    (void)x;//UNUSED
     if (ffmpeg_yuv_format_choice == 4)
         return AV_PIX_FMT_YUV444P;
     else if (ffmpeg_yuv_format_choice == 2)
@@ -571,6 +572,7 @@ FILE * OpenCaptureFile(const char * type,const char * ext) {
 
 #if (C_SSHOT)
 static void CAPTURE_AddAviChunk(const char * tag, Bit32u size, void * data, Bit32u flags, unsigned int streamindex) {
+    (void)tag;//UNUSED
 	if (capture.video.writer != NULL) {
 		if ((int)streamindex < capture.video.writer->avi_stream_alloc) {
 			avi_writer_stream *os = capture.video.writer->avi_stream + streamindex;
@@ -626,6 +628,8 @@ void CAPTURE_VideoEvent(bool pressed) {
 
 extern uint32_t GFX_palette32bpp[256];
 #endif
+
+unsigned int GFX_GetBShift();
 
 void CAPTURE_AddImage(Bitu width, Bitu height, Bitu bpp, Bitu pitch, Bitu flags, float fps, Bit8u * data, Bit8u * pal) {
 #if (C_SSHOT)
@@ -1103,8 +1107,6 @@ skip_shot:
 				LOG_MSG("Failed to alloc audio frame buffer");
 				goto skip_video;
 			}
-
-			unsigned int GFX_GetBShift();
 
 			av_frame_set_colorspace(ffmpeg_vidrgb_frame,AVCOL_SPC_RGB);
 			ffmpeg_vidrgb_frame->width = capture.video.width;
@@ -1709,6 +1711,7 @@ void CAPTURE_MidiEvent(bool pressed) {
 }
 
 void CAPTURE_Destroy(Section *sec) {
+    (void)sec;//UNUSED
 	// if capture is active, fake mapper event to "toggle" it off for each capture case.
 #if (C_SSHOT)
 	if (capture.video.writer != NULL) CAPTURE_VideoEvent(true);
@@ -1791,6 +1794,7 @@ void CAPTURE_Init() {
 }
 
 void HARDWARE_Destroy(Section * sec) {
+    (void)sec;//UNUSED
 }
 
 void HARDWARE_Init() {

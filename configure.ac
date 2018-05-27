@@ -125,15 +125,28 @@ dnl This warning will stay here for a long enough period of time before making C
 
 dnl AC_CHECK_CXXFLAGS will prepend gnu++11 to CXXFLAGS if supported, for us.
 dnl our code adds -std=gnu++0x if not supported where the function would not do anything.
+dnl This code checks the CXX flags but does not keep the changes because AC_CHECK_CXXFLAGS
+dnl also adds it to CPPFLAGS which then also affects the C compilation (with warnings like
+dnl "-std=gnu++11 is not valid for C")
+OLDCFLAGS="$CFLAGS"
+OLDCPPFLAGS="$CPPFLAGS"
+OLDCXXFLAGS="$CXXFLAGS"
+
 AC_MSG_CHECKING([checking for C++11 support])
 AC_CHECK_CXXFLAGS([ -std=gnu++11 ], [  ], [
-    CXXFLAGS="$CXXFLAGS -std=gnu++0x";
     warn_cpp0x=1
 ])
+
+CXXFLAGS="$OLDCXXFLAGS"
+CPPFLAGS="$OLDCPPFLAGS"
+CFLAGS="$OLDCFLAGS"
 
 if test x$warn_cpp0x = x1; then
     AC_MSG_ERROR([ Your compiler must support C++11 or better ])
 fi
+
+CFLAGS="$CFLAGS -std=gnu11";
+CXXFLAGS="$CXXFLAGS -std=gnu++0x";
 
 dnl Yksoft1 wants a MinGW build for Windows that doesn't use the Windows menu system.
 AH_TEMPLATE(C_FORCE_MENU_SDLDRAW,[Define to 1 to force SDL-drawn menus])
@@ -265,8 +278,32 @@ if test x$host = xi386-pc-os2-emx ; then
     LIBS="$LIBS -los2me"
 fi
 
+dnl I would like to know of any concerns given by the C++ compiler.
+dnl Clang/LLVM already does this to some degree, let's get GCC to do it too.
+AC_CHECK_CXXFLAGS([ -Wall ])
+AC_CHECK_CXXFLAGS([ -Wextra ])
+AC_CHECK_CXXFLAGS([ -pedantic ])
+#AC_CHECK_CXXFLAGS([ -Wconversion ])
+#AC_CHECK_CXXFLAGS([ -Wsign-conversion ])
+#AC_CHECK_CXXFLAGS([ -Wconversion-null ])
+
+dnl Let GCC 7.3.x know that the "fall through" switch cases in this codebase
+dnl are often intentional.
+AC_CHECK_CXXFLAGS([ -Wno-implicit-fallthrough ])
+
 dnl Stop reporting "type punning" warnings, I'm sick of hearing about it.
 AC_CHECK_CXXFLAGS([ -Wno-strict-aliasing ])
+
+dnl other
+AC_CHECK_CXXFLAGS([ -Wno-missing-field-initializers ])
+AC_CHECK_CXXFLAGS([ -Wno-format-zero-length ])
+
+dnl Clang/LLVM warning: don't care the address of a member may be unaligned, unless targeting ARM!
+AC_CHECK_CXXFLAGS([ -Wno-address-of-packed-member ])
+dnl Clang/LLVM warning: don't care about int to void*, since void* is either same size or larger
+AC_CHECK_CXXFLAGS([ -Wno-int-to-void-pointer-cast ])
+dnl Clang/LLVM warning: extended field designator
+AC_CHECK_CXXFLAGS([ -Wno-extended-offsetof ])
 
 dnl Some stuff for the icon.
 case "$host" in
@@ -473,11 +510,6 @@ dnl FEATURE: MT32 (MUNT) emulation
 AH_TEMPLATE(C_MT32,[Define to 1 to enable MT32 emulation (x86/x86_64 only)])
 AC_ARG_ENABLE(mt32,AC_HELP_STRING([--disable-mt32],[Disable MT32 emulation]),,enable_mt32=yes)
 AC_MSG_CHECKING(whether MT32 emulation will be enabled) 
-
-# HACK: Don't enable MT32 on SDL2
-if test -n "$SDL2_LIBS"; then
-    enable_mt32=no
-fi
 
 # test
 # Note that MT32 (MUNT) requires the SSE extensions

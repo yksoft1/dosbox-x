@@ -1,4 +1,72 @@
 0.82.7 (next)
+  - PC-98 INT 1Bh "read id" floppy disk call fixed to
+    cycle through sector numbers. Some bootable PC-98
+    games use "MEGDOS" which polls this BIOS call before
+    attempting to read the disk. If the sector numbers
+    never cycle, "MEGDOS" will not attempt to read the
+    disk.
+  - Fixed bug that prevented some menu options (such as
+    "aspect ratio") from working if still in the BIOS or
+    booted into a guest OS.
+  - PC-98 mode fixed to ignore "mainline compatible mapping".
+    That mapping mode refers to DOSBox SVN which never
+    supported PC-98 mode anyway.
+  - Fix PC-98 INT 1Bh "test read" call, which then allows
+    "cherry bomb" to run.
+  - Remove geometry checks in PC-98 INT 1Bh BIOS call, so
+    that FDD images with odd sector sizes can work.
+  - ROM BIOS now automatically occupies E8000-FFFFF instead
+    of F0000-FFFFF when in PC-98 mode.
+  - Most 128 byte/sector FDD images appear to jump to
+    E800:0002. I'm guessing that's ROM BASIC, so add a
+    callback at that location to catch these boot disks
+    and show a message instead of allowing the boot
+    sector to jump to nothing and crash.
+  - PC-98 BOOT fixed to check for and support booting from
+    FDD images where track 0 contains 128 byte/sector
+    boot sectors.
+  - PC-98 INT 1Bh support fixed to support reading/writing
+    sector sizes other than the one sector size reported
+    by the image. It is now possible to read the other
+    sector sizes from an FDD/VFD image.
+  - Fixed somewhat serious bug that, when compiled against
+    Microsoft C++, causes the AVI writer to use the 32-bit
+    lseek() function instead of the 64-bit lseek64() function.
+    Prior to this fix, AVI captures would begin to corrupt
+    themselves after growing past 2GB in size.
+  - Cleanup code, fix compiler warnings, typecast problems,
+    C/C++ conformance problems as reported by GCC 4.8,
+    GCC 7.3.0 (MinGW), Visual Studio 2017, and Clang/LLVM
+    on Mac OS X.
+  - FM Towns machine type stub, for anyone interested in
+    forking DOSBox-X to implement FM Towns emulation.
+  - Code cleanup, refactor, according to compiler warnings.
+  - SDL drawn menus fixed to copy Direct3D backbuffer to
+    the SDL surface when popup occurs. This allows the
+    menus to overlap the Direct3D display correctly.
+  - Fixed Direct3D output so that when composing the next
+    frame in the backbuffer, it also copies the SDL drawn
+    menu from the SDL surface in order to keep it on
+    screen.
+  - Direct3D output updated to follow SDL clip rectangle
+    struct, in the same exact manner as the OpenGL output.
+    This also permits the Direct3D output to correctly size
+    itself and leave space at the top for the SDL drawn
+    menus.
+  - Fixed dynamic core entry point to push/pop EBP because
+    debug builds need the compiler to track the stack frame.
+  - Updated in-tree zlib and libpng libraries to the latest
+    provided by both projects.
+  - Fixed VFD (FDD) disk image support to signal to FAT driver
+    properly an error if it could not determine a geometry.
+  - Fixed code breakage with SDL2 that prevented compilation
+    with Munt (MT32) emulation enabled. SDL2 builds now allow
+    MT32 emulation.
+  - Mac OS X builds now compile against the in-tree zlib and
+    libpng libraries for consistency.
+  - MinGW builds now compile against the MinGW provided zlib
+    and the in-tree libpng library for consistency.
+  - Enabled MinGW builds to use Direct3D and Direct3D shaders.
   - Added code to auto-detect the VirtualBox display driver
     in Windows build, because OpenGL output doesn't work
     in Windows XP under VirtualBox. The change will switch

@@ -46,7 +46,7 @@ MinGW compile (on Windows, using MinGW, not MinGW64) to target MS-DOS and the HX
 Visual Studio 2017 compile for 32/64-bit Windows Vista or higher
 Use the ./vs2015/dosbox-x.sln "solution" file and compile.
 You will need the DirectX 2010 SDK for Direct3D9 support.
-
+See the README.Windows for extra information about this platform.
 
 XCode (on Mac OS X, from the Terminal) to target Mac OS X
 ./build-debug
@@ -122,8 +122,7 @@ The four major operating systems and platforms of DOSBox-X are (in this order):
 
 Linux and MinGW Windows builds are expected to compile with the GNU autotools.
 
-There is an alternate branch maintained by other devs on Github if compilation
-with CMake is desired.
+A preliminary CMake build system is available, see README.cmake.md for details.
 
 Stright Windows builds are expected to compile using the free community edition
 of Visual Studio 2015 or Visual Studio 2017 and the DirectX 2010 SDK.
@@ -252,6 +251,12 @@ design as implemented now cannot accomodate.
   fork is and what system it is emulating, so I can list it in
   this README file for others seeking emulation of that system.
 
+  To help, I have added machine and video mode enumerations as
+  "stubs" to provide a starting point for your branch's implementation
+  of the platform.
+
+  Stubs implemented so far:
+    - FM Towns emulation (machine=fm_towns)
 
 
 Origins, and crediting of source code

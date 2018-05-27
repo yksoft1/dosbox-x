@@ -18,6 +18,7 @@
 
 #include "dosbox.h"
 #include "control.h"
+#include "menu.h"
 
 #if (HAVE_D3D9_H) && defined(WIN32)
 
@@ -532,6 +533,114 @@ void CDirect3D::DestroyD3D(void)
     }
 }
 
+// copy a rect from the SDL surface to the Direct3D9 backbuffer
+void CDirect3D::UpdateRectFromSDLSurface(int x,int y,int w,int h) {
+	if (x < 0 || y < 0 || (unsigned int)(x+w) > d3dpp.BackBufferWidth || (unsigned int)(y+h) > d3dpp.BackBufferHeight)
+		return;
+	if (w <= 0 || h <= 0)
+		return;
+
+	IDirect3DSurface9 *bbsurf = NULL;
+	IDirect3DSurface9 *tsurf = NULL;
+
+	if (pD3DDevice9->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bbsurf) == D3D_OK) {
+		if (pD3DDevice9->CreateOffscreenPlainSurface(w, h, d3dpp.BackBufferFormat, D3DPOOL_SYSTEMMEM, &tsurf, NULL) == D3D_OK) {
+			D3DLOCKED_RECT rl;
+
+			if (tsurf->LockRect(&rl, NULL, 0) == D3D_OK) {
+				unsigned char *GFX_GetSurfacePtr(size_t *pitch, unsigned int x, unsigned int y);
+				void GFX_ReleaseSurfacePtr(void);
+
+				size_t sdl_pitch = 0,sdl_copy;
+				unsigned char *sdl_surface = GFX_GetSurfacePtr(&sdl_pitch, x, y);
+
+				if (sdl_surface != NULL) {
+					sdl_copy = w * (bpp16 ? 2 : 4);
+
+//					fprintf(stderr,"sdl_copy=%u sdl_pitch=%u dxpitch=%u\n",
+//						(unsigned int)sdl_copy,(unsigned int)sdl_pitch,(unsigned int)rl.Pitch);
+
+					for (unsigned int iy=0;iy < (unsigned int)h;iy++) {
+						unsigned char *sp = sdl_surface + (iy * sdl_pitch);
+						unsigned char *dp = (unsigned char*)rl.pBits + (iy * rl.Pitch);
+
+						memcpy(dp, sp, sdl_copy);
+					}
+
+					GFX_ReleaseSurfacePtr();
+				}
+
+				tsurf->UnlockRect();
+
+				RECT rc;
+				POINT pt;
+
+				rc.top = 0;
+				rc.left = 0;
+				rc.right = w;
+				rc.bottom = h;
+				pt.x = 0;
+				pt.y = 0;
+
+				pD3DDevice9->UpdateSurface(/*source*/tsurf, &rc, /*dest*/bbsurf, &pt);
+			}
+		}
+	}
+
+	SAFE_RELEASE(bbsurf);
+	SAFE_RELEASE(tsurf);
+}
+
+// copy a rect to the SDL surface from the Direct3D9 backbuffer
+void CDirect3D::UpdateRectToSDLSurface(int x,int y,int w,int h) {
+	if (x < 0 || y < 0 || (unsigned int)(x+w) > d3dpp.BackBufferWidth || (unsigned int)(y+h) > d3dpp.BackBufferHeight)
+		return;
+	if (w <= 0 || h <= 0)
+		return;
+
+	IDirect3DSurface9 *bbsurf = NULL;
+	IDirect3DSurface9 *tsurf = NULL;
+
+	if (pD3DDevice9->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bbsurf) == D3D_OK) {
+		/* NTS: Microsoft doesn't seem to offer a way to capture only a part of the backbuffer :( */
+		if (pD3DDevice9->CreateOffscreenPlainSurface(d3dpp.BackBufferWidth, d3dpp.BackBufferHeight, d3dpp.BackBufferFormat, D3DPOOL_SYSTEMMEM, &tsurf, NULL) == D3D_OK) {
+			D3DLOCKED_RECT rl;
+
+			if (pD3DDevice9->GetRenderTargetData(/*source*/bbsurf, /*dest*/tsurf) != D3D_OK)
+				fprintf(stderr,"FAIL\n");
+
+			if (tsurf->LockRect(&rl, NULL, 0) == D3D_OK) {
+				unsigned char *GFX_GetSurfacePtr(size_t *pitch, unsigned int x, unsigned int y);
+				void GFX_ReleaseSurfacePtr(void);
+
+				size_t sdl_pitch = 0,sdl_copy;
+				unsigned char *sdl_surface = GFX_GetSurfacePtr(&sdl_pitch, x, y);
+
+				if (sdl_surface != NULL) {
+					sdl_copy = w * (bpp16 ? 2 : 4);
+
+//					fprintf(stderr,"sdl_copy=%u sdl_pitch=%u dxpitch=%u\n",
+//						(unsigned int)sdl_copy,(unsigned int)sdl_pitch,(unsigned int)rl.Pitch);
+
+					for (unsigned int iy=0;iy < (unsigned int)h;iy++) {
+						unsigned char *sp = (unsigned char*)rl.pBits + ((iy + y) * rl.Pitch) + (x * (bpp16 ? 2 : 4));
+						unsigned char *dp = sdl_surface + (iy * sdl_pitch);
+
+						memcpy(dp, sp, sdl_copy);
+					}
+
+					GFX_ReleaseSurfacePtr();
+				}
+
+				tsurf->UnlockRect();
+			}
+		}
+	}
+
+	SAFE_RELEASE(bbsurf);
+	SAFE_RELEASE(tsurf);
+}
+
 // Draw a textured quad on the back-buffer
 bool CDirect3D::D3DSwapBuffers(void)
 {
@@ -542,6 +651,12 @@ bool CDirect3D::D3DSwapBuffers(void)
 		backbuffer_clear_countdown--;
 		pD3DDevice9->Clear(0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
 	}
+
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+    // If the SDL drawn menus are visible, copy the SDL surface to the Direct3D surface to keep them visible on-screen
+    if (mainMenu.isVisible() && mainMenu.menuBox.h != 0 && dwY >= mainMenu.menuBox.h)
+	UpdateRectFromSDLSurface(0, 0, mainMenu.menuBox.w, mainMenu.menuBox.h);
+#endif
 
     // begin rendering
     pD3DDevice9->BeginScene();
@@ -896,7 +1011,7 @@ HRESULT CDirect3D::LoadPixelShader(void)
     LOG_MSG("D3D:Loading pixel shader from %s", pshader);
 #endif
 
-    psEffect->setinputDim(dwWidth, dwHeight);
+    psEffect->setinputDim((float)dwWidth, (float)dwHeight);
     if(FAILED(psEffect->LoadEffect(pshader)) || FAILED(psEffect->Validate())) {
 	/*LOG_MSG("D3D:Pixel shader error:");
 
@@ -929,6 +1044,8 @@ HRESULT CDirect3D::Resize3DEnvironment(Bitu window_width, Bitu window_height, Bi
 #if D3D_THREAD
     Wait(false);
 #endif
+
+	(void)fullscreen; // FIXME: This should be stored and used!
 
     // set the presentation parameters
 	d3dpp.BackBufferWidth = window_width;
@@ -1060,7 +1177,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
     }
 
     if(FAILED(hr)) {
-	LOG_MSG("D3D:Failed to create %stexture: 0x%x", (dynamic ? "dynamic " : ""), hr);
+	LOG_MSG("D3D:Failed to create %stexture: 0x%lx", (dynamic ? "dynamic " : ""), (unsigned long)hr);
 
 	switch(hr) {
 	case D3DERR_INVALIDCALL:
@@ -1083,7 +1200,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
 	Bit8u * pixels = (Bit8u *)d3dlr.pBits;
 
 	for(Bitu lines = dwTexHeight; lines; lines--) {
-	    memset(pixels, 0, (dwTexWidth<<2)>>bpp16);
+	    memset(pixels, 0, (dwTexWidth<<2)>>(bpp16?1:0));
 	    pixels += d3dlr.Pitch;
 	}
 
@@ -1102,7 +1219,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
 	// Working textures for pixel shader
 	if(FAILED(hr=pD3DDevice9->CreateTexture(dwTexWidth, dwTexHeight, 1, D3DUSAGE_RENDERTARGET,
 			    D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &lpWorkTexture1, NULL))) {
-	    LOG_MSG("D3D:Failed to create working texture: 0x%x", hr);
+	    LOG_MSG("D3D:Failed to create working texture: 0x%lx", (unsigned long)hr);
 
 	    switch(hr) {
 	    case D3DERR_INVALIDCALL:
@@ -1122,7 +1239,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
 
 	if(FAILED(hr=pD3DDevice9->CreateTexture(dwTexWidth, dwTexHeight, 1, D3DUSAGE_RENDERTARGET,
 			    D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &lpWorkTexture2, NULL))) {
-	    LOG_MSG("D3D:Failed to create working texture: 0x%x", hr);
+	    LOG_MSG("D3D:Failed to create working texture: 0x%lx", (unsigned long)hr);
 
 	    switch(hr) {
 	    case D3DERR_INVALIDCALL:
@@ -1142,7 +1259,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
 
 	if(FAILED(hr=pD3DDevice9->CreateVolumeTexture(256, 16, 256, 1, 0, D3DFMT_A8R8G8B8,
 			    D3DPOOL_MANAGED, &lpHq2xLookupTexture, NULL))) {
-	    LOG_MSG("D3D:Failed to create volume texture: 0x%x", hr);
+	    LOG_MSG("D3D:Failed to create volume texture: 0x%lx", (unsigned long)hr);
 
 	    switch(hr) {
 	    case D3DERR_INVALIDCALL:
@@ -1164,7 +1281,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
 	D3DLOCKED_BOX lockedBox;
 
 	if(FAILED(hr = lpHq2xLookupTexture->LockBox(0, &lockedBox, NULL, 0))) {
-	    LOG_MSG("D3D:Failed to lock box of volume texture: 0x%x", hr);
+	    LOG_MSG("D3D:Failed to lock box of volume texture: 0x%lx", (unsigned long)hr);
 
 	    switch(hr) {
 		case D3DERR_INVALIDCALL:
@@ -1189,7 +1306,7 @@ HRESULT CDirect3D::CreateDisplayTexture(void)
 #endif
 
 	if(FAILED(hr = lpHq2xLookupTexture->UnlockBox(0))) {
-	    LOG_MSG("D3D:Failed to unlock box of volume texture: 0x%x", hr);
+	    LOG_MSG("D3D:Failed to unlock box of volume texture: 0x%lx", (unsigned long)hr);
 
 	    switch(hr) {
 		case D3DERR_INVALIDCALL:
@@ -1257,21 +1374,21 @@ HRESULT CDirect3D::CreateVertex(void)
     vertexBuffer->Lock(0, 0, (void**)&vertices, 0);
 
     //Setup vertices
-    vertices[0].position = D3DXVECTOR3( dwX,                 dwY, 0.0f );
+    vertices[0].position = D3DXVECTOR3( (float)dwX,					  (float)dwY,					 0.0f );
     vertices[0].diffuse  = 0xFFFFFFFF;
-    vertices[0].texcoord = D3DXVECTOR2( 0.0f,                0.0f );
+    vertices[0].texcoord = D3DXVECTOR2( 0.0f,						  0.0f );
 
-    vertices[1].position = D3DXVECTOR3( dwX,                 dwY + dwScaledHeight, 0.0f );
+    vertices[1].position = D3DXVECTOR3( (float)dwX,					  (float)(dwY + dwScaledHeight), 0.0f );
     vertices[1].diffuse  = 0xFFFFFFFF;
-    vertices[1].texcoord = D3DXVECTOR2( 0.0f,                sizey );
+    vertices[1].texcoord = D3DXVECTOR2( 0.0f,						  (float)sizey );
     
-    vertices[2].position = D3DXVECTOR3( dwX + dwScaledWidth, dwY, 0.0f );
+    vertices[2].position = D3DXVECTOR3( (float)(dwX + dwScaledWidth), (float)dwY,				     0.0f );
     vertices[2].diffuse  = 0xFFFFFFFF;
-    vertices[2].texcoord = D3DXVECTOR2( sizex,               0.0f );
+    vertices[2].texcoord = D3DXVECTOR2( (float)sizex,				  0.0f );
     
-    vertices[3].position = D3DXVECTOR3( dwX + dwScaledWidth, dwY + dwScaledHeight, 0.0f );
+    vertices[3].position = D3DXVECTOR3( (float)(dwX + dwScaledWidth), (float)(dwY + dwScaledHeight), 0.0f );
     vertices[3].diffuse  = 0xFFFFFFFF;
-    vertices[3].texcoord = D3DXVECTOR2( sizex,               sizey );
+    vertices[3].texcoord = D3DXVECTOR2( (float)sizex,				  (float)sizey );
 
     // Additional vertices required for some PS effects
     // FIXME: Recent changes may have BROKEN pixel shader support here!!!!!
