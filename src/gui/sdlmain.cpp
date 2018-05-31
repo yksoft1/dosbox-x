@@ -74,6 +74,7 @@ void GFX_OpenGLRedrawScreen(void);
 #include "menu.h"
 #include "SDL_video.h"
 #include "ide.h"
+#include "bitop.h"
 #include "mapper.h"
 
 #include "../src/libs/gui_tk/gui_tk.h"
@@ -1613,7 +1614,7 @@ void MenuDrawText(int x,int y,const char *text,Bitu color) {
         else
             MenuDrawTextChar(x,y,(unsigned char)(*text++),color);
 
-        x += mainMenu.fontCharWidth;
+        x += (int)mainMenu.fontCharWidth;
     }
 
 #if C_OPENGL
@@ -1672,7 +1673,7 @@ void DOSBoxMenu::item::drawMenuItem(DOSBoxMenu &menu) {
         MenuDrawText(screenBox.x+shortBox.x, screenBox.y+shortBox.y, shortcut_text.c_str(), fgshortcolor);
 
     if (type == submenu_type_id && borderTop/*not toplevel*/)
-        MenuDrawText(screenBox.x+screenBox.w - mainMenu.fontCharWidth - 1, screenBox.y+textBox.y, "\x10", fgcheckcolor);
+        MenuDrawText((int)(screenBox.x+screenBox.w - mainMenu.fontCharWidth - 1), (int)(screenBox.y+textBox.y), "\x10", fgcheckcolor);
 
     if (type == separator_type_id)
         MenuDrawRect(screenBox.x, screenBox.y + (screenBox.h/2), screenBox.w, 1, fgcolor);
@@ -2541,7 +2542,7 @@ static LRESULT CALLBACK WinExtHookKeyboardHookProc(int nCode,WPARAM wParam,LPARA
                             ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) ? 0xC0000000 : 0);
 
                         // catch the keystroke, post it to ourself, do not pass it on
-                        PostMessage(myHwnd, wParam, st_hook->vkCode, lParam);
+                        PostMessage(myHwnd, (UINT)wParam, st_hook->vkCode, lParam);
                         return TRUE;
                     }
                 }
@@ -4782,9 +4783,8 @@ bool GFX_IsFullscreen(void) {
 }
 #endif
 
-#if defined(__WIN32__) && !defined(C_SDL2)
+#if defined(__WIN32__) && !defined(C_SDL2) && !defined(HX_DOS)
 void OpenFileDialog( char * path_arg ) {
-#if !defined(HX_DOS)
     if(control->SecureMode()) {
         LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
         return;
@@ -4911,15 +4911,13 @@ search:
 godefault:
     SetCurrentDirectory( Temp_CurrentDir );
     return;
-#endif
 }
 
 void Go_Boot(const char boot_drive[_MAX_DRIVE]) {
-#if !defined(HX_DOS)
-        if(control->SecureMode()) {
-            LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
-            return;
-        }
+    if(control->SecureMode()) {
+        LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
+        return;
+    }
 
     OPENFILENAME OpenFileName;
     char szFile[MAX_PATH];
@@ -5006,11 +5004,9 @@ search:
 godefault:
     SetCurrentDirectory( Temp_CurrentDir );
     return;
-#endif
 }
 
 void Go_Boot2(const char boot_drive[_MAX_DRIVE]) {
-#if !defined(HX_DOS)
     Bit16u n=1; Bit8u c='\n';
     DOS_WriteFile(STDOUT,&c,&n);
     char temp[7];
@@ -5028,12 +5024,10 @@ void Go_Boot2(const char boot_drive[_MAX_DRIVE]) {
     shell.RunInternal();
     DOS_WriteFile(STDOUT,&c,&n);
     shell.ShowPrompt(); // if failed
-#endif
 }
 
 /* FIXME: Unused */
 void Drag_Drop( char * path_arg ) {
-#if !defined(HX_DOS)
     if(control->SecureMode()) {
         LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
         return;
@@ -5065,12 +5059,10 @@ void Drag_Drop( char * path_arg ) {
         OpenFileDialog(path_arg);
     else
         LOG_MSG("GUI: Unsupported filename extension.");
-#endif
 }
 
 HHOOK hhk;
 LRESULT CALLBACK CBTProc(INT nCode, WPARAM wParam, LPARAM lParam) {
-#if !defined(HX_DOS)
     (void)lParam;
     if( HCBT_ACTIVATE == nCode ) {
         HWND hChildWnd;
@@ -5081,26 +5073,20 @@ LRESULT CALLBACK CBTProc(INT nCode, WPARAM wParam, LPARAM lParam) {
         UnhookWindowsHookEx(hhk);
     }
     CallNextHookEx(hhk, nCode, wParam, lParam);
-#endif
     return 0;
 }
 
 int MountMessageBox( HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, UINT uType ) {
-#if !defined(HX_DOS)
     hhk = SetWindowsHookEx( WH_CBT, &CBTProc, 0, GetCurrentThreadId() );
     const int iRes = MessageBox( hWnd, lpText, lpCaption, uType | MB_SETFOREGROUND );
         return iRes;
-#else
-    return 0;
-#endif
 }
 
 void OpenFileDialog_Img( char drive ) {
-#if !defined(HX_DOS)
-        if(control->SecureMode()) {
-            LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
-            return;
-        }
+    if(control->SecureMode()) {
+        LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
+        return;
+    }
     if (Drives[drive-'A']) {
         LOG_MSG("GUI: Unmount drive %c first, and then try again.",drive);
         return;
@@ -5165,11 +5151,9 @@ search:
             LOG_MSG("GUI: Unsupported filename extension.");
     }
     SetCurrentDirectory( Temp_CurrentDir );
-#endif
 }
 
 void D3D_PS(void) {
-#if !defined(HX_DOS)
     OPENFILENAME OpenFileName;
     char szFile[MAX_PATH];
     char CurrentDir[MAX_PATH];
@@ -5232,7 +5216,6 @@ void D3D_PS(void) {
 godefault:
     SetCurrentDirectory( Temp_CurrentDir );
     return;
-#endif
 }
 #endif
 
@@ -5322,8 +5305,8 @@ static void FingerToFakeMouseMotion(SDL_TouchFingerEvent * finger) {
     fake.x = finger->x;     /* Contrary to SDL_events.h the x/y coordinates are NOT normalized to 0...1 */
     fake.y = finger->y;     /* Contrary to SDL_events.h the x/y coordinates are NOT normalized to 0...1 */
 #endif
-    fake.xrel = finger->dx;
-    fake.yrel = finger->dy;
+    fake.xrel = (Sint32)finger->dx;
+    fake.yrel = (Sint32)finger->dy;
     HandleMouseMotion(&fake);
 
     if (finger->type == SDL_FINGERDOWN || finger->type == SDL_FINGERUP) {
@@ -7440,6 +7423,8 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     CommandLine com_line(argc,argv);
     Config myconf(&com_line);
 
+    bitop::self_test();
+
     memset(&sdl,0,sizeof(sdl)); // struct sdl isn't initialized anywhere that I can tell
 
     control=&myconf;
@@ -8201,10 +8186,6 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
         /* -- menu */
         MainMenu = mainMenu.getWinMenu();
-#endif
-#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU /* TODO: Move to menu.cpp DOSBox_SetMenu() and add setmenu(NULL) to DOSBox_NoMenu() @emendelson request showmenu=false */
-        void sdl_hax_macosx_setmenu(void *nsMenu);
-        sdl_hax_macosx_setmenu(mainMenu.getNsMenu());
 #endif
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
         mainMenu.screenWidth = sdl.surface->w;

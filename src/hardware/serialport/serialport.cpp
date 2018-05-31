@@ -56,7 +56,7 @@ bool device_COM::Read(Bit8u * data,Bit16u * size) {
 }
 
 
-bool device_COM::Write(Bit8u * data,Bit16u * size) {
+bool device_COM::Write(const Bit8u * data,Bit16u * size) {
 	// DTR + RTS on
 	sclass->Write_MCR(0x03);
 	for (Bit16u i=0; i<*size; i++)
@@ -216,7 +216,7 @@ void CSerial::log_ser(bool active, char const* format,...) {
 		vsprintf(buf+strlen(buf),format,msg);
 		va_end(msg);
 		// Add newline if not present
-		Bitu len=strlen(buf);
+		Bitu len=(Bitu)strlen(buf);
 		if(buf[len-1]!='\n') strcat(buf,"\r\n");
 		fputs(buf,debugfp);
 	}
