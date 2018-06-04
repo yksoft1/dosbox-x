@@ -175,11 +175,11 @@ template <typename T=unsigned int> static inline constexpr T bitcount2maskmsb(co
  * This code will NOT work correctly if a == 0, the result is to be considered undefined.
  *
  * @return Boolean true if 'a' is a power of 2 */
-template <typename T=unsigned int> static inline constexpr T ispowerof2(const unsigned int a) {
+template <typename T=unsigned int> static inline constexpr bool ispowerof2(const unsigned int a) {
     return (a & (a-(T)1u)) == 0;
 }
 
-void self_test();
+void self_test(void);
 
 }
 
