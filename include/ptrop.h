@@ -3,8 +3,10 @@
 
 namespace ptrop {
 
+/* return the misalignment in bytes of 'p' in the context of a data type of size 'A',
+ * 'A' must be a power of 2, or else this code will not work. */
 static inline constexpr uintptr_t misalignment(const uintptr_t p,const uintptr_t A) {
-    return p % A;
+    return p & (A - (uintptr_t)1u);
 }
 
 template <const uintptr_t A> static inline constexpr uintptr_t misalignment(const uintptr_t p) { // DEFER
@@ -24,6 +26,7 @@ template <typename T=unsigned char,const uintptr_t A> static inline constexpr ui
 }
 
 
+/* indicate whether pointer 'p' is aligned to type of size 'A' */
 static inline constexpr bool isaligned(const uintptr_t p,const uintptr_t A) {
     return misalignment(p,A) == (uintptr_t)0;
 }
@@ -45,6 +48,7 @@ template <typename T=unsigned char,const uintptr_t A> static inline constexpr bo
 }
 
 
+/* take pointer 'p' and align downward to type of size 'A' */
 static inline constexpr uintptr_t aligndown(const uintptr_t p,const uintptr_t A) {
     return p - misalignment(p,A);
 }
@@ -66,6 +70,7 @@ template <typename T=unsigned char,const uintptr_t A> static inline constexpr T*
 }
 
 
+/* take pointer 'p' and align upward to type of size 'A' */
 static inline constexpr uintptr_t alignup(const uintptr_t p,const uintptr_t A) {
     return aligndown(p + (uintptr_t)A - (uintptr_t)1u,A);
 }
