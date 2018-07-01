@@ -30,11 +30,16 @@
 #include "cross.h"
 #include "hardware.h"
 #include "support.h"
+#include "sdlmain.h"
 
 #include "render_scalers.h"
 #if defined(__SSE__)
 #include <xmmintrin.h>
 #include <emmintrin.h>
+#endif
+
+#if C_XBRZ
+#include <xBRZ/xbrz.h>
 #endif
 
 Render_t render;
@@ -323,7 +328,6 @@ static Bitu MakeAspectTable(Bitu skip,Bitu height,double scaley,Bitu miny) {
     return linesadded;
 }
 
-
 void RENDER_Reset( void ) {
     Bitu width=render.src.width;
     Bitu height=render.src.height;
@@ -339,7 +343,15 @@ void RENDER_Reset( void ) {
     Bitu gfx_flags, xscale, yscale;
     ScalerSimpleBlock_t     *simpleBlock = &ScaleNormal1x;
     ScalerComplexBlock_t    *complexBlock = 0;
-    if (render.aspect) {
+    gfx_scalew = 1;
+    gfx_scaleh = 1;
+
+#if !C_XBRZ
+    if (render.aspect == ASPECT_TRUE && !render.aspectOffload)
+#else
+    if (render.aspect == ASPECT_TRUE && !render.aspectOffload && !(render.xBRZ.enable && render.xBRZ.scale_on))
+#endif
+    {
         if (render.src.ratio>1.0) {
             gfx_scalew = 1;
             gfx_scaleh = render.src.ratio;
@@ -347,10 +359,8 @@ void RENDER_Reset( void ) {
             gfx_scalew = (1.0/render.src.ratio);
             gfx_scaleh = 1;
         }
-    } else {
-        gfx_scalew = 1;
-        gfx_scaleh = 1;
     }
+
     if ((dblh && dblw) || (render.scale.forced && !dblh && !dblw)) {
         /* Initialize always working defaults */
         if (render.scale.size == 2)
@@ -547,6 +557,12 @@ forcenormal:
             height = MakeAspectTable( skip, render.src.height, yscale, yscale);
         }
     }
+/* update the aspect ratio */
+    sdl.srcAspect.x = render.src.width * (render.src.dblw ? 2 : 1);
+    sdl.srcAspect.y = (int)floor((render.src.height * (render.src.dblh ? 2 : 1) * render.src.ratio) + 0.5);
+    sdl.srcAspect.xToY = (double)sdl.srcAspect.x / sdl.srcAspect.y;
+    sdl.srcAspect.yToX = (double)sdl.srcAspect.y / sdl.srcAspect.x;
+    LOG_MSG("Aspect ratio: %u x %u  xToY=%.3f yToX=%.3f",sdl.srcAspect.x,sdl.srcAspect.y,sdl.srcAspect.xToY,sdl.srcAspect.yToX);
 /* Setup the scaler variables */
     gfx_flags=GFX_SetSize(width,height,gfx_flags,gfx_scalew,gfx_scaleh,&RENDER_CallBack);
     if (gfx_flags & GFX_CAN_8)
@@ -719,14 +735,6 @@ static void ChangeScaler(bool pressed) {
 
 #include "vga.h"
 
-bool RENDER_GetAutofit(void) {
-    return render.autofit;
-}
-
-bool RENDER_GetAspect(void) {
-    return render.aspect;
-}
-
 void RENDER_SetForceUpdate(bool f) {
     render.forceUpdate = f;
 }
@@ -749,9 +757,16 @@ void RENDER_OnSectionPropChange(Section *x) {
 
     bool p_doublescan = vga.draw.doublescan_set;
     bool p_char9 = vga.draw.char9_set;
-    bool p_aspect = render.aspect;
+    int p_aspect = render.aspect;
 
-    render.aspect = section->Get_bool("aspect");
+    std::string s_aspect = section->Get_string("aspect");
+    render.aspect = ASPECT_FALSE;
+    if (s_aspect == "true" || s_aspect == "1" || s_aspect == "yes") render.aspect = ASPECT_TRUE;
+#if C_SURFACE_POSTRENDER_ASPECT
+    if (s_aspect == "nearest") render.aspect = ASPECT_NEAREST;
+    if (s_aspect == "bilinear") render.aspect = ASPECT_BILINEAR;
+#endif
+
     render.frameskip.max = (Bitu)section->Get_int("frameskip");
 
     vga.draw.doublescan_set=section->Get_bool("doublescan");
@@ -764,6 +779,16 @@ void RENDER_OnSectionPropChange(Section *x) {
 
     mainMenu.get_item("vga_9widetext").check(vga.draw.char9_set).refresh_item(mainMenu);
     mainMenu.get_item("doublescan").check(vga.draw.doublescan_set).refresh_item(mainMenu);
+
+#if C_XBRZ
+    render.xBRZ.task_granularity = section->Get_int("xbrz slice");
+    render.xBRZ.fixed_scale_factor = section->Get_int("xbrz fixed scale factor");
+    render.xBRZ.max_scale_factor = section->Get_int("xbrz max scale factor");
+    if ((render.xBRZ.max_scale_factor < 2) || (render.xBRZ.max_scale_factor > xbrz::SCALE_FACTOR_MAX))
+        render.xBRZ.max_scale_factor = xbrz::SCALE_FACTOR_MAX;
+    if ((render.xBRZ.fixed_scale_factor < 2) || (render.xBRZ.fixed_scale_factor > xbrz::SCALE_FACTOR_MAX))
+        render.xBRZ.fixed_scale_factor = 0;
+#endif
 
     RENDER_UpdateFrameskipMenu();
 }
@@ -790,6 +815,11 @@ void RENDER_UpdateFromScalerSetting(void) {
     Prop_multival* prop = section->Get_multival("scaler");
     std::string f = prop->GetSection()->Get_string("force");
     std::string scaler = prop->GetSection()->Get_string("type");
+
+#if C_XBRZ
+    bool old_xBRZ_enable = render.xBRZ.enable;
+    render.xBRZ.enable = false;
+#endif
 
     render.scale.forced = false;
     if(f == "forced") render.scale.forced = true;
@@ -823,7 +853,46 @@ void RENDER_UpdateFromScalerSetting(void) {
     else if (scaler == "hardware3x") { render.scale.op = scalerOpNormal; render.scale.size = 6; render.scale.hardware=true; }
     else if (scaler == "hardware4x") { render.scale.op = scalerOpNormal; render.scale.size = 8; render.scale.hardware=true; }
     else if (scaler == "hardware5x") { render.scale.op = scalerOpNormal; render.scale.size = 10; render.scale.hardware=true; }
+#if C_XBRZ
+    else if (scaler == "xbrz" || scaler == "xbrz_bilinear") { 
+        render.scale.op = scalerOpNormal; 
+        render.scale.size = 1; 
+        render.scale.hardware = false; 
+        vga.draw.doublescan_set = false; 
+        render.xBRZ.enable = true; 
+        render.xBRZ.postscale_bilinear = (scaler == "xbrz_bilinear");
+    }
+#endif
+
+#if C_XBRZ
+    if (old_xBRZ_enable != render.xBRZ.enable) RENDER_CallBack(GFX_CallBackReset);
+#endif
 }
+
+#if C_XBRZ
+void RENDER_xBRZ_Early_Init() {
+    Section_prop * section = static_cast<Section_prop *>(control->GetSection("render"));
+
+    LOG(LOG_MISC, LOG_DEBUG)("Early init (renderer): xBRZ options");
+
+    // set some defaults
+    render.xBRZ.task_granularity = 16;
+    render.xBRZ.max_scale_factor = xbrz::SCALE_FACTOR_MAX;
+
+    // read options related to xBRZ here
+    Prop_multival* prop = section->Get_multival("scaler");
+    std::string scaler = prop->GetSection()->Get_string("type");
+    render.xBRZ.enable = ((scaler == "xbrz") || (scaler == "xbrz_bilinear"));
+    render.xBRZ.postscale_bilinear = (scaler == "xbrz_bilinear");
+    render.xBRZ.task_granularity = section->Get_int("xbrz slice");
+    render.xBRZ.fixed_scale_factor = section->Get_int("xbrz fixed scale factor");
+    render.xBRZ.max_scale_factor = section->Get_int("xbrz max scale factor");
+    if ((render.xBRZ.max_scale_factor < 2) || (render.xBRZ.max_scale_factor > xbrz::SCALE_FACTOR_MAX))
+        render.xBRZ.max_scale_factor = xbrz::SCALE_FACTOR_MAX;
+    if ((render.xBRZ.fixed_scale_factor < 2) || (render.xBRZ.fixed_scale_factor > xbrz::SCALE_FACTOR_MAX))
+        render.xBRZ.fixed_scale_factor = 0;
+}
+#endif
 
 void RENDER_Init() {
     Section_prop * section=static_cast<Section_prop *>(control->GetSection("render"));
@@ -840,7 +909,7 @@ void RENDER_Init() {
 
     //For restarting the renderer.
     static bool running = false;
-    bool aspect = render.aspect;
+    int aspect = render.aspect;
     Bitu scalersize = render.scale.size;
     bool scalerforced = render.scale.forced;
     scalerOperation_t scaleOp = render.scale.op;
@@ -850,7 +919,15 @@ void RENDER_Init() {
 
     render.pal.first=0;
     render.pal.last=255;
-    render.aspect=section->Get_bool("aspect");
+
+    std::string s_aspect = section->Get_string("aspect");
+    render.aspect = ASPECT_FALSE;
+    if (s_aspect == "true" || s_aspect == "1") render.aspect = ASPECT_TRUE;
+#if C_SURFACE_POSTRENDER_ASPECT
+    if (s_aspect == "nearest") render.aspect = ASPECT_NEAREST;
+    if (s_aspect == "bilinear") render.aspect = ASPECT_BILINEAR;
+#endif
+
     render.frameskip.max=(Bitu)section->Get_int("frameskip");
 
     RENDER_UpdateFrameskipMenu();
@@ -873,7 +950,6 @@ void RENDER_Init() {
     RENDER_UpdateFromScalerSetting();
 
     render.autofit=section->Get_bool("autofit");
-
 
     //If something changed that needs a ReInit
     // Only ReInit when there is a src.bpp (fixes crashes on startup and directly changing the scaler without a screen specified yet)

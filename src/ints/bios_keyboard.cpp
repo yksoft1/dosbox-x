@@ -552,12 +552,16 @@ irq1_end:
     /* update LEDs on keyboard */
     if (leds_orig != leds) KEYBOARD_SetLEDs(leds);
 
-	/* update insert cursor */
-	const auto flg = mem_readb(BIOS_KEYBOARD_FLAGS1);
-	const auto ins = static_cast<bool>(flg & BIOS_KEYBOARD_FLAGS1_INSERT_ACTIVE);
-	const auto ssl = static_cast<Bit8u>(ins ? CURSOR_SCAN_LINE_INSERT : CURSOR_SCAN_LINE_NORMAL);
-	if (CurMode->type == M_TEXT)
-		INT10_SetCursorShape(ssl, CURSOR_SCAN_LINE_END);
+    /* update insert cursor */
+    extern bool dos_program_running;
+    if (!dos_program_running)
+    {
+        const auto flg = mem_readb(BIOS_KEYBOARD_FLAGS1);
+        const auto ins = static_cast<bool>(flg & BIOS_KEYBOARD_FLAGS1_INSERT_ACTIVE);
+        const auto ssl = static_cast<Bit8u>(ins ? CURSOR_SCAN_LINE_INSERT : CURSOR_SCAN_LINE_NORMAL);
+        if (CurMode->type == M_TEXT)
+            INT10_SetCursorShape(ssl, CURSOR_SCAN_LINE_END);
+    }
 					
 /*  IO_Write(0x20,0x20); moved out of handler to be virtualizable */
 #if 0
@@ -1211,12 +1215,23 @@ static Bitu IRQ1_Handler_PC98(void) {
 }
 
 static Bitu PCjr_NMI_Keyboard_Handler(void) {
+    Bitu save_eax = reg_eax;
+
     while (IO_ReadB(0x64) & 1) { /* while data is available */
+        Bitu save_ip = reg_eip;
+
+        /* HACK: IRQ1 handler modifies AX and IP. So do we!
+         *       The NMI handler is registered as CB_IRET which does not save any registers.
+         *       To avoid causing crashes and glitches, save and restore the CPU registers affected NOW.
+         *
+         *       I don't think the PCjr has the INT 15h hook that AT systems do. */
         reg_al=IO_ReadB(0x60);
-        /* FIXME: Need to execute INT 15h hook */
         IRQ1_Handler();
+
+        reg_eip = save_ip;
     }
 
+    reg_ax = save_eax;
     return CBRET_NONE;
 }
 
@@ -1384,6 +1399,7 @@ Bitu INT16_Handler_Wrap(void) {
 //Keyboard initialisation. src/gui/sdlmain.cpp
 extern bool startup_state_numlock;
 extern bool startup_state_capslock;
+extern bool startup_state_scrlock;
 
 static void InitBiosSegment(void) {
     /* Setup the variables for keyboard in the bios data segment */
@@ -1397,8 +1413,9 @@ static void InitBiosSegment(void) {
 #if 0 /*SDL_VERSION_ATLEAST(1, 2, 14)*/
 //Nothing, mapper handles all.
 #else
-    if (startup_state_capslock) { flag1|=0x40; leds|=0x04;}
-    if (startup_state_numlock)  { flag1|=0x20; leds|=0x02;}
+    if (startup_state_capslock) { flag1|=BIOS_KEYBOARD_FLAGS1_CAPS_LOCK_ACTIVE; leds|=BIOS_KEYBOARD_LEDS_CAPS_LOCK;}
+    if (startup_state_numlock)  { flag1|=BIOS_KEYBOARD_FLAGS1_NUMLOCK_ACTIVE; leds|=BIOS_KEYBOARD_LEDS_NUM_LOCK;}
+    if (startup_state_scrlock)  { flag1|=BIOS_KEYBOARD_FLAGS1_SCROLL_LOCK_ACTIVE; leds|=BIOS_KEYBOARD_LEDS_SCROLL_LOCK;}
 #endif
 
     mem_writeb(BIOS_KEYBOARD_FLAGS1,flag1);

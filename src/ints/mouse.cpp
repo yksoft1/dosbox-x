@@ -156,6 +156,7 @@ static struct {
     Bit16u hidden;
     float add_x,add_y;
     Bit16s min_x,max_x,min_y,max_y;
+    Bit16s max_screen_x,max_screen_y;
     float mickey_x,mickey_y;
     float x,y;
     float ps2x,ps2y;
@@ -555,6 +556,14 @@ void DrawCursor() {
 
 void pc98_mouse_movement_apply(int x,int y);
 
+#if !defined(C_SDL2)
+bool GFX_IsFullscreen(void);
+#else
+static inline bool GFX_IsFullscreen(void) {
+    return false;
+}
+#endif
+
 /* FIXME: Re-test this code */
 void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
     extern bool Mouse_Vertical;
@@ -611,6 +620,44 @@ void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
     if (mouse.x < mouse.min_x) mouse.x = mouse.min_x;
     if (mouse.y > mouse.max_y) mouse.y = mouse.max_y;
     if (mouse.y < mouse.min_y) mouse.y = mouse.min_y;
+    extern int  user_cursor_x,  user_cursor_y;
+    extern int  user_cursor_sw, user_cursor_sh;
+    extern bool user_cursor_locked;
+
+    /*make mouse emulated, eventually*/
+    extern MOUSE_EMULATION user_cursor_emulation;
+    bool emu;
+    switch (user_cursor_emulation)
+    {
+    case MOUSE_EMULATION_ALWAYS:
+        emu = true;
+        break;
+    case MOUSE_EMULATION_INTEGRATION:
+        emu = !user_cursor_locked && !GFX_IsFullscreen();
+        break;
+    case MOUSE_EMULATION_LOCKED:
+        emu = user_cursor_locked && !GFX_IsFullscreen();
+        break;
+    case MOUSE_EMULATION_NEVER:
+    default:
+        emu = false;
+    }
+    if (!emu)
+    {
+        auto x1 = (double)user_cursor_x / static_cast<double>(user_cursor_sw - 1);
+        auto y1 = (double)user_cursor_y / static_cast<double>(user_cursor_sh - 1);
+        mouse.x       = x1 * mouse.max_screen_x;
+        mouse.y       = y1 * mouse.max_screen_y;
+
+        if (mouse.x < mouse.min_x)
+            mouse.x = mouse.min_x;
+        if (mouse.y < mouse.min_y)
+            mouse.y = mouse.min_y;
+        if (mouse.x > mouse.max_x)
+            mouse.x = mouse.max_x;
+        if (mouse.y > mouse.max_y)
+            mouse.y = mouse.max_y;
+    }
 
     mouse.ps2x += xrel;
     mouse.ps2y += yrel;
@@ -851,6 +898,9 @@ void Mouse_NewVideoMode(void) {
     mouse.cursorType = 0;
     mouse.enabled=true;
     mouse.oldhidden=1;
+
+    mouse.max_screen_x = mouse.max_x;
+    mouse.max_screen_y = mouse.max_y;
 }
 
 //Much too empty, Mouse_NewVideoMode contains stuff that should be in here
@@ -995,11 +1045,15 @@ static Bitu INT33_Handler(void) {
         mouse.textXorMask = reg_dx;
         break;
     case 0x0b:  /* Read Motion Data */
-        reg_cx=(Bit16u)static_cast<Bit16s>(mouse.mickey_x);
-        reg_dx=(Bit16u)static_cast<Bit16s>(mouse.mickey_y);
-        mouse.mickey_x=0;
-        mouse.mickey_y=0;
-        break;
+    {
+	    bool MOUSE_IsLocked();
+	    const auto locked = MOUSE_IsLocked();
+	    reg_cx = (Bit16u)static_cast<Bit16s>(locked ? mouse.mickey_x : 0);
+	    reg_dx = (Bit16u)static_cast<Bit16s>(locked ? mouse.mickey_y : 0);
+	    mouse.mickey_x = 0;
+	    mouse.mickey_y = 0;
+	    break;
+    }
     case 0x0c:  /* Define interrupt subroutine parameters */
         mouse.sub_mask=reg_cx;
         mouse.sub_seg=SegValue(es);
@@ -1379,3 +1433,7 @@ void MOUSE_Init() {
     AddVMEventFunction(VM_EVENT_RESET,AddVMEventFunctionFuncPair(MOUSE_OnReset));
 }
 
+bool MOUSE_IsHidden()
+{
+    return static_cast<bool>(mouse.hidden);
+}

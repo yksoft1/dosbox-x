@@ -31,10 +31,13 @@
 //Enable this for scalers to support 0 input for empty lines
 //#define RENDER_NULL_INPUT
 
-enum SCREEN_TYPES {
-	SCREEN_SURFACE,
-	SCREEN_OPENGL,
-	SCREEN_DIRECT3D
+enum ASPECT_MODES {
+    ASPECT_FALSE = 0
+    ,ASPECT_TRUE
+#if C_SURFACE_POSTRENDER_ASPECT
+    ,ASPECT_NEAREST
+    ,ASPECT_BILINEAR
+#endif
 };
 
 typedef struct {
@@ -88,10 +91,21 @@ typedef struct {
 		Bit8u *cacheRead;
 		Bitu inHeight, inLine, outLine;
 	} scale;
-	RenderPal_t pal;
+#if C_XBRZ
+    struct {
+        bool enable;
+        bool postscale_bilinear;
+        int task_granularity;
+        int fixed_scale_factor;
+        int max_scale_factor;
+        bool scale_on;
+    } xBRZ;
+#endif
+    RenderPal_t pal;
 	bool updating;
 	bool active;
-	bool aspect;
+	int aspect;
+    bool aspectOffload;
 	bool fullFrame;
 	bool forceUpdate;
 	bool autofit;
