@@ -143,6 +143,11 @@ VideoModeBlock ModeList_VGA[]={
 // if you select VGA 320x200 with S3 acceleration.
 { 0x153  ,M_LIN8   ,320 ,200 ,40 ,25 ,8 ,8  ,1 ,0xA0000 ,0x10000,100 ,449 ,80 ,400 , _S3_PIXEL_DOUBLE | _REPEAT1 },
 
+{ 0x15C ,M_LIN8,    512 ,384 ,64 ,48 ,8, 8  ,1 ,0xA0000 ,0x10000,168 ,806 ,128,768 , _S3_PIXEL_DOUBLE | _DOUBLESCAN },
+{ 0x159 ,M_LIN8,    400 ,300 ,50 ,37 ,8 ,8  ,1 ,0xA0000 ,0x10000,132 ,628 ,100,600 , _S3_PIXEL_DOUBLE | _DOUBLESCAN },
+{ 0x15D ,M_LIN16,   512 ,384 ,64 ,48 ,8, 16 ,1 ,0xA0000 ,0x10000,168 ,806 ,128,768 , _S3_PIXEL_DOUBLE | _DOUBLESCAN },
+{ 0x15A ,M_LIN16,   400 ,300 ,50 ,37 ,8 ,16 ,1 ,0xA0000 ,0x10000,132 ,628 ,100,600 , _S3_PIXEL_DOUBLE | _DOUBLESCAN },
+
 { 0x160  ,M_LIN15  ,320 ,240 ,40 ,30 ,8 ,8  ,1 ,0xA0000 ,0x10000,100 ,525 , 80 ,480 , _REPEAT1 },
 { 0x161  ,M_LIN15  ,320 ,400 ,40 ,50 ,8 ,8  ,1 ,0xA0000 ,0x10000,100 ,449 , 80 ,400 ,0 },
 { 0x162  ,M_LIN15  ,320 ,480 ,40 ,60 ,8 ,8  ,1 ,0xA0000 ,0x10000,100 ,525 , 80 ,480 ,0 },
@@ -524,6 +529,11 @@ static bool SetCurMode(VideoModeBlock modeblock[],Bit16u mode) {
 		}
         /* ignore deleted modes */
         else if (modeblock[i].type == M_ERROR) {
+            /* ignore */
+            i++;
+        }
+	    /* ignore disabled modes */
+        else if (modeblock[i].special & _USER_DISABLED) {
             /* ignore */
             i++;
         }
@@ -1819,6 +1829,8 @@ Bitu VideoModeMemSize(Bitu mode) {
 	return 0;
 }
 
+Bitu INT10_WriteVESAModeList(Bitu max_modes);
+
 /* ====================== VESAMOED.COM ====================== */
 class VESAMOED : public Program {
 public:
@@ -1831,6 +1843,7 @@ public:
         int w = -1,h = -1;
         int ch = -1;
         int newmode = -1;
+        signed char enable = -1;
         bool doDelete = false;
         bool modefind = false;
 		
@@ -1903,9 +1916,20 @@ public:
             else if (arg == "delete") {
                 doDelete = true;
             }
+            // NTS: If you're wondering why we support disabled modes (modes listed but cannot be set),
+            //      there are plenty of scenarios on actual hardware where this occurs. Laptops, for
+            //      example, have SVGA chipsets that can go up to 1600x1200, but the BIOS will disable
+            //      anything above the native resolution of the laptop's LCD display unless an
+            //      external monitor is attached at boot-up.
+            else if (arg == "disable") {
+                enable = 0;
+            }
+            else if (arg == "enable") {
+                enable = 1;
+            }
             else {
                 WriteOut("Unknown switch %s",arg.c_str());
-                break;
+                return;
             }
         }
         cmd->EndOpt();
@@ -1929,6 +1953,8 @@ public:
                     match = false;
                 else if (ModeList_VGA[array_i].type == M_ERROR)
                     match = false;
+                else if (ModeList_VGA[array_i].mode <= 0x13)
+                    match = false;
 
                 if (!match)
                     array_i++;
@@ -1949,9 +1975,18 @@ public:
             WriteOut("Mode not found\n");
             return;
         }
+        else if (ModeList_VGA[array_i].mode <= 0x13) {
+            WriteOut("Editing base VGA modes is not allowed\n");
+            return;
+        }
         else if (modefind) {
             WriteOut("Found mode 0x%x\n",(unsigned int)ModeList_VGA[array_i].mode);
         }
+
+        if (enable == 0)
+            ModeList_VGA[array_i].special |= _USER_DISABLED;
+        else if (enable == 1)
+            ModeList_VGA[array_i].special &= ~_USER_DISABLED;
 
         if (doDelete) {
             if (ModeList_VGA[array_i].type != M_ERROR)
@@ -1960,6 +1995,12 @@ public:
                 WriteOut("Mode 0x%x already deleted\n",ModeList_VGA[array_i].mode);
 
             ModeList_VGA[array_i].type = M_ERROR;
+            INT10_WriteVESAModeList(int10.rom.vesa_alloc_modes);
+            return;
+        }
+
+        if (fmt < 0 && ModeList_VGA[array_i].type == M_ERROR) {
+            WriteOut("Mode 0x%x is still deleted. Set a format with -fmt to un-delete\n",ModeList_VGA[array_i].mode);
             return;
         }
 
@@ -1971,9 +2012,21 @@ public:
             if (fmt >= 0) {
                 ModeList_VGA[array_i].type = (VGAModes)fmt;
                 /* will require reprogramming width in some cases! */
-                w = ModeList_VGA[array_i].swidth;
+                if (w < 0) w = ModeList_VGA[array_i].swidth;
             }
             if (w > 0) {
+                /* enforce alignment to avoid problems with modesetting code */
+                {
+                    unsigned int aln = 8;
+
+                    if (ModeList_VGA[array_i].type == M_LIN4)
+                        aln = 16;
+
+                    w += aln / 2;
+                    w -= w % aln;
+                    if (w == 0) w = aln;
+                }
+
                 ModeList_VGA[array_i].swidth = (Bitu)w;
                 if (ModeList_VGA[array_i].type == M_LIN15 || ModeList_VGA[array_i].type == M_LIN16) {
                     ModeList_VGA[array_i].hdispend = (Bitu)w / 4;
@@ -2002,13 +2055,50 @@ public:
             if (ch == 8 || ch == 14 || ch == 16)
                 ModeList_VGA[array_i].cheight = (Bitu)ch;
 
-            ModeList_VGA[array_i].twidth = ModeList_VGA[array_i].swidth / 8u;
+            ModeList_VGA[array_i].twidth = ModeList_VGA[array_i].swidth / ModeList_VGA[array_i].cwidth;
             ModeList_VGA[array_i].theight = ModeList_VGA[array_i].sheight / ModeList_VGA[array_i].cheight;
+            INT10_WriteVESAModeList(int10.rom.vesa_alloc_modes);
         }
 
         if (newmode >= 0x40) {
             WriteOut("Mode 0x%x moved to mode 0x%x\n",(unsigned int)ModeList_VGA[array_i].mode,(unsigned int)newmode);
             ModeList_VGA[array_i].mode = (Bitu)newmode;
+            INT10_WriteVESAModeList(int10.rom.vesa_alloc_modes);
+        }
+
+        /* if the new mode cannot fit in available memory, then mark as disabled */
+        {
+            unsigned int pitch = 0;
+
+            switch (ModeList_VGA[array_i].type) {
+                case M_LIN4:
+                    pitch = (ModeList_VGA[array_i].swidth / 8) * 4; /* not totally accurate but close enough */
+                    break;
+                case M_LIN8:
+                    pitch = ModeList_VGA[array_i].swidth;
+                    break;
+                case M_LIN15:
+                case M_LIN16:
+                    pitch = ModeList_VGA[array_i].swidth * 2;
+                    break;
+                case M_LIN24:
+                    pitch = ModeList_VGA[array_i].swidth * 3;
+                    break;
+                case M_LIN32:
+                    pitch = ModeList_VGA[array_i].swidth * 4;
+                    break;
+                default:
+                    break;
+            }
+
+            if ((pitch * ModeList_VGA[array_i].sheight) > vga.mem.memsize) {
+                /* NTS: Actually we don't mark as disabled, the VESA mode query function will
+                 *      report as disabled automatically for the same check we do. This just
+                 *      lets the user know. */
+                WriteOut("WARNING: Mode %u x %u as specified exceeds video memory, will be disabled\n",
+                        ModeList_VGA[array_i].swidth,
+                        ModeList_VGA[array_i].sheight);
+            }
         }
     }
     void doHelp(void) {
@@ -2028,6 +2118,8 @@ public:
         WriteOut("  -ch <x>                 Change char height (in pixels), or mode to find.\n");
         WriteOut("  -newmode <x>            Change video mode number\n");
         WriteOut("  -delete                 Delete video mode\n");
+        WriteOut("  -disable                Disable video mode (list but do not allow setting)\n");
+        WriteOut("  -enable                 Enable video mode\n");
     }
 };
 
