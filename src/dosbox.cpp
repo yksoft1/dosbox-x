@@ -929,6 +929,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_values(machines);
     Pstring->Set_help("The type of machine DOSBox tries to emulate.");
 
+    Phex = secprop->Add_hex("svga lfb base", Property::Changeable::OnlyAtStart, 0);
+    Phex->Set_help("If nonzero, define the physical memory address of the linear framebuffer.");
+
     Pint = secprop->Add_int("vmemdelay", Property::Changeable::WhenIdle,0);
     Pint->SetMinMax(-1,100000);
     Pint->Set_help( "VGA Memory I/O delay in nanoseconds. Set to -1 to use default, 0 to disable.\n"
@@ -1341,6 +1344,17 @@ void DOSBOX_SetupConfigSections(void) {
             "This does not affect the linear framebuffer's location. It only affects the linear framebuffer\n"
             "location reported by the VESA BIOS. Set to nonzero for DOS games with sloppy VESA graphics pointer management.\n"
             "    MFX \"Melvindale\" (1996): Set this option to 2 to center the picture properly.");
+
+    /* If set, all VESA BIOS modes map 128KB of video RAM at A0000-BFFFF even though VESA BIOS emulation
+     * reports a 64KB window. Some demos like the 1996 Wired report
+     * (ftp.scene.org/pub/parties/1995/wired95/misc/e-w95rep.zip) assume they can write past the window
+     * by spilling into B0000 without bank switching. */
+    Pbool = secprop->Add_bool("vesa map non-lfb modes to 128kb region",Property::Changeable::Always,false);
+    Pbool->Set_help("If set, VESA BIOS SVGA modes will be set to map 128KB of video memory to A0000-BFFFF instead of\n"
+                    "64KB at A0000-AFFFF. This does not affect the SVGA window size or granularity.\n"
+                    "Some games or demoscene productions assume that they can render into the next SVGA window/bank\n"
+                    "by writing to video memory beyond the current SVGA window address and will not appear correctly\n"
+                    "without this option.");
 
     Pbool = secprop->Add_bool("allow hpel effects",Property::Changeable::Always,false);
     Pbool->Set_help("If set, allow the DOS demo or program to change the horizontal pel (panning) register per scanline.\n"
@@ -2007,6 +2021,20 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("unmask dma",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("Start the DOS virtual machine with the DMA channel already unmasked at the controller.\n"
             "Use this for DOS applications that expect to operate the GUS but forget to unmask the DMA channel.");
+
+    Pbool = secprop->Add_bool("pic unmask irq",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("Start the DOS virtual machine with the GUS IRQ already unmasked at the PIC.");
+
+    Pbool = secprop->Add_bool("startup initialized",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, start the GF1 in a fully initialized state (as if ULTRINIT had been run).\n"
+                    "If clear, leave the card in an uninitialized state (as if cold boot).\n"
+                    "Some DOS games or demoscene productions will hang or fail to use the Ultrasound hardware\n"
+                    "because they assume the card is initialized and their hardware detect does not fully initialize the card.");
+
+    Pbool = secprop->Add_bool("dma enable on dma control polling",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, automatically enable GUS DMA transfer bit in specific cases when the DMA control register is being polled.\n"
+                    "THIS IS A HACK. Some games and demoscene productions need this hack to avoid hanging while uploading sample data\n"
+                    "to the Gravis Ultrasound due to bugs in their implementation.");
 
     Pbool = secprop->Add_bool("clear dma tc irq if excess polling",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If the DOS application is seen polling the IRQ status register rapidly, automatically clear the DMA TC IRQ status.\n"
