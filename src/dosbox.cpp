@@ -246,6 +246,9 @@ void                INT10_Init(Section*);
 #if C_NE2000
 void                NE2K_Init(Section* sec);
 #endif
+#if C_PRINTER
+void                PRINTER_Init(Section*);
+#endif
 
 signed long long time_to_clockdom(ClockDomain &src,double t) {
     signed long long lt = (signed long long)t;
@@ -811,6 +814,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* captureformats[] = { "default", "avi-zmbv", "mpegts-h264", 0 };
     const char* blocksizes[] = {"1024", "2048", "4096", "8192", "512", "256", 0};
     const char* capturechromaformats[] = { "auto", "4:4:4", "4:2:2", "4:2:0", 0};
+    const char* controllertypes[] = { "auto", "at", "xt", "pcjr", "pc98", 0}; // Future work: Tandy(?) and USB
     const char* auxdevices[] = {"none","2button","3button","intellimouse","intellimouse45",0};
     const char* cputype_values[] = {"auto", "8086", "8086_prefetch", "80186", "80186_prefetch", "286", "286_prefetch", "386", "386_prefetch", "486", "486_prefetch", "pentium", "pentium_mmx", "ppro_slow", 0};
     const char* rates[] = {  "44100", "48000", "32000","22050", "16000", "11025", "8000", "49716", 0 };
@@ -1689,6 +1693,15 @@ void DOSBOX_SetupConfigSections(void) {
             "This option is required to allow Windows ME to reboot properly, whereas Windows 9x and earlier\n"
             "will reboot without this option using INT 19h");
 
+    Pstring = secprop->Add_string("controllertype",Property::Changeable::OnlyAtStart,"auto");
+    Pstring->Set_values(controllertypes);
+    Pstring->Set_help("Type of keyboard controller (and keyboard) attached.\n"
+                      "auto     Automatically pick according to machine type\n"
+                      "at       AT (PS/2) type keyboard\n"
+                      "xt       IBM PC/XT type keyboard\n"
+                      "pcjr     IBM PCjr type keyboard (only if machine=pcjr)\n"
+                      "pc98     PC-98 keyboard emulation (only if machine=pc98)");
+
     Pstring = secprop->Add_string("auxdevice",Property::Changeable::OnlyAtStart,"intellimouse");
     Pstring->Set_values(auxdevices);
     Pstring->Set_help("Type of PS/2 mouse attached to the AUX port");
@@ -2282,6 +2295,46 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_values(serials);
     Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
     Pmulti_remain->Set_help("see serial1");
+
+#if C_PRINTER
+    // printer redirection parameters
+    secprop = control->AddSection_prop("printer", &Null_Init);
+    Pbool = secprop->Add_bool("printer", Property::Changeable::WhenIdle, true);
+    Pbool->Set_help("Enable printer emulation.");
+    //secprop->Add_string("fontpath","%%windir%%\\fonts");
+    Pint = secprop->Add_int("dpi", Property::Changeable::WhenIdle, 360);
+    Pint->Set_help("Resolution of printer (default 360).");
+    Pint = secprop->Add_int("width", Property::Changeable::WhenIdle, 85);
+    Pint->Set_help("Width of paper in 1/10 inch (default 85 = 8.5'').");
+    Pint = secprop->Add_int("height", Property::Changeable::WhenIdle, 110);
+    Pint->Set_help("Height of paper in 1/10 inch (default 110 = 11.0'').");
+#ifdef C_LIBPNG
+    Pstring = secprop->Add_string("printoutput", Property::Changeable::WhenIdle, "png");
+#else
+    Pstring = secprop->Add_string("printoutput", Property::Changeable::WhenIdle, "ps");
+#endif
+    Pstring->Set_help("Output method for finished pages: \n"
+#ifdef C_LIBPNG
+        "  png     : Creates PNG images (default)\n"
+#endif
+        "  ps      : Creates Postscript\n"
+        "  bmp     : Creates BMP images (very huge files, not recommend)\n"
+#if defined (WIN32)
+        "  printer : Send to an actual printer (Print dialog will appear)"
+#endif
+    );
+
+    Pbool = secprop->Add_bool("multipage", Property::Changeable::WhenIdle, false);
+    Pbool->Set_help("Adds all pages to one Postscript file or printer job until CTRL-F2 is pressed.");
+
+    Pstring = secprop->Add_string("docpath", Property::Changeable::WhenIdle, ".");
+    Pstring->Set_help("The path where the output files are stored.");
+
+    Pint = secprop->Add_int("timeout", Property::Changeable::WhenIdle, 0);
+    Pint->Set_help("(in milliseconds) if nonzero: the time the page will\n"
+        "be ejected automatically after when no more data\n"
+        "arrives at the printer.");
+#endif
 
     // parallel ports
     secprop=control->AddSection_prop("parallel",&Null_Init,true);
