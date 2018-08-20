@@ -551,6 +551,34 @@ void DBGUI_StartUp(void) {
 
 #endif
 
+int debugPageCounter = 0;
+int debugPageStopAt = 0;
+
+bool DEBUG_IsPagingOutput(void) {
+    return debugPageStopAt > 0;
+}
+
+void DEBUG_DrawInput(void);
+
+void DEBUG_BeginPagedContent(void) {
+#if C_DEBUG
+	int maxy, maxx; getmaxyx(dbg.win_out,maxy,maxx);
+
+    debugPageCounter = 0;
+    debugPageStopAt = maxy;
+#endif
+}
+
+void DEBUG_EndPagedContent(void) {
+#if C_DEBUG
+    debugPageCounter = 0;
+    debugPageStopAt = 0;
+    DEBUG_DrawInput();
+#endif
+}
+
+bool IsDebuggerActive(void);
+
 void DEBUG_ShowMsg(char const* format,...) {
 	bool stderrlog = false;
 	char buf[512];
@@ -613,6 +641,33 @@ void DEBUG_ShowMsg(char const* format,...) {
             wrefresh(dbg.win_out);
         }
 	}
+
+    if (IsDebuggerActive() && debugPageStopAt > 0) {
+        if (++debugPageCounter >= debugPageStopAt) {
+            int key;
+
+            debugPageCounter = 0;
+            DEBUG_RefreshPage(0);
+            DEBUG_DrawInput();
+
+            /* pause, wait for input */
+            do {
+                key = getch();
+                if (key > 0) {
+                    if (key == ' ' || key == 0x0A) {
+                        /* continue */
+                        break;
+                    }
+                    else if (key == 0x27/*ESC*/ || key == 0x7F/*DEL*/ || key == 0x08/*BKSP*/ ||
+                             key == 'q' || key == 'Q') {
+                        /* user wants to stop paging */
+                        debugPageStopAt = 0;
+                        break;
+                    }
+                }
+            } while (1);
+        }
+    }
 #endif
 }
 

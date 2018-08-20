@@ -53,6 +53,7 @@ void KEYBOARD_AUX_Event(float x,float y,Bitu buttons,int scrollwheel);
 
 bool en_int33=false;
 bool en_bios_ps2mouse=false;
+bool cell_granularity_disable=false;
 
 void DisableINT33() {
     if (en_int33) {
@@ -564,6 +565,10 @@ static inline bool GFX_IsFullscreen(void) {
 }
 #endif
 
+extern int  user_cursor_x,  user_cursor_y;
+extern int  user_cursor_sw, user_cursor_sh;
+extern bool user_cursor_locked;
+
 /* FIXME: Re-test this code */
 void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
     extern bool Mouse_Vertical;
@@ -580,8 +585,16 @@ void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
     if((fabs(yrel) > 1.0) || (mouse.senv_y < 1.0)) dy *= mouse.senv_y;
     if (useps2callback) dy *= 2;    
 
-    /* serial mouse, if connected, also wants to know about it */
-    on_mouse_event_for_serial((int)(dx),(int)(dy*2),mouse.buttons);
+    if (user_cursor_locked) {
+        /* either device reports relative motion ONLY, and therefore requires that the user
+         * has captured the mouse */
+
+        /* serial mouse */
+        on_mouse_event_for_serial((int)(dx),(int)(dy*2),mouse.buttons);
+
+        /* PC-98 mouse */
+        if (IS_PC98_ARCH) pc98_mouse_movement_apply(xrel,yrel);
+    }
 
     mouse.mickey_x += (dx * mouse.mickeysPerPixel_x);
     mouse.mickey_y += (dy * mouse.mickeysPerPixel_y);
@@ -611,18 +624,12 @@ void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
         }
     }
 
-    if (IS_PC98_ARCH)
-        pc98_mouse_movement_apply(xrel,yrel);
-
     /* ignore constraints if using PS2 mouse callback in the bios */
 
     if (mouse.x > mouse.max_x) mouse.x = mouse.max_x;
     if (mouse.x < mouse.min_x) mouse.x = mouse.min_x;
     if (mouse.y > mouse.max_y) mouse.y = mouse.max_y;
     if (mouse.y < mouse.min_y) mouse.y = mouse.min_y;
-    extern int  user_cursor_x,  user_cursor_y;
-    extern int  user_cursor_sw, user_cursor_sh;
-    extern bool user_cursor_locked;
 
     /*make mouse emulated, eventually*/
     extern MOUSE_EMULATION user_cursor_emulation;
@@ -876,6 +883,11 @@ void Mouse_NewVideoMode(void) {
     mouse.max_x = 639;
     mouse.min_x = 0;
     mouse.min_y = 0;
+
+    if (cell_granularity_disable) {
+        mouse.gran_x = (Bit16s)0xffff;
+        mouse.gran_y = (Bit16s)0xffff;
+    }
 
     mouse.events = 0;
     mouse.timer_in_progress = false;
@@ -1383,7 +1395,13 @@ void MOUSE_Startup(Section *sec) {
     /* TODO: Needs to check for mouse, and fail to do anything if neither PS/2 nor serial mouse emulation enabled */
 
     en_int33=section->Get_bool("int33");
-    if (!en_int33) return;
+    if (!en_int33) {
+        Mouse_Reset();
+        Mouse_SetSensitivity(50,50,50);
+        return;
+    }
+
+    cell_granularity_disable=section->Get_bool("int33 disable cell granularity");
 
     LOG(LOG_KEYBOARD,LOG_NORMAL)("INT 33H emulation enabled");
 

@@ -5982,6 +5982,9 @@ bool VM_PowerOn() {
     return true;
 }
 
+void update_capture_fmt_menu(void);
+bool capture_fmt_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem);
+
 void update_pc98_clock_pit_menu(void) {
     Section_prop * dosbox_section = static_cast<Section_prop *>(control->GetSection("dosbox"));
 
@@ -7130,6 +7133,19 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CaptureMenu");
             item.set_text("Capture");
         }
+        {
+            DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"CaptureFormatMenu");
+            item.set_text("Capture format");
+
+            {
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"capture_fmt_avi_zmbv").set_text("AVI + ZMBV").
+                    set_callback_function(capture_fmt_menu_callback);
+#if (C_AVCODEC)
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"capture_fmt_mpegts_h264").set_text("MPEG-TS + H.264").
+                    set_callback_function(capture_fmt_menu_callback);
+#endif
+            }
+        }
 
         /* more */
         {
@@ -7315,6 +7331,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 
         OutputSettingMenuUpdate();
         update_pc98_clock_pit_menu();
+        update_capture_fmt_menu();
 
         /* The machine just "powered on", and then reset finished */
         if (!VM_PowerOn()) E_Exit("VM failed to power on");

@@ -80,6 +80,10 @@ static void DrawVariables(void);
 static void LogDOSKernMem(void);
 static void LogBIOSMem(void);
 
+void DEBUG_DrawInput(void) {
+    DrawInput();
+}
+
 bool XMS_Active(void);
 
 Bitu XMS_GetTotalHandles(void);
@@ -141,6 +145,9 @@ static bool debugging = false;
 static bool debug_running = false;
 static bool check_rescroll = false;
 
+bool IsDebuggerActive(void) {
+    return debugging;
+}
 
 static void SetColor(Bitu test) {
 	if (test) {
@@ -888,12 +895,20 @@ static void DrawRegisters(void) {
 	wrefresh(dbg.win_reg);
 }
 
+bool DEBUG_IsPagingOutput(void);
+
 static void DrawInput(void) {
     if (!debugging) {
         wbkgdset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
         wattrset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
 
         mvwprintw(dbg.win_inp,0,0,"%s","(Running)");
+        wclrtoeol(dbg.win_inp);
+    } else if (DEBUG_IsPagingOutput()) {
+        wbkgdset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
+        wattrset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
+
+        mvwprintw(dbg.win_inp,0,0,"%s","^ Paged content: Hit ENTER to continue, Q to exit paging");
         wclrtoeol(dbg.win_inp);
     } else {
         //TODO long lines
@@ -1147,6 +1162,9 @@ bool ChangeRegister(char* str)
 void DEBUG_GUI_Rebuild(void);
 void DBGUI_NextWindowIfActiveHidden(void);
 
+void DEBUG_BeginPagedContent(void);
+void DEBUG_EndPagedContent(void);
+
 bool ParseCommand(char* str) {
 	char* found = str;
 	for(char* idx = found;*idx != 0; idx++)
@@ -1350,9 +1368,11 @@ bool ParseCommand(char* str) {
 	};
 
 	if (command == "BPLIST") {
+        DEBUG_BeginPagedContent();
 		DEBUG_ShowMsg("Breakpoint list:\n");
 		DEBUG_ShowMsg("-------------------------------------------------------------------------\n");
 		CBreakpoint::ShowList();
+        DEBUG_EndPagedContent();
 		return true;
 	};
 
@@ -1413,6 +1433,8 @@ bool ParseCommand(char* str) {
         void DEBUG_PICAck(int irq);
         void DEBUG_LogPIC(void);
 
+        DEBUG_BeginPagedContent();
+
 		stream >> command;
 
         if (command == "MASKIRQ") {
@@ -1448,6 +1470,8 @@ bool ParseCommand(char* str) {
         else {
             DEBUG_LogPIC();
         }
+
+        DEBUG_EndPagedContent();
 
         return true;
     }
@@ -1625,6 +1649,7 @@ bool ParseCommand(char* str) {
 
 #endif
 	if (command == "HELP" || command == "?") {
+        DEBUG_BeginPagedContent();
 		DEBUG_ShowMsg("Debugger commands (enter all values in hex or as register):\n");
 		DEBUG_ShowMsg("--------------------------------------------------------------------------\n");
 		DEBUG_ShowMsg("F3/F6                     - Previous command in history.\n");
@@ -1634,9 +1659,10 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("F10/F11                   - Step over / trace into instruction.\n");
 		DEBUG_ShowMsg("ALT + D/E/S/X/B           - Set data view to DS:SI/ES:DI/SS:SP/DS:DX/ES:BX.\n");
 		DEBUG_ShowMsg("Escape                    - Clear input line.");
-		DEBUG_ShowMsg("Up/Down                   - Move code view cursor.\n");
-		DEBUG_ShowMsg("Page Up/Down              - Scroll data view.\n");
-		DEBUG_ShowMsg("Home/End                  - Scroll log messages.\n");
+		DEBUG_ShowMsg("Up/Down                   - Scroll up/down in the current window.\n");
+		DEBUG_ShowMsg("Page Up/Down              - Page up/down in the current window.\n");
+		DEBUG_ShowMsg("Home/End                  - Move to begin/end of the current window.\n");
+        DEBUG_ShowMsg("TAB                       - Select next window\n");
 		DEBUG_ShowMsg("BP     [segment]:[offset] - Set breakpoint.\n");
 		DEBUG_ShowMsg("BPINT  [intNr] *          - Set interrupt breakpoint.\n");
 		DEBUG_ShowMsg("BPINT  [intNr] [ah]       - Set interrupt breakpoint with ah.\n");
@@ -1679,6 +1705,7 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("TIMERIRQ                  - Run the system timer.\n");
 
 		DEBUG_ShowMsg("HELP                      - Help\n");
+        DEBUG_EndPagedContent();
 		
 		return true;
 	}
@@ -2465,6 +2492,8 @@ extern RegionAllocTracking rombios_alloc;
 static void LogBIOSMem(void) {
     char tmp[192];
 
+    DEBUG_BeginPagedContent();
+
     LOG(LOG_MISC,LOG_ERROR)("BIOS memory blocks:");
     LOG(LOG_MISC,LOG_ERROR)("Region            Status What");
     for (auto i=rombios_alloc.alist.begin();i!=rombios_alloc.alist.end();i++) {
@@ -2474,6 +2503,8 @@ static void LogBIOSMem(void) {
             i->free ? "FREE  " : "ALLOC ");
         LOG(LOG_MISC,LOG_ERROR)("%s %s",tmp,i->who.c_str());
     }
+
+    DEBUG_EndPagedContent();
 }
 
 Bitu XMS_GetTotalHandles(void);
@@ -2498,6 +2529,8 @@ static void LogEMS(void) {
         LOG(LOG_MISC,LOG_ERROR)("Cannot enumerate EMS memory while EMS is inactive.");
         return;
     }
+
+    DEBUG_BeginPagedContent();
 
     LOG(LOG_MISC,LOG_ERROR)("EMS memory (type %s) handles:",EMS_Type_String());
     LOG(LOG_MISC,LOG_ERROR)("Handle Address  Size (bytes)    Name");
@@ -2548,6 +2581,8 @@ static void LogEMS(void) {
                 (GetEMSPageFrameSegment()*16UL)+((p+1UL) << 14UL)-1);
         }
     }
+
+    DEBUG_EndPagedContent();
 }
 
 static void LogXMS(void) {
@@ -2566,19 +2601,23 @@ static void LogXMS(void) {
         return;
     }
 
+    DEBUG_BeginPagedContent();
+
     LOG(LOG_MISC,LOG_ERROR)("XMS memory handles:");
     LOG(LOG_MISC,LOG_ERROR)("Handle Status Location Size (bytes)");
     for (Bitu h=1;h < XMS_GetTotalHandles();h++) {
         if (XMS_GetHandleInfo(/*&*/phys_location,/*&*/size,/*&*/lockcount,/*&*/free,h)) {
             if (!free) {
                 LOG(LOG_MISC,LOG_ERROR)("%6lu %s 0x%08lx %lu",
-                    (unsigned long)h,
-                    free ? "FREE  " : "ALLOC ",
-                    (unsigned long)phys_location,
-                    (unsigned long)size << 10UL); /* KB -> bytes */
+                        (unsigned long)h,
+                        free ? "FREE  " : "ALLOC ",
+                        (unsigned long)phys_location,
+                        (unsigned long)size << 10UL); /* KB -> bytes */
             }
         }
     }
+
+    DEBUG_EndPagedContent();
 }
 
 static void LogDOSKernMem(void) {
@@ -2589,15 +2628,19 @@ static void LogDOSKernMem(void) {
         return;
     }
 
+    DEBUG_BeginPagedContent();
+
     LOG(LOG_MISC,LOG_ERROR)("DOS kernel memory blocks:");
     LOG(LOG_MISC,LOG_ERROR)("Seg      Size (bytes)     What");
     for (auto i=DOS_GetMemLog.begin();i!=DOS_GetMemLog.end();i++) {
         sprintf(tmp,"%04x     %8lu     ",
-            (unsigned int)(i->segbase),
-            (unsigned long)(i->pages << 4UL));
+                (unsigned int)(i->segbase),
+                (unsigned long)(i->pages << 4UL));
 
         LOG(LOG_MISC,LOG_ERROR)("%s    %s",tmp,i->who.c_str());
     }
+
+    DEBUG_EndPagedContent();
 }
 
 // Display the content of all Memory Control Blocks.
@@ -2608,14 +2651,18 @@ static void LogMCBS(void)
         return;
     }
 
-	LOG(LOG_MISC,LOG_ERROR)("MCB Seg  Size (bytes)  PSP Seg (notes)  Filename");
-	LOG(LOG_MISC,LOG_ERROR)("Conventional memory:");
-	LogMCBChain(dos.firstMCB);
+    DEBUG_BeginPagedContent();
+
+    LOG(LOG_MISC,LOG_ERROR)("MCB Seg  Size (bytes)  PSP Seg (notes)  Filename");
+    LOG(LOG_MISC,LOG_ERROR)("Conventional memory:");
+    LogMCBChain(dos.firstMCB);
 
     if (dos_infoblock.GetStartOfUMBChain() != 0xFFFF) {
         LOG(LOG_MISC,LOG_ERROR)("Upper memory:");
         LogMCBChain(dos_infoblock.GetStartOfUMBChain());
     }
+
+    DEBUG_EndPagedContent();
 }
 
 static void LogGDT(void)
@@ -2626,6 +2673,9 @@ static void LogGDT(void)
 	PhysPt address = cpu.gdt.GetBase();
 	PhysPt max	   = address + length;
 	Bitu i = 0;
+
+    DEBUG_BeginPagedContent();
+
 	LOG(LOG_MISC,LOG_ERROR)("GDT Base:%08lX Limit:%08lX",(unsigned long)address,(unsigned long)length);
 	while (address<max) {
 		desc.Load(address);
@@ -2635,6 +2685,8 @@ static void LogGDT(void)
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		address+=8; i++;
 	}
+
+    DEBUG_EndPagedContent();
 }
 
 static void LogLDT(void) {
@@ -2646,6 +2698,9 @@ static void LogLDT(void) {
 	PhysPt address = desc.GetBase();
 	PhysPt max	   = address + length;
 	Bitu i = 0;
+
+    DEBUG_BeginPagedContent();
+
 	LOG(LOG_MISC,LOG_ERROR)("LDT Base:%08lX Limit:%08lX",(unsigned long)address,(unsigned long)length);
 	while (address<max) {
 		desc.Load(address);
@@ -2655,12 +2710,17 @@ static void LogLDT(void) {
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 		address+=8; i++;
 	}
+
+    DEBUG_EndPagedContent();
 }
 
 static void LogIDT(void) {
 	char out1[512];
 	Descriptor desc;
 	Bitu address = 0;
+
+    DEBUG_BeginPagedContent();
+
 	while (address<256*8) {
 		if (cpu.idt.GetDescriptor(address,desc)) {
 			sprintf(out1,"%04X: sel:%04X off:%02X",(unsigned int)(address/8),(int)desc.GetSelector(),(int)desc.GetOffset());
@@ -2668,10 +2728,15 @@ static void LogIDT(void) {
 		}
 		address+=8;
 	}
+
+    DEBUG_EndPagedContent();
 }
 
 void LogPages(char* selname) {
 	char out1[512];
+
+    DEBUG_BeginPagedContent();
+
 	if (paging.enabled) {
 		Bitu sel = GetHexValue(selname,selname);
 		if ((sel==0x00) && ((*selname==0) || (*selname=='*'))) {
@@ -2714,10 +2779,15 @@ void LogPages(char* selname) {
 			}
 		}
 	}
+
+    DEBUG_EndPagedContent();
 }
 
 static void LogCPUInfo(void) {
 	char out1[512];
+
+    DEBUG_BeginPagedContent();
+
 	sprintf(out1,"cr0:%08lX cr2:%08lX cr3:%08lX  cpl=%lx",
 		(unsigned long)cpu.cr0,
 		(unsigned long)paging.cr2,
@@ -2750,6 +2820,8 @@ static void LogCPUInfo(void) {
 		sprintf(out1,"LDT selector=%04X, base=%08lX limit=%08lX*%X",(int)sel,(unsigned long)desc.GetBase(),(unsigned long)desc.GetLimit(),desc.saved.seg.g?0x4000:1);
 		LOG(LOG_MISC,LOG_ERROR)("%s",out1);
 	}
+
+    DEBUG_EndPagedContent();
 }
 
 #if C_HEAVY_DEBUG
