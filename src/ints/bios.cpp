@@ -5924,6 +5924,7 @@ private:
                     break;
                 case EGAVGA_ARCH_CASE:
                 case MCH_CGA:
+                case MCH_MCGA:
                 case TANDY_ARCH_CASE:
                 case MCH_AMSTRAD:
                     //Startup 80x25 color
@@ -6457,6 +6458,9 @@ private:
             switch (machine) {
                 case MCH_CGA:
                     card = "IBM Color Graphics Adapter";
+                    break;
+                case MCH_MCGA:
+                    card = "IBM Multi Color Graphics Adapter";
                     break;
                 case MCH_HERC:
                     card = "IBM Monochrome Display Adapter (Hercules)";

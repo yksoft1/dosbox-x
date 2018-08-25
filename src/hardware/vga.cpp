@@ -392,6 +392,11 @@ void VGA_SetCGA2Table(Bit8u val0,Bit8u val1) {
             ((Bitu)total[(i >> 1u) & 1u] << 16u ) | ((Bitu)total[(i >> 0u) & 1u] << 24u );
 #endif
     }
+
+    if (machine == MCH_MCGA) {
+        VGA_DAC_CombineColor(0x0,val0);
+        VGA_DAC_CombineColor(0x1,val1);
+    }
 }
 
 void VGA_SetCGA4Table(Bit8u val0,Bit8u val1,Bit8u val2,Bit8u val3) {
@@ -413,7 +418,14 @@ void VGA_SetCGA4Table(Bit8u val0,Bit8u val1,Bit8u val2,Bit8u val3) {
             ((Bitu)total[((i >> 3u) & 1u) | ((i >> 6u) & 2u)] << 0u  ) | (Bitu)(total[((i >> 2u) & 1u) | ((i >> 5u) & 2u)] << 8u  ) |
             ((Bitu)total[((i >> 1u) & 1u) | ((i >> 4u) & 2u)] << 16u ) | (Bitu)(total[((i >> 0u) & 1u) | ((i >> 3u) & 2u)] << 24u );
 #endif
-    }   
+    }
+
+    if (machine == MCH_MCGA) {
+        VGA_DAC_CombineColor(0x0,val0);
+        VGA_DAC_CombineColor(0x1,val1);
+        VGA_DAC_CombineColor(0x2,val2);
+        VGA_DAC_CombineColor(0x3,val3);
+    }
 }
 
 class VFRCRATE : public Program {
@@ -784,6 +796,9 @@ void VGA_Reset(Section*) {
             break;
         case MCH_PC98:
             if (vga.mem.memsize < _KB_bytes(512)) vga.mem.memsize = _KB_bytes(512);
+            break;
+        case MCH_MCGA:
+            if (vga.mem.memsize < _KB_bytes(64)) vga.mem.memsize = _KB_bytes(64);
             break;
         default:
             E_Exit("Unexpected machine");
@@ -1244,6 +1259,8 @@ void VGA_SaveState(Section *sec) {
 void VGA_Init() {
     string str;
     Bitu i,j;
+
+    vga.other.mcga_mode_control = 0;
 
     vga.draw.render_step = 0;
     vga.draw.render_max = 1;

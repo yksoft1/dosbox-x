@@ -123,6 +123,14 @@ void VGA_DAC_UpdateColor( Bitu index ) {
 
         VGA_DAC_SendColor( index, maskIndex );
     }
+    else if (machine == MCH_MCGA) {
+        if (vga.mode == M_VGA || vga.mode == M_LIN8)
+            maskIndex = index & vga.dac.pel_mask;
+        else
+            maskIndex = vga.dac.combine[index&0xF] & vga.dac.pel_mask;
+
+        VGA_DAC_SendColor( index, maskIndex );
+    }
     else {
         VGA_DAC_SendColor( index, index );
     }
@@ -145,6 +153,10 @@ void write_p3c6(Bitu port,Bitu val,Bitu iolen) {
     if ( vga.dac.pel_mask != val ) {
         LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:DCA:Pel Mask set to %X", (int)val);
         vga.dac.pel_mask = val;
+
+        // TODO: MCGA 640x480 2-color mode appears to latch the DAC at retrace
+        //       for background/foreground. Does that apply to the PEL mask too?
+
         VGA_DAC_UpdateColorPalette();
     }
 }
@@ -237,7 +249,19 @@ void write_p3c9(Bitu port,Bitu val,Bitu iolen) {
     }
 
     if (update) {
-        VGA_DAC_UpdateColorPalette(); // FIXME: Yes, this is very inefficient. Will improve later.
+        // As seen on real hardware: 640x480 2-color is the ONLY video mode
+        // where the MCGA hardware appears to latch foreground and background
+        // colors from the DAC at retrace, instead of always reading through
+        // the DAC.
+        //
+        // Perhaps IBM couldn't get the DAC to run fast enough for 640x480 2-color mode.
+        if (machine == MCH_MCGA && (vga.other.mcga_mode_control & 2)) {
+            /* do not update the palette right now.
+             * MCGA double-buffers foreground and background colors */
+        }
+        else {
+            VGA_DAC_UpdateColorPalette(); // FIXME: Yes, this is very inefficient. Will improve later.
+        }
 
         /* only if we just completed a color should we advance */
         if (vga.dac.pel_index == 0)
@@ -297,6 +321,9 @@ void VGA_DAC_CombineColor(Bit8u attr,Bit8u pal) {
             VGA_DAC_UpdateColor( attr );
         }
     }
+    else if (machine == MCH_MCGA) {
+        VGA_DAC_UpdateColor( attr );
+    }
     else {
         VGA_DAC_SendColor( attr, pal );
     }
@@ -322,7 +349,7 @@ void VGA_SetupDAC(void) {
     vga.dac.write_index=0;
     vga.dac.hidac_counter=0;
     vga.dac.reg02=0;
-    if (IS_VGA_ARCH) {
+    if (IS_VGA_ARCH || machine == MCH_MCGA) {
         /* Setup the DAC IO port Handlers */
         if (svga.setup_dac) {
             svga.setup_dac();
