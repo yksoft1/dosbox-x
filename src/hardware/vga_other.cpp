@@ -29,6 +29,7 @@
 
 #define crtc(blah) vga.crtc.blah
 
+static Bitu read_cga(Bitu /*port*/,Bitu /*iolen*/);
 static void write_cga(Bitu port,Bitu val,Bitu /*iolen*/);
 
 static void write_crtc_index_other(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
@@ -518,9 +519,26 @@ static void write_cga_color_select(Bitu val) {
 	}
 }
 
+static Bitu read_cga(Bitu port,Bitu /*iolen*/) {
+    if (machine == MCH_MCGA) { // On MCGA, ports 3D8h and 3D9h are also readable
+        switch (port) {
+            case 0x3d8:
+                return vga.tandy.mode_control;
+            case 0x3d9: // color select
+                return vga.tandy.color_select;
+        }
+    }
+
+    return ~0UL;
+}
+
 static void write_cga(Bitu port,Bitu val,Bitu /*iolen*/) {
+    Bitu changed;
+
 	switch (port) {
 	case 0x3d8:
+        changed = vga.tandy.mode_control ^ val;
+
 		vga.tandy.mode_control=(Bit8u)val;
 		vga.attr.disabled = (val&0x8)? 0: 1; 
         if (vga.other.mcga_mode_control & 3) { // MCGA 256-color mode or 2-color 640x480
@@ -548,6 +566,12 @@ static void write_cga(Bitu port,Bitu val,Bitu /*iolen*/) {
 			VGA_SetMode(M_TANDY_TEXT);
 		}
 		VGA_SetBlinking(val & 0x20);
+
+        /* MCGA: Changes to this bit are important to track, because
+         *       horizontal timings do not change between 40x25 and 80x25 */
+        if (changed & 1) /* 80x25 enable bit changed */
+            VGA_StartResize();
+
 		break;
 	case 0x3d9: // color select
 		write_cga_color_select(val);
@@ -1014,8 +1038,12 @@ void VGA_SetupOther(void) {
 		IO_RegisterWriteHandler(0x3d8,write_cga,IO_MB);
 		IO_RegisterWriteHandler(0x3d9,write_cga,IO_MB);
 
-		if( machine==MCH_AMSTRAD )
-		{
+        if (machine == MCH_MCGA) { /* ports 3D8h-3D9h are readable on MCGA */
+            IO_RegisterReadHandler(0x3d8,read_cga,IO_MB);
+            IO_RegisterReadHandler(0x3d9,read_cga,IO_MB);
+        }
+
+		if (machine == MCH_AMSTRAD) {
 			IO_RegisterWriteHandler(0x3dd,write_cga,IO_MB);
 			IO_RegisterWriteHandler(0x3de,write_cga,IO_MB);
 			IO_RegisterWriteHandler(0x3df,write_cga,IO_MB);
