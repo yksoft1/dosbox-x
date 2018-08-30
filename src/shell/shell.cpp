@@ -30,6 +30,7 @@
 #include "builtin.h"
 #include "build_timestamp.h"
 
+extern bool enable_config_as_shell_commands;
 extern bool dos_shell_running_program;
 
 Bitu shell_psp = 0;
@@ -335,7 +336,7 @@ void DOS_Shell::Run(void) {
 #endif
         if (machine == MCH_CGA || machine == MCH_AMSTRAD) WriteOut(MSG_Get("SHELL_STARTUP_CGA"));
         if (machine == MCH_PC98) WriteOut(MSG_Get("SHELL_STARTUP_PC98"));
-        if (machine == MCH_HERC) WriteOut(MSG_Get("SHELL_STARTUP_HERC"));
+        if (machine == MCH_HERC || machine == MCH_MDA) WriteOut(MSG_Get("SHELL_STARTUP_HERC"));
         WriteOut(MSG_Get("SHELL_STARTUP_END"));
     }
     else {
@@ -1083,6 +1084,12 @@ void SHELL_Init() {
 	/* Setup internal DOS Variables */
 	dos.dta(RealMake(psp_seg,0x80));
 	dos.psp(psp_seg);
+
+    /* settings */
+    {
+        Section_prop * section=static_cast<Section_prop *>(control->GetSection("dos"));
+        enable_config_as_shell_commands = section->Get_bool("shell configuration as commands");
+    }
 }
 
 /* Pfff... starting and running the shell from a configuration section INIT

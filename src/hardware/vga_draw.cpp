@@ -578,17 +578,17 @@ static Bit8u * EGA_Draw_VGA_Planar_Xlat8_Line(Bitu vidstart, Bitu /*line*/) {
             for (Bitu w = 0;w < 2;w++,t1>>=8,t2>>=8,i+=8) {
                 tmp =   Expand16Table[0][(t1>>0)&0xFF] |
                     Expand16Table[2][(t1>>16)&0xFF];
-                temps[i+0] = vga.attr.palette[(tmp>>0)&0xFF];
-                temps[i+1] = vga.attr.palette[(tmp>>8)&0xFF];
-                temps[i+2] = vga.attr.palette[(tmp>>16)&0xFF];
-                temps[i+3] = vga.attr.palette[(tmp>>24)&0xFF];
+                temps[i+0] = vga.attr.palette[(tmp>>0)&vga.attr.color_plane_enable];
+                temps[i+1] = vga.attr.palette[(tmp>>8)&vga.attr.color_plane_enable];
+                temps[i+2] = vga.attr.palette[(tmp>>16)&vga.attr.color_plane_enable];
+                temps[i+3] = vga.attr.palette[(tmp>>24)&vga.attr.color_plane_enable];
 
                 tmp =   Expand16Table[0][(t2>>0)&0xFF] |
                     Expand16Table[2][(t2>>16)&0xFF];
-                temps[i+4] = vga.attr.palette[(tmp>>0)&0xFF];
-                temps[i+5] = vga.attr.palette[(tmp>>8)&0xFF];
-                temps[i+6] = vga.attr.palette[(tmp>>16)&0xFF];
-                temps[i+7] = vga.attr.palette[(tmp>>24)&0xFF];
+                temps[i+4] = vga.attr.palette[(tmp>>0)&vga.attr.color_plane_enable];
+                temps[i+5] = vga.attr.palette[(tmp>>8)&vga.attr.color_plane_enable];
+                temps[i+6] = vga.attr.palette[(tmp>>16)&vga.attr.color_plane_enable];
+                temps[i+7] = vga.attr.palette[(tmp>>24)&vga.attr.color_plane_enable];
             }
         }
     }
@@ -603,19 +603,19 @@ static Bit8u * EGA_Draw_VGA_Planar_Xlat8_Line(Bitu vidstart, Bitu /*line*/) {
                 Expand16Table[1][(t1>>8)&0xFF] |
                 Expand16Table[2][(t1>>16)&0xFF] |
                 Expand16Table[3][(t1>>24)&0xFF];
-            temps[i+0] = vga.attr.palette[(tmp>>0)&0xFF];
-            temps[i+1] = vga.attr.palette[(tmp>>8)&0xFF];
-            temps[i+2] = vga.attr.palette[(tmp>>16)&0xFF];
-            temps[i+3] = vga.attr.palette[(tmp>>24)&0xFF];
+            temps[i+0] = vga.attr.palette[(tmp>>0)&vga.attr.color_plane_enable];
+            temps[i+1] = vga.attr.palette[(tmp>>8)&vga.attr.color_plane_enable];
+            temps[i+2] = vga.attr.palette[(tmp>>16)&vga.attr.color_plane_enable];
+            temps[i+3] = vga.attr.palette[(tmp>>24)&vga.attr.color_plane_enable];
 
             tmp =   Expand16Table[0][(t2>>0)&0xFF] |
                 Expand16Table[1][(t2>>8)&0xFF] |
                 Expand16Table[2][(t2>>16)&0xFF] |
                 Expand16Table[3][(t2>>24)&0xFF];
-            temps[i+4] = vga.attr.palette[(tmp>>0)&0xFF];
-            temps[i+5] = vga.attr.palette[(tmp>>8)&0xFF];
-            temps[i+6] = vga.attr.palette[(tmp>>16)&0xFF];
-            temps[i+7] = vga.attr.palette[(tmp>>24)&0xFF];
+            temps[i+4] = vga.attr.palette[(tmp>>0)&vga.attr.color_plane_enable];
+            temps[i+5] = vga.attr.palette[(tmp>>8)&vga.attr.color_plane_enable];
+            temps[i+6] = vga.attr.palette[(tmp>>16)&vga.attr.color_plane_enable];
+            temps[i+7] = vga.attr.palette[(tmp>>24)&vga.attr.color_plane_enable];
         }
     }
 
@@ -1944,6 +1944,7 @@ static void VGA_VerticalTimer(Bitu /*val*/) {
         // fall-through
     case MCH_AMSTRAD:
     case MCH_CGA:
+    case MCH_MDA:
     case MCH_MCGA:
     case MCH_HERC:
         // MC6845-powered graphics: Loading the display start latch happens somewhere
@@ -2036,7 +2037,7 @@ static void VGA_VerticalTimer(Bitu /*val*/) {
         // fall-through
     case M_TANDY_TEXT:
     case M_HERC_TEXT:
-        if (machine==MCH_HERC) vga.draw.linear_mask = 0xfff; // 1 page
+        if (machine==MCH_HERC || machine==MCH_MDA) vga.draw.linear_mask = 0xfff; // 1 page
         else if (IS_EGAVGA_ARCH || machine == MCH_MCGA) vga.draw.linear_mask = 0x7fff; // 8 pages
         else vga.draw.linear_mask = 0x3fff; // CGA, Tandy 4 pages
         if (IS_EGAVGA_ARCH)
@@ -2512,10 +2513,10 @@ void VGA_SetupDrawing(Bitu /*val*/) {
             clock = 25175000 / 2 / 8;//FIXME: Guess. Verify
             if (!(vga.tandy.mode_control & 1)) clock /= 2;
             break;
+        case MCH_MDA:
         case MCH_HERC:
             clock=16000000/8;
             if (vga.herc.mode_control & 0x2) clock/=2;
-
             break;
         default:
             clock = (PIT_TICK_RATE*12);
@@ -3019,6 +3020,7 @@ void VGA_SetupDrawing(Bitu /*val*/) {
         case MCH_TANDY:
             scanfield_ratio = 1.382;
             break;
+        case MCH_MDA:
         case MCH_HERC:
             scanfield_ratio = 1.535;
             break;
@@ -3125,9 +3127,14 @@ void VGA_SetupDrawing(Bitu /*val*/) {
     }
     vga.draw.delay.singleline_delay = (float)vga.draw.delay.htotal;
 
-    /* FIXME: Why is this required to prevent VGA palette errors with Crystal Dream II?
-     *        What is this code doing to change the palette prior to this point? */
-    VGA_DAC_UpdateColorPalette();
+    if (machine == MCH_HERC || machine == MCH_MDA) {
+        Herc_Palette();
+    }
+    else {
+        /* FIXME: Why is this required to prevent VGA palette errors with Crystal Dream II?
+         *        What is this code doing to change the palette prior to this point? */
+        VGA_DAC_UpdateColorPalette();
+    }
 }
 
 void VGA_KillDrawing(void) {
