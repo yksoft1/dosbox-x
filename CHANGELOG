@@ -1,4 +1,67 @@
-<next version>
+(next version)
+  - Added option to control how unhandled IRQs are dealt with.
+    One option, mask_isr, is derived from em-dosbox.
+  - Code added to read the screen dimensions in Linux/X11,
+    either through XRandR or through the base X11 API.
+  - Code added to read and store the dimensions, size, and
+    DPI (Dots per Inch) of the screen.
+  - Fixed bug that enabled IBM style APM BIOS in PC-98 mode.
+  - For PC-98 mode, PIC emulation by default (but controllable
+    through dosbox.conf) now initializes the PIC at startup to
+    return the ISR (interrupt in-service) register instead of
+    the IRR (interrupt request) register. This fixes FM
+    music problems with Blackbird by Vivian caused by a
+    programming mistake in the FM interrupt handler.
+  - PIC emulation now accepts a dosbox.conf option not to mark
+    the cascade interrupt as in service, for troublesome games.
+  - VESA BIOS emulation now supports a packed 16-color (4bpp)
+    mode as seen on a Toshiba Libretto (Chips & Tech) system.
+    The packed format is different than the normal planar 16-color
+    SVGA modes seen on most systems.
+  - INT 33h no longer reports relative mouse motion unless the
+    user captures the cursor.
+  - Fixed EGA 16-color display modes (M_EGA) to honor CGA and
+    Hercules compatible mapping modes (bits 0 and 1 of the
+    CRTC mode control) and limit memory display to 8KB or 16KB
+    accordingly. This fixes the mode select screen in the game
+    "Prehistorik 2".
+  - Removed Sound Blaster goldplay mode + sample accurate mode
+    warning, goldplay mode no longer has issues with sample
+    accurate mode.
+  - Mixer "sample accurate" mode fixed to work again.
+  - Windows SDL1 builds fixed to work around Windows SDK-level API
+    limitation that normally prevents Win32 applications from
+    fully receiving WM_KEYDOWN events for the left/right shift
+    keys independently. Left and right shift keys are now fully
+    usable on Windows builds (i.e. for use with pinball games).
+  - INSTALL.MD guide and test files (Aybe)
+  - CONFIG -get now populates %CONFIG% environment variable with
+    configuration setting (follow DOSBox SVN behavior)
+0.82.9
+  - "Always on top" mode is now available for Mac OS X builds.
+  - PS/2 mouse emulation fixed not to send relative mouse motion
+    unless mouse cursor is captured.
+  - Shell no longer provides MEM.COM if machine=pc98 or cputype=8086.
+    MEM.COM is not compatible with either case.
+  - INT 10h emulation will now set the S3 LFB enable bit for VESA
+    SVGA modes, unless machine=vesa_nolfb was specified.
+  - VGA emulation revised to report possible known problems with
+    Windows 3.1 with regard to LFB base address or memalias setting.
+  - VGA emulation fixed to emit warning if memalias=24, for S3 LFB,
+    if machine=svga_s3, to inform the user that the configuration is
+    known to cause the Windows 3.x driver to crash.
+  - VGA emulation will no longer report S3 linear framebuffer address
+    unless machine=svga_s3. The LFB address doesn't matter for anything
+    other than SVGA S3 emulation.
+  - S3 emulation will now automatically disable PCI VGA emulation if
+    constraints prevent DOSBox-X from setting a linear framebuffer
+    address aligned to 32MB (as required for PCI emulation).
+  - VGA emulation fixed to pick a more appropriate linear framebuffer
+    (S3) address if memalias is set to a value below 32.
+  - Added dosbox.conf option "pci vga" to control whether the VGA
+    emulation appears as a PCI or ISA device.
+  - ROM BIOS now forces reported RAM down to make room for BIOS
+    alias at top of memory instead of throwing an E_Exit error.
   - Fixed Hercules emulation (and MDA) so that the Hercules palette
     is always enforced. This fixes a bug where switching to HGC
     graphics mode resulted in monochrome blue/black graphics instead

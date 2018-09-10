@@ -7,12 +7,17 @@
 #include "SDL.h"
 #include "SDL_version.h"
 #include "SDL_syswm.h"
+#include "sdlmain.h"
 
 #include <X11/XKBlib.h>
 #include <X11/extensions/XKBrules.h>
 
 void UpdateWindowDimensions(Bitu width, Bitu height);
 void UpdateWindowMaximized(bool flag);
+
+#if C_X11_XRANDR
+#include <X11/extensions/Xrandr.h>
+#endif
 
 #if !defined(C_SDL2)
 extern "C" void SDL1_hax_X11_jpfix(int ro_scan,int yen_scan);
@@ -227,6 +232,152 @@ void UpdateWindowDimensions_Linux(void) {
 
             UpdateWindowDimensions((unsigned int)attr.width, (unsigned int)attr.height);
             UpdateWindowMaximized(maximized);
+        }
+    }
+#endif
+}
+
+/* Retrieve screen size/dimensions/DPI using XRandR */
+static bool Linux_TryXRandrGetDPI(ScreenSizeInfo &info,Display *display,Window window) {
+    bool result = false;
+#if C_X11_XRANDR
+    XRRScreenResources *xr_screen;
+    XWindowAttributes attr;
+    int x = 0, y = 0;
+    Window child;
+
+    memset(&attr,0,sizeof(attr));
+    XGetWindowAttributes(display, window, &attr);
+    XTranslateCoordinates(display, window, DefaultRootWindow(display), 0, 0, &x, &y, &child );
+
+    attr.x += x;
+    attr.y += y;
+
+    if ((xr_screen=XRRGetScreenResources(display, DefaultRootWindow(display))) != NULL) {
+        /* Look for a valid CRTC, don't assume the first is valid (as the StackOverflow example does) */
+        for (int c=0;c < xr_screen->ncrtc;c++) {
+            XRRCrtcInfo *chk = XRRGetCrtcInfo(display, xr_screen, xr_screen->crtcs[c]);
+            if (chk == NULL) continue;
+            if (chk->width == 0 || chk->height == 0) continue;
+
+            LOG_MSG("XRandR CRTC %u: pos=(%d,%d) size=(%d,%d) outputs=%d",
+                c,chk->x,chk->y,chk->width,chk->height,chk->noutput);
+
+            /* match our window position to the display, use the center */
+            int match_x = attr.x + (attr.width / 2);
+            int match_y = attr.y + (attr.height / 2);
+
+            if (match_x >= chk->x && match_x < (chk->x+(int)chk->width) &&
+                match_y >= chk->y && match_y < (chk->y+(int)chk->height)) {
+                LOG_MSG("Our window lies on this CRTC display (window pos=(%d,%d) size=(%d,%d) match=(%d,%d)).",
+                    attr.x,attr.y,
+                    attr.width,attr.height,
+                    match_x,match_y);
+
+                if (chk->noutput > 0) {
+                    for (int o=0;o < chk->noutput;o++) {
+                        XRROutputInfo *ochk = XRRGetOutputInfo(display, xr_screen, chk->outputs[o]);
+                        if (ochk == NULL) continue;
+
+                        std::string oname;
+
+                        if (ochk->nameLen > 0 && ochk->name != NULL)
+                            oname = std::string(ochk->name,ochk->nameLen);
+
+                        LOG_MSG("  Goes to output %u: name='%s' size_mm=(%lu x %lu)",
+                                o,oname.c_str(),ochk->mm_width,ochk->mm_height);
+
+                        if (true/*TODO: Any decision making?*/) {
+                            o = chk->noutput; /* short circuit the for loop */
+                            c = xr_screen->ncrtc; /* and the other */
+                            result = true;
+
+                            /* choose this combo to determine screen size, and dimensions */
+                            info.method = ScreenSizeInfo::METHOD_XRANDR;
+
+                            info.screen_dimensions_pixels.width  = chk->width;
+                            info.screen_dimensions_pixels.height = chk->height;
+
+                            info.screen_dimensions_mm.width      = ochk->mm_width;
+                            info.screen_dimensions_mm.height     = ochk->mm_height;
+
+                            if (info.screen_dimensions_mm.width > 0)
+                                info.screen_dpi.width =
+                                    ((((double)info.screen_dimensions_pixels.width) * 25.4) /
+                                     ((double)info.screen_dimensions_mm.width));
+
+                            if (info.screen_dimensions_mm.height > 0)
+                                info.screen_dpi.height =
+                                    ((((double)info.screen_dimensions_pixels.height) * 25.4) /
+                                     ((double)info.screen_dimensions_mm.height));
+                        }
+
+                        XRRFreeOutputInfo(ochk);
+                        ochk = NULL;
+                    }
+                }
+            }
+
+            XRRFreeCrtcInfo(chk);
+            chk = NULL;
+        }
+
+        XRRFreeScreenResources(xr_screen);
+        xr_screen = NULL;
+    }
+#endif
+
+    return result;
+}
+
+void Linux_GetWindowDPI(ScreenSizeInfo &info) {
+    info.clear();
+
+#if defined(C_SDL2)
+    /* TODO */
+#else
+	SDL_SysWMinfo wminfo;
+	memset(&wminfo,0,sizeof(wminfo));
+	SDL_VERSION(&wminfo.version);
+	if (SDL_GetWMInfo(&wminfo) >= 0) {
+		if (wminfo.subsystem == SDL_SYSWM_X11 && wminfo.info.x11.display != NULL) {
+            if (Linux_TryXRandrGetDPI(info,wminfo.info.x11.display,GFX_IsFullscreen() ? wminfo.info.x11.fswindow : wminfo.info.x11.wmwindow)) {
+                /* got it */
+            }
+            else {
+                /* fallback to X11 method, which may not return accurate info on modern systems */
+                Window rootWindow = DefaultRootWindow(wminfo.info.x11.display);
+                if (rootWindow != 0) {
+                    int screen = 0;
+
+                    info.method = ScreenSizeInfo::METHOD_X11;
+
+                    /* found on StackOverflow */
+
+                    /*
+                     * there are 2.54 centimeters to an inch; so there are 25.4 millimeters.
+                     *
+                     *     dpi = N pixels / (M millimeters / (25.4 millimeters / 1 inch))
+                     *         = N pixels / (M inch / 25.4)
+                     *         = N * 25.4 pixels / M inch
+                     */
+                    info.screen_dimensions_pixels.width  = DisplayWidth(   wminfo.info.x11.display,screen);
+                    info.screen_dimensions_pixels.height = DisplayHeight(  wminfo.info.x11.display,screen);
+
+                    info.screen_dimensions_mm.width      = DisplayWidthMM( wminfo.info.x11.display,screen);
+                    info.screen_dimensions_mm.height     = DisplayHeightMM(wminfo.info.x11.display,screen);
+
+                    if (info.screen_dimensions_mm.width > 0)
+                        info.screen_dpi.width =
+                            ((((double)info.screen_dimensions_pixels.width) * 25.4) /
+                             ((double)info.screen_dimensions_mm.width));
+
+                    if (info.screen_dimensions_mm.height > 0)
+                        info.screen_dpi.height =
+                            ((((double)info.screen_dimensions_pixels.height) * 25.4) /
+                             ((double)info.screen_dimensions_mm.height));
+                }
+            }
         }
     }
 #endif

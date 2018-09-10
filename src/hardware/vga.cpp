@@ -171,6 +171,8 @@ extern uint8_t                      pc98_egc_mask[2]; /* host given (Neko: egc.m
 
 uint32_t S3_LFB_BASE =              S3_LFB_BASE_DEFAULT;
 
+bool                                enable_pci_vga = true;
+
 VGA_Type vga;
 SVGA_Driver svga;
 int enableCGASnow;
@@ -205,6 +207,7 @@ unsigned char VGA_AC_remap = AC_4x4;
 unsigned int vga_display_start_hretrace = 0;
 float hretrace_fx_avg_weight = 3;
 
+bool allow_vesa_4bpp_packed = true;
 bool allow_vesa_lowres_modes = true;
 bool vesa12_modes_32bpp = true;
 bool allow_vesa_32bpp = true;
@@ -298,6 +301,7 @@ void VGA_DetermineMode(void) {
     case 5:VGA_SetMode(M_LIN16);break;
     case 7:VGA_SetMode(M_LIN24);break;
     case 13:VGA_SetMode(M_LIN32);break;
+    case 15:VGA_SetMode(M_PACKED4);break;// hacked
     }
 }
 
@@ -545,24 +549,57 @@ VGA_Vsync VGA_Vsync_Decode(const char *vsyncmodestr) {
 }
 
 bool has_pcibus_enable(void);
+Bit32u MEM_get_address_bits();
 
 void VGA_Reset(Section*) {
     Section_prop * section=static_cast<Section_prop *>(control->GetSection("dosbox"));
+    bool lfb_default = false;
     string str;
     int i;
+
+    Bit32u cpu_addr_bits = MEM_get_address_bits();
+    Bit64u cpu_max_addr = (Bit64u)1 << (Bit64u)cpu_addr_bits;
 
     LOG(LOG_MISC,LOG_DEBUG)("VGA_Reset() reinitializing VGA emulation");
 
     GDC_display_plane_wait_for_vsync = section->Get_bool("pc-98 buffer page flip");
 
+    enable_pci_vga = section->Get_bool("pci vga");
+
     S3_LFB_BASE = section->Get_hex("svga lfb base");
-    if (S3_LFB_BASE == 0) S3_LFB_BASE = S3_LFB_BASE_DEFAULT;
+    if (S3_LFB_BASE == 0) {
+        if (cpu_addr_bits >= 32)
+            S3_LFB_BASE = S3_LFB_BASE_DEFAULT;
+        else if (cpu_addr_bits >= 26)
+            S3_LFB_BASE = (enable_pci_vga && has_pcibus_enable()) ? 0x02000000 : 0x03400000;
+        else if (cpu_addr_bits >= 24)
+            S3_LFB_BASE = 0x00C00000;
+        else
+            S3_LFB_BASE = S3_LFB_BASE_DEFAULT;
+
+        lfb_default = true;
+    }
 
     /* no farther than 32MB below the top */
     if (S3_LFB_BASE > 0xFE000000UL)
         S3_LFB_BASE = 0xFE000000UL;
 
-    if (has_pcibus_enable()) {
+    /* if the user WANTS the base address to be PCI misaligned, then turn off PCI VGA emulation */
+    if (enable_pci_vga && has_pcibus_enable() && (S3_LFB_BASE & 0x1FFFFFFul)) {
+        if (!lfb_default)
+            LOG(LOG_VGA,LOG_DEBUG)("S3 linear framebuffer was set by user to an address not aligned to 32MB, switching off PCI VGA emulation");
+
+        enable_pci_vga = false;
+    }
+    /* if memalias is below 26 bits, PCI VGA emulation is impossible */
+    if (cpu_addr_bits < 26) {
+        if (IS_VGA_ARCH && enable_pci_vga && has_pcibus_enable())
+            LOG(LOG_VGA,LOG_DEBUG)("CPU memalias setting is below 26 bits, switching off PCI VGA emulation");
+
+        enable_pci_vga = false;
+    }
+
+    if (enable_pci_vga && has_pcibus_enable()) {
         /* must be 32MB aligned (PCI) */
         S3_LFB_BASE +=  0x0FFFFFFUL;
         S3_LFB_BASE &= ~0x1FFFFFFUL;
@@ -577,7 +614,45 @@ void VGA_Reset(Section*) {
     if (S3_LFB_BASE < (MEM_TotalPages()*4096))
         S3_LFB_BASE = (MEM_TotalPages()*4096);
 
-    LOG(LOG_VGA,LOG_DEBUG)("S3 linear framebuffer at 0x%lx",(unsigned long)S3_LFB_BASE);
+    /* if the constraints we imposed make it impossible to maintain the alignment required for PCI,
+     * then just switch off PCI VGA emulation. */
+    if (IS_VGA_ARCH && enable_pci_vga && has_pcibus_enable()) {
+        if (S3_LFB_BASE & 0x1FFFFFFUL) { /* not 32MB aligned */
+            LOG(LOG_VGA,LOG_DEBUG)("S3 linear framebuffer is not 32MB aligned, switching off PCI VGA emulation");
+            enable_pci_vga = false;
+        }
+    }
+
+    /* announce LFB framebuffer address only if actually emulating the S3 */
+    if (IS_VGA_ARCH && svgaCard == SVGA_S3Trio)
+        LOG(LOG_VGA,LOG_DEBUG)("S3 linear framebuffer at 0x%lx%s as %s",
+            (unsigned long)S3_LFB_BASE,lfb_default?" by default":"",
+            (enable_pci_vga && has_pcibus_enable()) ? "PCI" : "(E)ISA");
+
+    /* other applicable warnings: */
+    /* Microsoft Windows 3.1 S3 driver:
+     *   If the LFB is set to an address below 16MB, the driver will program the base to something
+     *   odd like 0x73000000 and access MMIO through 0x74000000.
+     *
+     *   Because of this, if memalias < 31 and LFB is below 16MB mark, Windows won't use the
+     *   accelerated features of the S3 emulation properly.
+     *
+     *   If memalias=24, the driver hangs and nothing appears on screen.
+     *
+     *   As far as I can tell, it's mapping for the LFB, not the MMIO. It uses the MMIO in the
+     *   A0000-AFFFF range anyway. The failure to blit and draw seems to be caused by mapping the
+     *   LFB out of range like that and then trying to draw on the LFB.
+     *
+     *   As far as I can tell from http://www.vgamuseum.info and the list of S3 cards, the S3 chipsets
+     *   emulated by DOSBox-X and DOSBox SVN here are all EISA and PCI cards, so it's likely the driver
+     *   is written around the assumption that memory addresses are the full 32 bits to the card, not
+     *   just the low 24 seen on the ISA slot. So it is unlikely the driver could ever support the
+     *   card on a 386SX nor could such a card work on a 386SX. It shouldn't even work on a 486SX
+     *   (26-bit limit), but it could. */
+    if (IS_VGA_ARCH && svgaCard == SVGA_S3Trio && cpu_addr_bits <= 24)
+        LOG(LOG_VGA,LOG_WARN)("S3 linear framebuffer warning: memalias setting is known to cause the Windows 3.1 S3 driver to crash");
+    if (IS_VGA_ARCH && svgaCard == SVGA_S3Trio && cpu_addr_bits < 31 && S3_LFB_BASE < 0x1000000ul) /* below 16MB and memalias == 31 bits */
+        LOG(LOG_VGA,LOG_WARN)("S3 linear framebuffer warning: A linear framebuffer below the 16MB mark in physical memory when memalias < 31 is known to have problems with the Windows 3.1 S3 driver");
 
     pc98_allow_scanline_effect = section->Get_bool("pc-98 allow scanline effect");
     mainMenu.get_item("pc98_allow_200scanline").check(pc98_allow_scanline_effect).refresh_item(mainMenu);
@@ -674,6 +749,7 @@ void VGA_Reset(Section*) {
     hack_lfb_yadjust = section->Get_int("vesa lfb base scanline adjust");
     allow_vesa_lowres_modes = section->Get_bool("allow low resolution vesa modes");
     vesa12_modes_32bpp = section->Get_bool("vesa vbe 1.2 modes are 32bpp");
+    allow_vesa_4bpp_packed = section->Get_bool("allow 4bpp packed vesa modes");
     allow_vesa_32bpp = section->Get_bool("allow 32bpp vesa modes");
     allow_vesa_24bpp = section->Get_bool("allow 24bpp vesa modes");
     allow_vesa_16bpp = section->Get_bool("allow 16bpp vesa modes");
@@ -820,6 +896,10 @@ void VGA_Reset(Section*) {
     vga.mem.memmask = vga.mem.memsize - 1u;
 
     LOG(LOG_VGA,LOG_NORMAL)("Video RAM: %uKB",vga.mem.memsize>>10);
+
+    // TODO: If S3 emulation, and linear framebuffer bumps up against the CPU memalias limits,
+    //       trim Video RAM to fit (within reasonable limits) or else E_Exit() to let the user
+    //       know of impossible constraints.
 
     VGA_SetupMemory();      // memory is allocated here
     if (!IS_PC98_ARCH) {

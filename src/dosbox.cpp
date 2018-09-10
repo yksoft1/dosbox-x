@@ -860,6 +860,9 @@ void DOSBOX_SetupConfigSections(void) {
     const char* aspectmodes[] = { "false", "true", "0", "1", "yes", "no", "nearest", "bilinear", 0};
     const char *vga_ac_mapping_settings[] = { "", "auto", "4x4", "4low", "first16", 0 };
 
+    const char* irqhandler[] = {
+        "", "simple", "mask_isr", 0 };
+
     /* Setup all the different modules making up DOSBox */
     const char* machines[] = {
         "hercules", "cga", "cga_mono", "cga_rgb", "cga_composite", "cga_composite2", "tandy", "pcjr", "ega",
@@ -935,6 +938,9 @@ void DOSBOX_SetupConfigSections(void) {
 
     Phex = secprop->Add_hex("svga lfb base", Property::Changeable::OnlyAtStart, 0);
     Phex->Set_help("If nonzero, define the physical memory address of the linear framebuffer.");
+
+    Pbool = secprop->Add_bool("pci vga",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("If set, SVGA is emulated as if a PCI device (when enable pci bus=true)");
 
     Pint = secprop->Add_int("vmemdelay", Property::Changeable::WhenIdle,0);
     Pint->SetMinMax(-1,100000);
@@ -1061,6 +1067,13 @@ void DOSBOX_SetupConfigSections(void) {
                       "jump directly to F000:FFF0 to return control to the BIOS.\n"
                       "This can be used for x86 assembly language experiments and automated testing against the CPU emulation.");
 
+    Pstring = secprop->Add_string("unhandled irq handler",Property::Changeable::WhenIdle,"");
+    Pstring->Set_values(irqhandler);
+    Pstring->Set_help("Determines how unhandled IRQs are handled. This may help some errant DOS applications.\n"
+                      "Leave unset for default behavior (simple).\n"
+                      "simple               Acknowledge the IRQ, and the master (if slave IRQ)\n"
+                      "mask_isr             Acknowledge IRQs in service on master and slave and mask IRQs still in service, to deal with errant handlers (em-dosbox method)");
+
     Pstring = secprop->Add_string("call binary on boot",Property::Changeable::WhenIdle,"");
     Pstring->Set_help("If set, this is the path of a binary blob to load into the ROM BIOS area and execute immediately before booting the DOS system.\n"
                       "This can be used for x86 assembly language experiments and automated testing against the CPU emulation.");
@@ -1163,6 +1176,12 @@ void DOSBOX_SetupConfigSections(void) {
         "    24: 16MB aliasing. Common on 386SX systems (CPU had 24 external address bits)\n"
         "        or 386DX and 486 systems where the CPU communicated directly with the ISA bus (A24-A31 tied off)\n"
         "    26: 64MB aliasing. Some 486s had only 26 external address bits, some motherboards tied off A26-A31");
+
+    Pbool = secprop->Add_bool("pc-98 pic init to read isr",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("If set, the programmable interrupt controllers are initialized by default (if PC-98 mode)\n"
+                    "so that the in-service interrupt status can be read immediately. There seems to be a common\n"
+                    "convention in PC-98 games to program and/or assume this mode for cooperative interrupt handling.\n"
+                    "This option is enabled by default for best compatibility with PC-98 games.");
 
     Pstring = secprop->Add_string("pc-98 fm board",Property::Changeable::Always,"auto");
     Pstring->Set_values(pc98fmboards);
@@ -1320,6 +1339,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("dma page registers write-only",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("Normally (on AT hardware) the DMA page registers are read/write. Set this option if you want to emulate PC/XT hardware where the page registers are write-only.");
 
+    Pbool = secprop->Add_bool("cascade interrupt never in service",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, PIC emulation will never mark cascade interrupt as in service. This is OFF by default. It is a hack for troublesome games.");
+
     Pbool = secprop->Add_bool("enable slave pic",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Enable slave PIC (IRQ 8-15). Set this to 0 if you want to emulate a PC/XT type arrangement with IRQ 0-7 and no IRQ 2 cascade.");
 
@@ -1417,6 +1439,9 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("allow 4bpp vesa modes",Property::Changeable::Always,true);
     Pbool->Set_help("If the DOS game or demo has problems with 4bpp VESA modes, set to 'false'");
+
+    Pbool = secprop->Add_bool("allow 4bpp packed vesa modes",Property::Changeable::Always,true);
+    Pbool->Set_help("If the DOS game or demo has problems with 4bpp packed VESA modes, set to 'false'");
 
     Pbool = secprop->Add_bool("allow tty vesa modes",Property::Changeable::Always,true);
     Pbool->Set_help("If the DOS game or demo has problems with text VESA modes, set to 'false'");

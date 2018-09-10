@@ -33,6 +33,8 @@
 
 unsigned long PIC_irq_delay_ns = 0;
 
+bool never_mark_cascade_in_service = false;
+
 struct PIC_Controller {
     Bitu icw_words;
     Bitu icw_index;
@@ -185,8 +187,13 @@ void PIC_Controller::start_irq(Bit8u val){
     irr&=~(1<<(val));
     if (!auto_eoi) {
         active_irq = val;
-        isr |= 1<<(val);
-        isrr = ~isr;
+        if (never_mark_cascade_in_service && this == &master && val == master_cascade_irq) {
+            /* do nothing */
+        }
+        else {
+            isr |= 1<<(val);
+            isrr = ~isr;
+        }
     } else if (GCC_UNLIKELY(rotate_on_auto_eoi)) {
         LOG_MSG("rotate on auto EOI not handled");
     }
@@ -806,6 +813,7 @@ void PIC_Reset(Section *sec) {
 
     enable_slave_pic = section->Get_bool("enable slave pic");
     enable_pc_xt_nmi_mask = section->Get_bool("enable pc nmi mask");
+    never_mark_cascade_in_service = section->Get_bool("cascade interrupt never in service");
 
     if (enable_slave_pic && machine == MCH_PCJR && enable_pc_xt_nmi_mask) {
         LOG(LOG_MISC,LOG_DEBUG)("PIC_Reset(): PCjr emulation with NMI mask register requires disabling slave PIC (IRQ 8-15)");
@@ -846,6 +854,25 @@ void PIC_Reset(Section *sec) {
         pics[i].isrr = pics[i].imr = 0xff;
         pics[i].active_irq = 8;
     }
+
+    /* PC-98: By default (but an option otherwise)
+     *        initialize the PIC so that reading the command port
+     *        produces the ISR status not the IRR status.
+     *
+     *        The reason the option is on by default, is that there
+     *        is PC-98 programming literature that recommends reading
+     *        ISR status before acknowledging interrupts (to avoid
+     *        conflicts with other ISR handlers perhaps). So it's
+     *        probably a common convention.
+     *
+     * Notes: "Blackbird" by Vivian needs this in order for the FM interrupt
+     *        to continue working. A bug in the FM interrupt routine programs
+     *        only the master PIC into this mode but then reads from the slave
+     *        which is not necessarily initialized into this mode and may return
+     *        the IRR register instead, causing the game to misinterpret
+     *        incoming interrupts as in-service. */
+    if (IS_PC98_ARCH && section->Get_bool("pc-98 pic init to read isr"))
+        pics[0].request_issr = pics[1].request_issr = true;
 
     /* IBM: IRQ 0-15 is INT 0x08-0x0F, 0x70-0x7F
      * PC-98: IRQ 0-15 is INT 0x08-0x17 */

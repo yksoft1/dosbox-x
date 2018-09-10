@@ -64,6 +64,7 @@ const char* const mode_texts[M_MAX] = {
     "M_AMSTRAD",
     "M_PC98",
     "M_FM_TOWNS",       // 20 STUB
+    "M_PACKED4",
     "M_ERROR"
 };
 
@@ -620,6 +621,21 @@ static Bit8u * EGA_Draw_VGA_Planar_Xlat8_Line(Bitu vidstart, Bitu /*line*/) {
     }
 
     return TempLine + (vga.draw.panning);
+}
+
+static Bit8u * VGA_Draw_VGA_Packed4_Xlat32_Line(Bitu vidstart, Bitu /*line*/) {
+    Bit32u* temps = (Bit32u*) TempLine;
+    Bit8u t;
+
+    for (Bitu i = 0; i < ((vga.draw.line_length>>2)+vga.draw.panning); i += 2) {
+        t = vga.draw.linear_base[ vidstart & vga.draw.linear_mask ];
+        vidstart++;
+
+        temps[i+0] = vga.dac.xlat32[(t>>4)&0xF];
+        temps[i+1] = vga.dac.xlat32[(t>>0)&0xF];
+    }
+
+    return TempLine + (vga.draw.panning*4);
 }
 
 static Bit8u * VGA_Draw_VGA_Planar_Xlat32_Line(Bitu vidstart, Bitu /*line*/) {
@@ -1481,6 +1497,7 @@ static void VGA_ProcessSplit() {
                 case M_TEXT:
                 case M_EGA:
                 case M_LIN4:
+                case M_PACKED4:
                     /* ignore */
                     break;
                 default:
@@ -1703,6 +1720,7 @@ static void VGA_DrawEGASingleLine(Bitu /*blah*/) {
                     case M_TEXT:
                     case M_EGA:
                     case M_LIN4:
+                    case M_PACKED4:
                         /* ignore */
                         break;
                     default:
@@ -1990,8 +2008,28 @@ static void VGA_VerticalTimer(Bitu /*val*/) {
     switch (vga.mode) {
     case M_EGA:
         if (vga.mem.memmask >= 0x1FFFFu) {
-            if (!(vga.crtc.mode_control&0x1u)) vga.draw.linear_mask &= ~0x10000u;
-            else vga.draw.linear_mask |= 0x10000u;
+            /* EGA/VGA Mode control register 0x17 effects on the linear mask */
+            if ((vga.crtc.maximum_scan_line&0x1fu) == 0) {
+                /* WARNING: These hacks only work IF max scanline value == 0 (no doubling).
+                 *          The bit 0 (bit 13 replacement) mode here is needed for
+                 *          Prehistorik 2 to display it's mode select/password entry screen
+                 *          (the one with the scrolling background of various cavemen) */
+
+                /* if bit 0 is cleared, CGA compatible addressing is enabled.
+                 * bit 13 is replaced by bit 0 of the row counter */
+                if (!(vga.crtc.mode_control&0x1u)) vga.draw.linear_mask &= ~0x8000u;
+                else vga.draw.linear_mask |= 0x8000u;
+
+                /* if bit 1 is cleared, Hercules compatible addressing is enabled.
+                 * bit 14 is replaced by bit 0 of the row counter */
+                if (!(vga.crtc.mode_control&0x2u)) vga.draw.linear_mask &= ~0x10000u;
+                else vga.draw.linear_mask |= 0x10000u;
+            }
+            else {
+                if ((vga.crtc.mode_control&0x03u) != 0x03u) {
+                    LOG(LOG_VGAMISC,LOG_WARN)("Guest is attempting to use CGA/Hercules compatible display mapping in M_EGA mode with max_scanline != 0, which is not yet supported");
+                }
+            }
         }
         /* fall through */
     case M_LIN4:
@@ -2024,6 +2062,11 @@ static void VGA_VerticalTimer(Bitu /*val*/) {
         vga.draw.address += vga.draw.bytes_skip;
         vga.draw.address *= vga.draw.byte_panning_shift;
         vga.draw.address += vga.draw.panning;
+        break;
+    case M_PACKED4:
+        vga.draw.byte_panning_shift = 4u;
+        vga.draw.address += vga.draw.bytes_skip;
+        vga.draw.address *= vga.draw.byte_panning_shift;
         break;
     case M_PC98:
         vga.draw.linear_mask = 0xfff; // 1 page
@@ -2128,6 +2171,9 @@ void VGA_CheckScanLength(void) {
 
         if (IS_EGA_ARCH && (vga.seq.clocking_mode&4))
             vga.draw.address_add*=2;
+        break;
+    case M_PACKED4:
+        vga.draw.address_add=vga.config.scan_len*8;
         break;
     case M_VGA:
     case M_LIN8:
@@ -2783,6 +2829,11 @@ void VGA_SetupDrawing(Bitu /*val*/) {
     case M_LIN16:
         pix_per_char = 4; // 15/16 bpp modes double the horizontal values
         VGA_ActivateHardwareCursor();
+        break;
+    case M_PACKED4:
+        bpp = 32;
+        vga.draw.blocks = width;
+        VGA_DrawLine = VGA_Draw_VGA_Packed4_Xlat32_Line;
         break;
     case M_LIN4:
     case M_EGA:

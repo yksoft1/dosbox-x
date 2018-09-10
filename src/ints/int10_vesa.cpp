@@ -33,6 +33,7 @@ int hack_lfb_yadjust = 0;
 extern int vesa_mode_width_cap;
 extern int vesa_mode_height_cap;
 extern bool allow_vesa_lowres_modes;
+extern bool allow_vesa_4bpp_packed;
 extern bool vesa12_modes_32bpp;
 extern bool allow_vesa_32bpp;
 extern bool allow_vesa_24bpp;
@@ -206,12 +207,22 @@ foundit:
 		(ModeList_VGA[i].swidth >= 640 && ModeList_VGA[i].sheight >= 400);
 
 	switch (mblock->type) {
+	case M_PACKED4:
+		if (!allow_vesa_4bpp_packed) return VESA_FAIL;//TODO: New option to disable
+		pageSize = mblock->sheight * mblock->swidth/2;
+		var_write(&minfo.BytesPerScanLine,(((mblock->swidth+15U)/8U)&(~1U))*4); /* NTS: 4bpp requires even value due to VGA registers, round up */
+		var_write(&minfo.NumberOfPlanes,0x1);
+		var_write(&minfo.BitsPerPixel,4);
+		var_write(&minfo.MemoryModel,4);	//packed pixel
+		modeAttributes = 0x1b;	// Color, graphics
+		if (!int10.vesa_nolfb) modeAttributes |= 0x80;	// linear framebuffer
+		break;
 	case M_LIN4:
 		if (!allow_vesa_4bpp) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth/2;
 		var_write(&minfo.BytesPerScanLine,((mblock->swidth+15U)/8U)&(~1U)); /* NTS: 4bpp requires even value due to VGA registers, round up */
 		var_write(&minfo.NumberOfPlanes,0x4);
-		var_write(&minfo.BitsPerPixel,4);
+		var_write(&minfo.BitsPerPixel,4);//FIXME: Shouldn't this say 4 planes, 1 bit per pixel??
 		var_write(&minfo.MemoryModel,3);	//ega planar mode
 		modeAttributes = 0x1b;	// Color, graphics, no linear buffer
 		break;
@@ -435,6 +446,7 @@ Bit8u VESA_ScanLineLength(Bit8u subcall,Bit16u val, Bit16u & bytes,Bit16u & pixe
 		bytes_per_offset = 4;   // 2 characters + 2 attributes
 		break;
 	case M_LIN4:
+	case M_PACKED4:
 		pixels_per_offset = 16;
 		break;
 	case M_LIN8:
@@ -511,6 +523,7 @@ Bit8u VESA_SetDisplayStart(Bit16u x,Bit16u y) {
 	switch (CurMode->type) {
 	case M_TEXT:
 	case M_LIN4:
+	case M_PACKED4:
 		pixels_per_offset = 16;
 		break;
 	case M_LIN8:
@@ -560,6 +573,7 @@ Bit8u VESA_GetDisplayStart(Bit16u & x,Bit16u & y) {
 		pixels_per_offset = 16;
 		break;
 	case M_LIN4:
+	case M_PACKED4:
 		pixels_per_offset = 16;
 		break;
 	case M_LIN8:
@@ -663,8 +677,9 @@ Bitu INT10_WriteVESAModeList(Bitu max_modes) {
                         case M_LIN16:	canuse_mode=allow_vesa_16bpp && allow_res; break;
                         case M_LIN15:	canuse_mode=allow_vesa_15bpp && allow_res; break;
                         case M_LIN8:	canuse_mode=allow_vesa_8bpp && allow_res; break;
-                        case M_LIN4:	canuse_mode=allow_vesa_4bpp; break;
-                        case M_TEXT:	canuse_mode=allow_vesa_tty; break;
+                        case M_LIN4:	canuse_mode=allow_vesa_4bpp && allow_res; break;
+                        case M_PACKED4:	canuse_mode=allow_vesa_4bpp_packed && allow_res; break;
+                        case M_TEXT:	canuse_mode=allow_vesa_tty && allow_res; break;
                         default:	break;
                     }
                 }

@@ -1071,7 +1071,7 @@ void MEM_A20_Enable(bool enabled) {
 
     LOG(LOG_MISC,LOG_DEBUG)("MEM_A20_Enable(%u)",enabled?1:0);
 
-    if (!a20_fake_changeable) {
+    if (!a20_fake_changeable && (memory.mem_alias_pagemask & 0x100ul)) {
         if (memory.a20.enabled) memory.mem_alias_pagemask_active |= 0x100ul;
         else memory.mem_alias_pagemask_active &= ~0x100ul;
         PAGING_ClearTLB();
@@ -1778,7 +1778,7 @@ void Init_RAM() {
     LOG(LOG_MISC,LOG_DEBUG)("Initializing RAM emulation (system memory)");
 
     // CHECK: address mask init must have been called!
-    assert(memory.mem_alias_pagemask > 0xFF);
+    assert(memory.mem_alias_pagemask >= 0xFF);
 
     /* Setup the Physical Page Links */
     Bitu memsizekb = (Bitu)section->Get_int("memsizekb");
@@ -1864,6 +1864,19 @@ void Init_RAM() {
      *        address ranges it is not responding to when mapping changes. */
     for (i=0xa0;i<0x100;i++) /* we want to make sure adapter ROM is unmapped entirely! */
         memory.phandlers[i] = NULL;//&unmapped_page_handler;
+}
+
+/* ROM BIOS emulation will call this to impose an additional cap on RAM
+ * to make sure the upper alias of the ROM BIOS has room. */
+void MEM_cut_RAM_up_to(Bitu addr) {
+    Bitu pages = addr >> 12ul;
+
+    if (memory.reported_pages > pages) {
+        LOG(LOG_MISC,LOG_DEBUG)("Memory: Reducing RAM to 0x%lx",(unsigned long)addr);
+
+        do { memory.phandlers[--memory.reported_pages] = NULL;
+        } while (memory.reported_pages > pages);
+    }
 }
 
 static IO_ReadHandleObject PS2_Port_92h_ReadHandler;
@@ -2032,7 +2045,7 @@ void Init_MemoryAccessArray() {
     LOG(LOG_MISC,LOG_DEBUG)("Initializing memory access array (page handler callback system). mem_alias_pagemask=%lx",(unsigned long)memory.mem_alias_pagemask);
 
     // CHECK: address mask init must have been called!
-    assert(memory.mem_alias_pagemask > 0xFF);
+    assert(memory.mem_alias_pagemask >= 0xFF);
 
     // we maintain a different page count for page handlers because we want to maintain a
     // "cache" of sorts of what device responds to a given memory address.

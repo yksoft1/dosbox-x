@@ -70,6 +70,7 @@ void GFX_OpenGLRedrawScreen(void);
 #include "bitop.h"
 #include "ptrop.h"
 #include "mapper.h"
+#include "sdlmain.h"
 #include "zipfile.h"
 
 #include "../src/libs/gui_tk/gui_tk.h"
@@ -117,6 +118,8 @@ void GFX_OpenGLRedrawScreen(void);
 
 SDL_Block sdl;
 Bitu frames = 0;
+
+ScreenSizeInfo          screen_size_info;
 
 const char *scaler_menu_opts[][2] = {
     { "none",                   "None" },
@@ -327,7 +330,35 @@ void UpdateWindowDimensions(Bitu width, Bitu height)
     currentWindowHeight = height;
 }
 
-void UpdateWindowDimensions(void) 
+void PrintScreenSizeInfo(void) {
+#if 1
+    const char *method = "?";
+
+    switch (screen_size_info.method) {
+        case ScreenSizeInfo::METHOD_NONE:       method = "None";        break;
+        case ScreenSizeInfo::METHOD_X11:        method = "X11";         break;
+        case ScreenSizeInfo::METHOD_XRANDR:     method = "XRandR";      break;
+        default:                                                        break;
+    };
+
+    LOG_MSG("Screen report: Method '%s' (%.3f x %.3f pixels) (%.3f x %.3f mm) (%.3f x %.3f in) (%.3f x %.3f DPI)",
+            method,
+
+            screen_size_info.screen_dimensions_pixels.width,
+            screen_size_info.screen_dimensions_pixels.height,
+
+            screen_size_info.screen_dimensions_mm.width,
+            screen_size_info.screen_dimensions_mm.height,
+
+            screen_size_info.screen_dimensions_mm.width / 25.4,
+            screen_size_info.screen_dimensions_mm.height / 25.4,
+
+            screen_size_info.screen_dpi.width,
+            screen_size_info.screen_dpi.height);
+#endif
+}
+
+void UpdateWindowDimensions(void)
 {
 #if defined(WIN32) && !defined(C_SDL2)
     // When maximized, SDL won't actually tell us our new dimensions, so get it ourselves.
@@ -342,7 +373,10 @@ void UpdateWindowDimensions(void)
 #if defined(LINUX) && !defined(C_SDL2)
     void UpdateWindowDimensions_Linux(void);
     UpdateWindowDimensions_Linux();
+    void Linux_GetWindowDPI(ScreenSizeInfo &info);
+    Linux_GetWindowDPI(/*&*/screen_size_info);
 #endif
+    PrintScreenSizeInfo();
 }
 
 #if defined(C_SDL2)
@@ -6425,10 +6459,16 @@ bool doublebuf_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const m
 bool x11_on_top = false;
 #endif
 
+#if defined(MACOSX) && !defined(C_SDL2)
+bool macosx_on_top = false;
+#endif
+
 bool is_always_on_top(void) {
 #if defined(_WIN32) && !defined(C_SDL2)
     DWORD dwExStyle = ::GetWindowLong(GetHWND(), GWL_EXSTYLE);
     return !!(dwExStyle & WS_EX_TOPMOST);
+#elif defined(MACOSX) && !defined(C_SDL2)
+    return macosx_on_top;
 #elif defined(LINUX) && !defined(C_SDL2)
     return x11_on_top;
 #else
@@ -6439,11 +6479,16 @@ bool is_always_on_top(void) {
 #if defined(_WIN32) && !defined(C_SDL2)
 extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
 #endif
+#if defined(MACOSX) && !defined(C_SDL2)
+extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
+#endif
 
 void toggle_always_on_top(void) {
     bool cur = is_always_on_top();
 #if defined(_WIN32) && !defined(C_SDL2)
     sdl1_hax_set_topmost(!cur);
+#elif defined(MACOSX) && !defined(C_SDL2)
+    sdl1_hax_set_topmost(macosx_on_top = (!cur));
 #elif defined(LINUX) && !defined(C_SDL2)
     void LinuxX11_OnTop(bool f);
     LinuxX11_OnTop(x11_on_top = (!cur));
@@ -7544,6 +7589,12 @@ fresh_boot:
 
             /* if instructed, turn off A20 at boot */
             if (disable_a20) MEM_A20_Enable(false);
+
+            /* PC-98: hide the cursor */
+            if (IS_PC98_ARCH) {
+                void PC98_show_cursor(bool show);
+                PC98_show_cursor(false);
+            }
 
             /* new code: fire event */
             DispatchVMEvent(VM_EVENT_GUEST_OS_BOOT);
