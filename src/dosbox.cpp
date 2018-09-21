@@ -75,6 +75,10 @@
 #include "parport.h"
 #include "clockdomain.h"
 
+#if C_EMSCRIPTEN
+# include <emscripten.h>
+#endif
+
 #ifdef WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -104,7 +108,7 @@ bool sse2_available = false;
 
 void CheckSSESupport()
 {
-#if defined (__GNUC__) || (_MSC_VER)
+#if (defined (__GNUC__) || (_MSC_VER)) && !defined(EMSCRIPTEN)
     Bitu a, b, c, d;
     cpuid(1, a, b, c, d);
     sse2_available = ((d >> 26) & 1)?true:false;
@@ -905,7 +909,7 @@ void DOSBOX_SetupConfigSections(void) {
         0
     };
 
-#if defined(__SSE__) && !defined(_M_AMD64)
+#if defined(__SSE__) && !defined(_M_AMD64) && !defined(EMSCRIPTEN)
     CheckSSESupport();
 #endif
     SDLNetInited = false;
@@ -1132,7 +1136,11 @@ void DOSBOX_SetupConfigSections(void) {
     Pint = secprop->Add_int("acpi reserved size", Property::Changeable::WhenIdle,0);
     Pint->Set_help("Amount of memory at top to reserve for ACPI structures and tables. Set to 0 for automatic assignment.");
 
+#if defined(C_EMSCRIPTEN)
+    Pint = secprop->Add_int("memsize", Property::Changeable::WhenIdle,4);
+#else
     Pint = secprop->Add_int("memsize", Property::Changeable::WhenIdle,16);
+#endif
     Pint->SetMinMax(1,511);
     Pint->Set_help(
         "Amount of memory DOSBox has in megabytes.\n"
