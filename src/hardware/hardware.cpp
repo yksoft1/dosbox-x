@@ -420,7 +420,7 @@ void ffmpeg_reopen_video(double fps,const int bpp) {
 	ffmpeg_vid_ctx->max_b_frames = 0;
 	ffmpeg_vid_ctx->pix_fmt = ffmpeg_choose_pixfmt(ffmpeg_yuv_format_choice);
 	ffmpeg_vid_ctx->thread_count = 0;		// auto-choose
-	ffmpeg_vid_ctx->flags2 = CODEC_FLAG2_FAST;
+	ffmpeg_vid_ctx->flags2 = AV_CODEC_FLAG2_FAST;
 	ffmpeg_vid_ctx->qmin = 1;
 	ffmpeg_vid_ctx->qmax = 63;
 	ffmpeg_vid_ctx->rc_max_rate = ffmpeg_vid_ctx->bit_rate;
@@ -626,6 +626,7 @@ void CAPTURE_VideoEvent(bool pressed) {
 
 	mainMenu.get_item("mapper_video").check(!!(CaptureState & CAPTURE_VIDEO)).refresh_item(mainMenu);
 }
+#endif
 
 void CAPTURE_StartCapture(void) {
 #if (C_SSHOT)
@@ -677,6 +678,7 @@ void CAPTURE_StopMTWave(void) {
 #endif
 }
 
+#if (C_SSHOT)
 extern uint32_t GFX_palette32bpp[256];
 #endif
 
@@ -1078,7 +1080,7 @@ skip_shot:
 			ffmpeg_vid_ctx->max_b_frames = 0;
 			ffmpeg_vid_ctx->pix_fmt = ffmpeg_choose_pixfmt(ffmpeg_yuv_format_choice); // TODO: auto-choose according to what codec says is supported, and let user choose as well
 			ffmpeg_vid_ctx->thread_count = 0;		// auto-choose
-			ffmpeg_vid_ctx->flags2 = CODEC_FLAG2_FAST;
+			ffmpeg_vid_ctx->flags2 = AV_CODEC_FLAG2_FAST;
 			ffmpeg_vid_ctx->qmin = 1;
 			ffmpeg_vid_ctx->qmax = 63;
 			ffmpeg_vid_ctx->rc_max_rate = ffmpeg_vid_ctx->bit_rate;
@@ -1871,10 +1873,12 @@ void HARDWARE_Init() {
 
 #if !defined(C_EMSCRIPTEN)
 void update_capture_fmt_menu(void) {
+# if (C_SSHOT)
     mainMenu.get_item("capture_fmt_avi_zmbv").check(native_zmbv).refresh_item(mainMenu);
-#if (C_AVCODEC)
+#  if (C_AVCODEC)
     mainMenu.get_item("capture_fmt_mpegts_h264").check(export_ffmpeg).refresh_item(mainMenu);
-#endif
+#  endif
+# endif
 }
 #endif
 
