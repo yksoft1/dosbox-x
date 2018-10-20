@@ -171,6 +171,10 @@ Bitu ROMBIOS_GetMemory(Bitu bytes,const char *who,Bitu alignment,Bitu must_be_at
     return rombios_alloc.getMemory(bytes,who,alignment,must_be_at);
 }
 
+void ROMBIOS_InitForCustomBIOS(void) {
+    rombios_alloc.initSetRange(0xD8000,0xE0000);
+}
+
 static IO_Callout_t dosbox_int_iocallout = IO_Callout_t_none;
 
 static unsigned char dosbox_int_register_shf = 0;
@@ -3057,6 +3061,12 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
         /* TODO: 0x0A = Read ID */
         /* TODO: 0x0D = Format track */
         /* TODO: 0x0E = ?? */
+        case 0x03: /* equipment flags update (?) */
+            // TODO: Update the disk equipment flags in BDA.
+            //       For now, make Alantia happy by returning success.
+            reg_ah = 0x00;
+            CALLBACK_SCF(false);
+            break;
         case 0x00: /* seek */
             /* CL = track */
             if (floppy == NULL) {
@@ -7240,6 +7250,11 @@ void MOUSE_Unsetup_BIOS(void);
 void BIOS_OnResetComplete(Section *x) {
     (void)x;//UNUSED
     INT10_OnResetComplete();
+
+    if (IS_PC98_ARCH) {
+        void PC98_BIOS_Bank_Switch_Reset(void);
+        PC98_BIOS_Bank_Switch_Reset();
+    }
 
     if (biosConfigSeg != 0u) {
         ROMBIOS_FreeMemory((Bitu)(biosConfigSeg << 4u)); /* remember it was alloc'd paragraph aligned, then saved >> 4 */

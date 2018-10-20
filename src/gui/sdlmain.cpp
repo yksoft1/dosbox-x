@@ -7737,6 +7737,20 @@ fresh_boot:
 
             /* new code: fire event */
             DispatchVMEvent(VM_EVENT_RESET);
+
+            extern bool custom_bios;
+            if (custom_bios) {
+                /* need to relocate BIOS allocations */
+                void ROMBIOS_InitForCustomBIOS(void);
+                ROMBIOS_InitForCustomBIOS();
+
+                void CALLBACK_Init();
+                CALLBACK_Init();
+
+                void DEBUG_ReinitCallback(void);
+                DEBUG_ReinitCallback();
+            }
+
             DispatchVMEvent(VM_EVENT_RESET_END);
 
             /* HACK: EGA/VGA modes will need VGA BIOS mapped in, ready to go */
