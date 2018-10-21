@@ -121,10 +121,10 @@ clean:
 html: $(TARGET)
 ifeq ($(PRELOAD), 1)
 	$(CC) -O3 -s USE_SDL=2 -s WASM=$(WASM) -s TOTAL_MEMORY=$(EMSCRIPTEN_TOTAL_MEMORY)  -s EMTERPRETIFY=1 -s EMTERPRETIFY_ASYNC=1 \
-	$(TARGET) \
+	$(TARGET) -s EMTERPRETIFY_WHITELIST=@ew.txt \
 	--preload-file $(PREFILE) -o $(basename $(TARGET)).html 
 else
 	$(CC) -O3 -s USE_SDL=2 -s WASM=$(WASM) -s TOTAL_MEMORY=$(EMSCRIPTEN_TOTAL_MEMORY)  -s EMTERPRETIFY=1 -s EMTERPRETIFY_ASYNC=1 \
-	$(TARGET) -o $(basename $(TARGET)).html 
+	-s EMTERPRETIFY_WHITELIST=@ew.txt $(TARGET) --profiling-funcs -o $(basename $(TARGET)).html 
 endif
-#TODO: make an EMTERPRETIFY_WHITELIST file.
+#TODO: make an EMTERPRETIFY_WHITELIST file with less functions to Emterpretify.
