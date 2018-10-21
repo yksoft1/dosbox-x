@@ -1,8 +1,0 @@
-[
-"__Z11PauseDOSBoxb", "__Z13GFX_EndUpdatePKt",
-"__ZL17HandleMouseButtonP20SDL_MouseButtonEvent", 
-"__ZL17HandleMouseMotionP20SDL_MouseMotionEvent",
-"__Z10GFX_Eventsv","__Z18BIND_MappingEventsv",
-"__Z18MAPPER_RunInternalv",
-"__ZN4BIOS28cb_bios_startup_screen__funcEv",
-]
