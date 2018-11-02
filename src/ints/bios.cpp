@@ -3031,6 +3031,18 @@ void PC98_BIOS_FDC_CALL_GEO_UNPACK(unsigned int &fdc_cyl,unsigned int &fdc_head,
     if (fdc_sz > 8) fdc_sz = 8;
 }
 
+/* NTS: FDC calls reset IRQ 0 timer to a specific fixed interval,
+ *      because the real BIOS likely does the same in the act of
+ *      controlling the floppy drive.
+ *
+ *      Resetting the interval is required to prevent Ys II from
+ *      crashing after disk swap (divide by zero/overflow) because
+ *      Ys II reads the timer after INT 1Bh for whatever reason
+ *      and the upper half of the timer byte later affects a divide
+ *      by 3 in the code. */
+
+void PC98_Interval_Timer_Continue(void);
+
 void PC98_BIOS_FDC_CALL(unsigned int flags) {
     static unsigned int fdc_cyl[2]={0,0},fdc_head[2]={0,0},fdc_sect[2]={0,0},fdc_sz[2]={0,0}; // FIXME: Rename and move out. Making "static" is a hack here.
     Bit32u img_heads=0,img_cyl=0,img_sect=0,img_ssz=0;
@@ -3076,6 +3088,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 /* TODO? Error code? */
                 return;
             }
+
+            /* fake like we use the timer */
+            PC98_Interval_Timer_Continue();
 
             fdc_cyl[drive] = reg_cl;
 
@@ -3127,6 +3142,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 /* TODO? Error code? */
                 return;
             }
+
+            /* fake like we use the timer */
+            PC98_Interval_Timer_Continue();
 
             size = reg_bx;
             while (size > 0) {
@@ -3201,6 +3219,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 /* TODO? Error code? */
                 return;
             }
+
+            /* fake like we use the timer */
+            PC98_Interval_Timer_Continue();
 
             size = reg_bx;
             memaddr = ((unsigned int)SegValue(es) << 4U) + reg_bp;
@@ -3295,6 +3316,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 return;
             }
 
+            /* fake like we use the timer */
+            PC98_Interval_Timer_Continue();
+
             size = reg_bx;
             memaddr = ((unsigned int)SegValue(es) << 4U) + reg_bp;
             while (size > 0) {
@@ -3387,6 +3411,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 if ((++fdc_sect[drive]) > img_sect)
                     fdc_sect[drive] = 1;
             }
+
+            /* fake like we use the timer */
+            PC98_Interval_Timer_Continue();
 
             reg_ah = 0x00;
             CALLBACK_SCF(false);
@@ -5652,8 +5679,8 @@ private:
             callback[18].Install(&INTGEN_PC98_Handler,CB_IRET,"Int stub ???");
             for (unsigned int i=0x00;i < 0x100;i++) RealSetVec(i,callback[18].Get_RealPointer());
 
-            /* need handler at INT 07h */
-            real_writed(0,0x07*4,BIOS_DEFAULT_HANDLER_LOCATION);
+            for (unsigned int i=0x00;i < 0x08;i++)
+                real_writed(0,i*4,CALLBACK_RealPointer(call_default));
         }
         else {
             /* Clear the vector table */
@@ -6316,6 +6343,12 @@ private:
 
             void BIOS_Post_register_FDC();
             BIOS_Post_register_FDC();
+        }
+
+        if (IS_PC98_ARCH) {
+            /* initialize IRQ0 timer to default tick interval.
+             * PC-98 does not pre-initialize timer 0 of the PIT to 0xFFFF the way IBM PC/XT/AT do */
+            PC98_Interval_Timer_Continue();
         }
 
         CPU_STI();
