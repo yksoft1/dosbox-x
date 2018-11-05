@@ -1,4 +1,12 @@
-(next version)
+<next version>
+  - Added dosbox.conf option to determine whether INT 10h
+    VESA BIOS emulation points at the modelist in ROM or
+    copies the modelist into the DOS application's info
+    structure when asked.
+0.82.10
+  - PC-98 INT 1Bh floppy emulation now fakes success for
+    calls to format track.
+  - Initial keyboard pause fixed
   - PC-98 INT 1Bh floppy disk BIOS call now resets timer
     interval per call. This fixes Ys II after disk swap.
   - BIOS fixed to put normal "unhandled INT call" handler
