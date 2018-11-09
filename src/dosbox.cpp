@@ -495,11 +495,26 @@ void DOSBOX_SetNormalLoop() {
     loop=Normal_Loop;
 }
 
+#ifdef DEBUG_RECURSION
+volatile int runmachine_recursion = 0;
+#endif
+
 void DOSBOX_RunMachine(void){
     Bitu ret;
+
+#ifdef DEBUG_RECURSION
+    if (runmachine_recursion++ != 0)
+        LOG_MSG("RunMachine recursion");
+#endif
+
     do {
         ret=(*loop)();
     } while (!ret);
+
+#ifdef DEBUG_RECURSION
+    if (--runmachine_recursion < 0)
+        LOG_MSG("RunMachine recursion leave error");
+#endif
 }
 
 static void DOSBOX_UnlockSpeed( bool pressed ) {
@@ -651,8 +666,12 @@ void Init_VGABIOS() {
 
     if (VGA_BIOS_Size_override >= 512 && VGA_BIOS_Size_override <= 65536)
         VGA_BIOS_Size = (VGA_BIOS_Size_override + 0x7FFU) & (~0xFFFU);
-    else if (IS_VGA_ARCH)
-        VGA_BIOS_Size = 0x3000; /* <- Experimentation shows the S3 emulation can fit in 12KB, doesn't need all 32KB */
+    else if (IS_VGA_ARCH) {
+        if (svgaCard == SVGA_S3Trio)
+            VGA_BIOS_Size = 0x4000;
+        else
+            VGA_BIOS_Size = 0x3000;
+    }
     else if (machine == MCH_EGA) {
         if (VIDEO_BIOS_always_carry_16_high_font)
             VGA_BIOS_Size = 0x3000;
@@ -2625,6 +2644,17 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("int33",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Enable INT 33H (mouse) support.");
+
+    Pbool = secprop->Add_bool("int33 hide host cursor if interrupt subroutine",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("If set, the cursor on the host will be hidden if the DOS application provides it's own\n"
+                    "interrupt subroutine for the mouse driver to call, which is usually an indication that\n"
+                    "the DOS game wishes to draw the cursor with it's own support routines (DeluxePaint II).");
+
+    Pbool = secprop->Add_bool("int33 hide host cursor when polling",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, the cursor on the host will be hidden even if the DOS application has also\n"
+                    "hidden the cursor in the guest, as long as the DOS application is polling position\n"
+                    "and button status. This can be useful for DOS programs that draw the cursor on their\n"
+                    "own instead of using the mouse driver, including most games and DeluxePaint II.");
 
     Pbool = secprop->Add_bool("int33 disable cell granularity",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, the mouse pointer position is reported at full precision (as if 640x200 coordinates) in all modes.\n"
