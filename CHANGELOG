@@ -1,4 +1,25 @@
 <next version>
+  - PC-98 text scroll region implemented (I/O ports
+    76h-7Ah even).
+  - PC-98 CRTC mode set regarding 20/25-line mode fixed
+    to update line height, text vertical position/height,
+    and cursor shape.
+  - PC-98 emulation of text height/vertical position
+    registers 70h-74h even added.
+  - PC-98 text hardware cursor fixed to cover both halves
+    of doublewide characters if cursor positioned on left
+    half, to match real hardware.
+  - Fixed music/interrupt slowdown whenever I/O and INT 10h
+    BIOS emulation is involved.
+  - PC-98 minimal (non-functional at this time) printer
+    port emulation added, as well as system configuration
+    port.
+  - PC-98 CG memory region fixed to match real hardware
+    behavior, responding to A4000-A4FFF.
+  - FAT filesystem driver now supports 2048 bytes per
+    sector filesystems.
+  - FAT filesystem driver logical/physical sector matching
+    fixed to improve flexibility.
   - Fixed crash that occurs if you maximize the window
     and then adjust scalers to produce output that is
     larger than the maximized window.

@@ -302,6 +302,8 @@ extern bool allow_keyb_reset;
 
 extern bool DOSBox_Paused();
 
+//#define DEBUG_CYCLE_OVERRUN_CALLBACK
+
 static Bitu Normal_Loop(void) {
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;
     Bit32u ticksNew;
@@ -346,11 +348,27 @@ static Bitu Normal_Loop(void) {
                         return 0;
 
                     extern unsigned int last_callback;
-
+                    unsigned int p_last_callback = last_callback;
                     last_callback = ret;
+
                     dosbox_allow_nonrecursive_page_fault = false;
                     Bitu blah = (*CallBack_Handlers[ret])();
                     dosbox_allow_nonrecursive_page_fault = saved_allow;
+
+                    last_callback = p_last_callback;
+
+#ifdef DEBUG_CYCLE_OVERRUN_CALLBACK
+                    {
+                        extern char* CallBack_Description[CB_MAX];
+
+                        /* I/O delay can cause negative CPU_Cycles and PIC event / audio rendering issues */
+                        cpu_cycles_count_t overrun = -std::min(CPU_Cycles,(cpu_cycles_count_t)0);
+
+                        if (overrun > (CPU_CycleMax/100))
+                            LOG_MSG("Normal loop: CPU cycles count overrun by %ld (%.3fms) after callback '%s'\n",(signed long)overrun,(double)overrun / CPU_CycleMax,CallBack_Description[ret]);
+                    }
+#endif
+
                     if (GCC_UNLIKELY(blah > 0U))
                         return blah;
                 }
@@ -495,12 +513,18 @@ void DOSBOX_SetNormalLoop() {
     loop=Normal_Loop;
 }
 
+//#define DEBUG_RECURSION
+
 #ifdef DEBUG_RECURSION
 volatile int runmachine_recursion = 0;
 #endif
 
 void DOSBOX_RunMachine(void){
     Bitu ret;
+
+    extern unsigned int last_callback;
+    unsigned int p_last_callback = last_callback;
+    last_callback = 0;
 
 #ifdef DEBUG_RECURSION
     if (runmachine_recursion++ != 0)
@@ -515,6 +539,8 @@ void DOSBOX_RunMachine(void){
     if (--runmachine_recursion < 0)
         LOG_MSG("RunMachine recursion leave error");
 #endif
+
+    last_callback = p_last_callback;
 }
 
 static void DOSBOX_UnlockSpeed( bool pressed ) {
