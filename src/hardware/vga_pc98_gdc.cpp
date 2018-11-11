@@ -315,8 +315,25 @@ void PC98_GDC_state::idle_proc(void) {
                 param_ram_wptr = current_command & 0xF;
                 current_command = GDC_CMD_PARAMETER_RAM_LOAD;
                 break;
+#if 0 // TODO: I do not yet have any games to verify this works nor test code in DOSLIB.
+      //
+      //       "Ancient Dragon" sends this command apparently to test that data would return,
+      //       rather than reading the data, then crashes.
+            case GDC_CMD_CURSOR_ADDRESS_READ:  // 0xE0       1 1 1 0 0 0 0 0
+
+                Bitu DEBUG_EnableDebugger(void);
+                DEBUG_EnableDebugger();
+
+                rfifo[0] = (unsigned char)( vga.config.cursor_start         & 0xFFu);
+                rfifo[1] = (unsigned char)((vga.config.cursor_start >>  8u) & 0xFFu);
+                rfifo[2] = (unsigned char)((vga.config.cursor_start >> 16u) & 0xFFu);
+                rfifo[3] = 0x00; // TODO
+                rfifo[4] = 0x00; // TODO
+                rfifo_write = 5;
+                break;
+#endif
             default:
-                LOG_MSG("GDC: Unknown command 0x%x",current_command);
+                LOG_MSG("GDC: %s: Unknown command 0x%x",master_sync?"master":"slave",current_command);
                 break;
         };
     }
@@ -377,7 +394,8 @@ Bit16u PC98_GDC_state::read_fifo(void) {
 }
 
 void PC98_GDC_state::next_line(void) {
-    if ((++row_line) == row_height) {
+    row_line++;
+    if (row_line == row_height) {
         scan_address += display_pitch;
         row_line = 0;
     }
