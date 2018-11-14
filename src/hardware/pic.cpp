@@ -62,6 +62,10 @@ struct PIC_Controller {
     }
 
     void update_active_irq() {
+        if (auto_eoi) {
+            assert(isr == 0);
+        }
+
         if(isr == 0) {active_irq = 8; return;}
         for(Bit8u i = 0, s = 1; i < 8;i++, s<<=1){
             if( isr & s){
@@ -312,7 +316,14 @@ static Bitu read_command(Bitu port,Bitu iolen) {
     PIC_Controller * pic=&pics[(port==0x20/*IBM*/ || port==0x00/*PC-98*/) ? 0 : 1];
     if (pic->request_issr){
         return pic->isr;
-    } else { 
+    } else {
+        /* HACK: I found a PC-98 game "Steel Gun Nyan" that relies on setting the timer to Mode 3 (Square Wave)
+         *       then polling the output through the master PIC's IRR to do delays. */
+        if (pic == &master) {
+            void TIMER_IRQ0Poll(void);
+            TIMER_IRQ0Poll();
+        }
+
         return pic->irr;
     }
 }
@@ -507,9 +518,14 @@ void PIC_runIRQs(void) {
         }
     }
 
+    if (slave.auto_eoi)
+        slave.check_for_irq();
+    if (master.auto_eoi)
+        master.check_for_irq();
+
     /* if we cleared all IRQs, then stop checking.
      * otherwise, keep the flag set for the next IRQ to process. */
-    if (i == max && (master.irr&master.imrr) == 0) {
+    if (i == max && (master.irr&master.imrr) == 0 && (slave.irr&slave.imrr) == 0) {
         PIC_IRQCheckPending = 0;
         PIC_IRQCheck = 0;
     }
@@ -883,6 +899,15 @@ void PIC_Reset(Section *sec) {
      *        incoming interrupts as in-service. */
     if (IS_PC98_ARCH && section->Get_bool("pc-98 pic init to read isr"))
         pics[0].request_issr = pics[1].request_issr = true;
+
+    /* I have a hunch (at this time) that the PC-98 uses auto-EOI, at
+     * least on the master PIC. Many PC-98 games seem to have interrupt
+     * handlers that do not acknowledge the master when handling an
+     * interrupt from the slave (IRQ 8-15) */
+    if (IS_PC98_ARCH) {
+        pics[0].auto_eoi = section->Get_bool("pc-98 auto eoi master");
+        pics[1].auto_eoi = section->Get_bool("pc-98 auto eoi slave");
+    }
 
     /* IBM: IRQ 0-15 is INT 0x08-0x0F, 0x70-0x7F
      * PC-98: IRQ 0-15 is INT 0x08-0x17 */

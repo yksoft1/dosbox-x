@@ -1,4 +1,31 @@
 <next version>
+  - Emulator hanging problem fixed when inputs are
+    processed while running at a very low cycle count.
+  - Added PC-98 LIO BIOS list and stub for games that
+    require it.
+  - Timer and PIC updated to emulate Mode 3 Square Wave
+    output through the IRR register. Needed for Steel
+    Gun Nyan.
+  - PC-98 INT 18h fixed to reenable and process any
+    keyboard data waiting when the DOS game or application
+    calls INT 18h to read keyboard input. This fixes
+    keyboard problems with Quarth.
+  - Added dosbox.conf settings to enable Auto EOI mode
+    in PC-98 mode. DOS game behavior suggests that
+    the platform may use Auto EOI.
+  - PC-98 FDC BIOS emulation no longer reprograms the
+    timer interrupt, but uses an alternate hack to
+    avoid divide by zero fault with Ys II.
+  - PC-98 GDC command to read back cursor position
+    added.
+  - PC-98 DOS CON device emulation now maintains ANSI
+    attribute byte at 60:11D as documented.
+  - BOOT now hides hardware cursor when booting a guest
+    OS in PC-98 mode.
+  - INT 1Dh vector now points at segment FD80 to satisfy
+    some games that autodetect PC-98 vs other platforms.
+  - INT 18h AH=42 implement display "bank" bit for games
+    that need it.
   - PC-98 text scroll region implemented (I/O ports
     76h-7Ah even).
   - PC-98 CRTC mode set regarding 20/25-line mode fixed

@@ -2309,6 +2309,7 @@ bool INT16_get_key(Bit16u &code);
 bool INT16_peek_key(Bit16u &code);
 
 extern uint8_t                     GDC_display_plane;
+extern uint8_t                     GDC_display_plane_pending;
 
 unsigned char prev_pc98_mode42 = 0;
 
@@ -2508,6 +2509,16 @@ static Bitu INT18_PC98_Handler(void) {
                 reg_ax = temp16;
             }
             else {
+                /* Keyboard checks.
+                 * If the interrupt got masked, unmask it.
+                 * If the keyboard has data waiting, make sure the interrupt signal is active in case the last interrupt handler
+                 * handled the keyboard interrupt and never read the keyboard (Quarth).
+                 *
+                 * TODO: Is this what real PC-98 BIOSes do? */
+                void check_keyboard_fire_IRQ1(void);
+                check_keyboard_fire_IRQ1();
+                IO_WriteB(0x02,IO_ReadB(0x02) & (~(1u << /*IRQ*/1u))); // unmask IRQ1
+
                 reg_ip += 1; /* step over IRET, to NOPs which then JMP back to callback */
             }
             break;
@@ -2519,6 +2530,16 @@ static Bitu INT18_PC98_Handler(void) {
                 reg_bh = 1;
             }
             else {
+                /* Keyboard checks.
+                 * If the interrupt got masked, unmask it.
+                 * If the keyboard has data waiting, make sure the interrupt signal is active in case the last interrupt handler
+                 * handled the keyboard interrupt and never read the keyboard (Quarth).
+                 *
+                 * TODO: Is this what real PC-98 BIOSes do? */
+                void check_keyboard_fire_IRQ1(void);
+                check_keyboard_fire_IRQ1();
+                IO_WriteB(0x02,IO_ReadB(0x02) & (~(1u << /*IRQ*/1u))); // unmask IRQ1
+
                 reg_bh = 0;
             }
             break;
@@ -2539,6 +2560,16 @@ static Bitu INT18_PC98_Handler(void) {
                 reg_bh = 1;
             }
             else {
+                /* Keyboard checks.
+                 * If the interrupt got masked, unmask it.
+                 * If the keyboard has data waiting, make sure the interrupt signal is active in case the last interrupt handler
+                 * handled the keyboard interrupt and never read the keyboard (Quarth).
+                 *
+                 * TODO: Is this what real PC-98 BIOSes do? */
+                void check_keyboard_fire_IRQ1(void);
+                check_keyboard_fire_IRQ1();
+                IO_WriteB(0x02,IO_ReadB(0x02) & (~(1u << /*IRQ*/1u))); // unmask IRQ1
+
                 reg_bh = 0;
             }
             break;
@@ -2776,6 +2807,10 @@ static Bitu INT18_PC98_Handler(void) {
             //           01 = 640x200 upper half
             //           10 = 640x200 lower half
             //           11 = 640x400
+            //   [5:5] = CRT
+            //           0 = color
+            //           1 = monochrome
+            //   [4:4] = Display bank
 
             // FIXME: This is a guess. I have no idea as to actual behavior, yet.
             //        This seems to help with clearing the text layer when games start the graphics.
@@ -2807,7 +2842,7 @@ static Bitu INT18_PC98_Handler(void) {
             }
 
             pc98_gdc_vramop &= ~(1 << VOPBIT_ACCESS);
-            GDC_display_plane = 0;
+            GDC_display_plane = GDC_display_plane_pending = (reg_ch & 0x10) ? 1 : 0;
 
             prev_pc98_mode42 = reg_ch;
 
@@ -3071,6 +3106,37 @@ void PC98_BIOS_FDC_CALL_GEO_UNPACK(unsigned int &fdc_cyl,unsigned int &fdc_head,
 
 void PC98_Interval_Timer_Continue(void);
 
+void FDC_WAIT_TIMER_HACK(void) {
+    unsigned int v;
+
+    // Explanation:
+    //
+    // Originally the FDC code here changed the timer interval back to the stock 100hz
+    // normally used in PC-98, to fix Ys II. However that seems to break other booter
+    // games that hook IRQ 0 directly and set the timer ONCE, then access the disk.
+    //
+    // For example, "Angelus" ran WAY too slow with the timer hack because it programs
+    // the timer to a 600hz interval and expects it to stay that way.
+    //
+    // So the new method to satisfy both games is to loop here until the timer
+    // count is below the maximum that would occur if the 100hz tick count were
+    // still in effect, even if the timer interval was reprogrammed.
+    //
+    // NTS: Writing port 0x77 to relatch the timer also seems to break games
+    //
+    // TODO: As a safety against getting stuck, perhaps PIC_FullIndex() should be used
+    //       to break out of the loop if this runs for more than 1 second, since that
+    //       is a sign the timer is in an odd state that will never terminate this loop.
+
+    do {
+        void CALLBACK_Idle(void);
+        CALLBACK_Idle();
+
+        v  = IO_ReadB(0x71);
+        v |= IO_ReadB(0x71) << 8;
+    } while (v >= 0x60);
+}
+
 void PC98_BIOS_FDC_CALL(unsigned int flags) {
     static unsigned int fdc_cyl[2]={0,0},fdc_head[2]={0,0},fdc_sect[2]={0,0},fdc_sz[2]={0,0}; // FIXME: Rename and move out. Making "static" is a hack here.
     Bit32u img_heads=0,img_cyl=0,img_sect=0,img_ssz=0;
@@ -3117,8 +3183,8 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 return;
             }
 
-            /* fake like we use the timer */
-            PC98_Interval_Timer_Continue();
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
 
             fdc_cyl[drive] = reg_cl;
 
@@ -3140,6 +3206,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 return;
             }
             floppy->Get_Geometry(&img_heads, &img_cyl, &img_sect, &img_ssz);
+
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
 
             /* Prevent reading 1.44MB floppyies using 1.2MB read commands and vice versa.
              * FIXME: It seems MS-DOS 5.0 booted from a HDI image has trouble understanding
@@ -3170,9 +3239,6 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 /* TODO? Error code? */
                 return;
             }
-
-            /* fake like we use the timer */
-            PC98_Interval_Timer_Continue();
 
             size = reg_bx;
             while (size > 0) {
@@ -3218,6 +3284,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
             }
             floppy->Get_Geometry(&img_heads, &img_cyl, &img_sect, &img_ssz);
 
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
+
             /* Prevent reading 1.44MB floppyies using 1.2MB read commands and vice versa.
              * FIXME: It seems MS-DOS 5.0 booted from a HDI image has trouble understanding
              *        when Drive A: (the first floppy) is a 1.44MB drive or not and fails
@@ -3247,9 +3316,6 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 /* TODO? Error code? */
                 return;
             }
-
-            /* fake like we use the timer */
-            PC98_Interval_Timer_Continue();
 
             size = reg_bx;
             memaddr = ((unsigned int)SegValue(es) << 4U) + reg_bp;
@@ -3333,6 +3399,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
             }
             floppy->Get_Geometry(&img_heads, &img_cyl, &img_sect, &img_ssz);
 
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
+
             /* TODO: Error if write protected */
 
             PC98_BIOS_FDC_CALL_GEO_UNPACK(/*&*/fdc_cyl[drive],/*&*/fdc_head[drive],/*&*/fdc_sect[drive],/*&*/fdc_sz[drive]);
@@ -3343,9 +3412,6 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 /* TODO? Error code? */
                 return;
             }
-
-            /* fake like we use the timer */
-            PC98_Interval_Timer_Continue();
 
             size = reg_bx;
             memaddr = ((unsigned int)SegValue(es) << 4U) + reg_bp;
@@ -3387,6 +3453,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 return;
             }
 
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
+
             reg_ah = 0x00;
             CALLBACK_SCF(false);
             break;
@@ -3401,8 +3470,8 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
             PC98_BIOS_FDC_CALL_GEO_UNPACK(/*&*/fdc_cyl[drive],/*&*/fdc_head[drive],/*&*/fdc_sect[drive],/*&*/fdc_sz[drive]);
             unitsize = PC98_FDC_SZ_TO_BYTES(fdc_sz[drive]);
 
-            /* fake like we use the timer */
-            PC98_Interval_Timer_Continue();
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
 
             LOG_MSG("WARNING: INT 1Bh FDC format track command not implemented. Formatting is faked, for now on C/H/S/sz %u/%u/%u/%u drive %c.",
                 (unsigned int)fdc_cyl[drive],
@@ -3425,6 +3494,9 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
             }
 
             floppy->Get_Geometry(&img_heads, &img_cyl, &img_sect, &img_ssz);
+
+            // Hack for Ys II
+            FDC_WAIT_TIMER_HACK();
 
             if (reg_ah & 0x10) { // seek to track number in CL
                 if (img_cyl != 0 && reg_cl >= img_cyl) {
@@ -3463,9 +3535,6 @@ void PC98_BIOS_FDC_CALL(unsigned int flags) {
                 if ((++fdc_sect[drive]) > img_sect)
                     fdc_sect[drive] = 1;
             }
-
-            /* fake like we use the timer */
-            PC98_Interval_Timer_Continue();
 
             reg_ah = 0x00;
             CALLBACK_SCF(false);
@@ -3572,7 +3641,7 @@ void PC98_Interval_Timer_Continue(void) {
     else
         IO_WriteB(0x71,0x60);
 
-    PIC_SetIRQMask(0,false);
+    IO_WriteB(0x02,IO_ReadB(0x02) & (~(1u << /*IRQ*/0u))); // unmask IRQ0
 }
 
 unsigned char pc98_dec2bcd(unsigned char c) {
@@ -3731,11 +3800,11 @@ static Bitu INTDC_PC98_Handler(void) {
 
     switch (reg_cl) {
         case 0x10:
-            if (reg_ah == 0x00) { /* CL=0x10 AL=0x00 DL=char write char to CON */
+            if (reg_ah == 0x00) { /* CL=0x10 AH=0x00 DL=char write char to CON */
                 PC98_INTDC_WriteChar(reg_dl);
                 goto done;
             }
-            else if (reg_ah == 0x01) { /* CL=0x10 AL=0x01 DS:DX write string to CON */
+            else if (reg_ah == 0x01) { /* CL=0x10 AH=0x01 DS:DX write string to CON */
                 /* According to the example at http://tepe.tec.fukuoka-u.ac.jp/HP98/studfile/grth/gt10.pdf
                  * the string ends in '$' just like the main DOS string output function. */
                 Bit16u ofs = reg_dx;
@@ -3744,6 +3813,13 @@ static Bitu INTDC_PC98_Handler(void) {
                     if (c == '$') break;
                     PC98_INTDC_WriteChar(c);
                 } while (1);
+                goto done;
+            }
+            else if (reg_ah == 0x02) { /* CL=0x10 AH=0x02 DL=attribute set console output attribute */
+                /* Ref: https://nas.jmc/jmcs/docs/browse/Computer/Platform/PC%2c%20NEC%20PC%2d98/Collections/Undocumented%209801%2c%209821%20Volume%202%20%28webtech.co.jp%29%20English%20translation/memdos%2eenglish%2dgoogle%2dtranslate%2etxt
+                 *
+                 * DL is the attribute byte (in the format written directly to video RAM, not the ANSI code) */
+                mem_writeb(0x71D,reg_dl);   /* 60:11D */
                 goto done;
             }
             goto unknown;
@@ -3778,6 +3854,25 @@ static Bitu INTF2_PC98_Handler(void) {
         reg_di,
         SegValue(ds),
         SegValue(es));
+
+    return CBRET_NONE;
+}
+
+static Bitu PC98_BIOS_LIO(void) {
+    /* on entry, AL (from our BIOS code) is set to the call number that lead here */
+    LOG_MSG("PC-98 BIOS LIO graphics call 0x%02x with AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X",
+        reg_al,
+        reg_ax,
+        reg_bx,
+        reg_cx,
+        reg_dx,
+        reg_si,
+        reg_di,
+        SegValue(ds),
+        SegValue(es));
+
+    // from Yksoft1's patch
+    reg_ah = 0;
 
     return CBRET_NONE;
 }
@@ -5343,6 +5438,7 @@ static Bitu adapter_scan_start;
 static CALLBACK_HandlerObject int4b_callback;
 static CALLBACK_HandlerObject callback[20]; /* <- fixme: this is stupid. just declare one per interrupt. */
 static CALLBACK_HandlerObject cb_bios_post;
+static CALLBACK_HandlerObject callback_pc98_lio;
 
 Bitu call_pnp_r = ~0UL;
 Bitu call_pnp_rp = 0;
@@ -5796,6 +5892,8 @@ private:
             void INT10_EnterPC98(Section *sec);
             INT10_EnterPC98(NULL); /* INT 10h */
 
+            callback_pc98_lio.Uninstall();
+
             callback[1].Uninstall(); /* INT 11h */
             callback[2].Uninstall(); /* INT 12h */
             callback[3].Uninstall(); /* INT 14h */
@@ -5877,8 +5975,22 @@ private:
             callback[5].Set_RealVec(0x1C,/*reinstall*/true);
 
             /* INT 1Dh *STUB* */
+            /* Place it in the PC-98 int vector area at FD80:0000 to satisfy some DOS games
+             * that detect PC-98 from the segment value of the vector (issue #927).
+             * Note that on real hardware (PC-9821) INT 1Dh appears to be a stub that IRETs immediately. */
             callback[6].Install(&INT1D_PC98_Handler,CB_IRET,"Int 1D ???");
-            callback[6].Set_RealVec(0x1D,/*reinstall*/true);
+//            callback[6].Set_RealVec(0x1D,/*reinstall*/true);
+            {
+                Bitu ofs = 0xFD813; /* 0xFD80:0013 try not to look like a phony address */
+                unsigned int vec = 0x1D;
+                Bit32u target = callback[6].Get_RealPointer();
+
+                phys_writeb(ofs+0,0xEA);        // JMP FAR <callback>
+                phys_writed(ofs+1,target);
+
+                phys_writew((vec*4)+0,(ofs-0xFD800));
+                phys_writew((vec*4)+2,0xFD80);
+            }
 
             /* INT 1Eh *STUB* */
             callback[7].Install(&INT1E_PC98_Handler,CB_IRET,"Int 1E ???");
@@ -5903,6 +6015,46 @@ private:
             // default handler for IRQ 8-15
             for (Bit16u ct=0;ct < 8;ct++)
                 RealSetVec(ct+(IS_PC98_ARCH ? 0x10 : 0x70),BIOS_DEFAULT_IRQ815_DEF_LOCATION);
+
+            // LIO graphics interface (number of entry points, unknown WORD value and offset into the segment).
+            {
+                callback_pc98_lio.Install(&PC98_BIOS_LIO,CB_IRET,"LIO graphics library");
+
+                Bitu ofs = 0xF990u << 4u; // F990:0000...
+                unsigned int entrypoints = 0x11;
+                Bitu final_addr = callback_pc98_lio.Get_RealPointer();
+
+                /* NTS: Based on GAME/MAZE 999 behavior, these numbers are interrupt vector numbers.
+                 *      The entry point marked 0xA0 is copied by the game to interrupt vector A0 and
+                 *      then called with INT A0h even though it blindly assumes the numbers are
+                 *      sequential from 0xA0-0xAF. */
+                unsigned char entrypoint_indexes[0x11] = {
+                    0xA0,   0xA1,   0xA2,   0xA3,       // +0x00
+                    0xA4,   0xA5,   0xA6,   0xA7,       // +0x04
+                    0xA8,   0xA9,   0xAA,   0xAB,       // +0x08
+                    0xAC,   0xAD,   0xAE,   0xAF,       // +0x0C
+                    0xCE                                // +0x10
+                };
+
+                assert(((entrypoints * 4) + 4) <= 0x50);
+                assert((50 + (entrypoints * 7)) <= 0x100); // a 256-byte region is set aside for this!
+
+                phys_writed(ofs+0,entrypoints);
+                for (unsigned int ent=0;ent < entrypoints;ent++) {
+                    /* each entry point is "MOV AL,<entrypoint> ; JMP FAR <callback>" */
+                    /* Yksoft1's patch suggests a segment offset of 0x50 which I'm OK with */
+                    unsigned int ins_ofs = ofs + 0x50 + (ent * 7);
+
+                    phys_writew(ofs+4+(ent*4)+0,entrypoint_indexes[ent]);
+                    phys_writew(ofs+4+(ent*4)+2,ins_ofs - ofs);
+
+                    phys_writeb(ins_ofs+0,0xB0);                        // MOV AL,(entrypoint index)
+                    phys_writeb(ins_ofs+1,entrypoint_indexes[ent]);
+                    phys_writeb(ins_ofs+2,0xEA);                        // JMP FAR <callback>
+                    phys_writed(ins_ofs+3,final_addr);
+                    // total:   ins_ofs+7
+                }
+            }
         }
 
         // setup a few interrupt handlers that point to bios IRETs by default
@@ -5910,7 +6062,7 @@ private:
             real_writed(0,0x0e*4,CALLBACK_RealPointer(call_default2));  //design your own railroad
 
         if (IS_PC98_ARCH) {
-            real_writew(0,0x58A,0xFFFFU); // countdown timer value
+            real_writew(0,0x58A,0x0000U); // countdown timer value
             PIC_SetIRQMask(0,true); /* PC-98 keeps the timer off unless INT 1Ch is called to set a timer interval */
         }
 
@@ -6401,6 +6553,7 @@ private:
             /* initialize IRQ0 timer to default tick interval.
              * PC-98 does not pre-initialize timer 0 of the PIT to 0xFFFF the way IBM PC/XT/AT do */
             PC98_Interval_Timer_Continue();
+            PIC_SetIRQMask(0,true); /* PC-98 keeps the timer off unless INT 1Ch is called to set a timer interval */
         }
 
         CPU_STI();
@@ -7511,6 +7664,23 @@ void ROMBIOS_Init() {
          * allocate this NOW before other things get in the way */
         if (ROMBIOS_GetMemory(128*8,"BIOS 8x8 font (first 128 chars)",1,0xFFA6E) == 0) {
             LOG_MSG("WARNING: Was not able to mark off 0xFFA6E off-limits for 8x8 font");
+        }
+    }
+
+    /* PC-98 BIOS vectors appear to reside at segment 0xFD80. This is so common some games
+     * use it (through INT 1Dh) to detect whether they are running on PC-98 or not (issue #927).
+     *
+     * Note that INT 1Dh is one of the few BIOS interrupts not intercepted by PC-98 MS-DOS */
+    if (IS_PC98_ARCH) {
+        if (ROMBIOS_GetMemory(128,"PC-98 INT vector stub segment 0xFD80",1,0xFD800) == 0) {
+            LOG_MSG("WARNING: Was not able to mark off 0xFD800 off-limits for PC-98 int vector stubs");
+        }
+    }
+
+    /* PC-98 BIOSes have a LIO interface at segment F990 with graphic subroutines for Microsoft BASIC */
+    if (IS_PC98_ARCH) {
+        if (ROMBIOS_GetMemory(256,"PC-98 LIO graphic ROM BIOS library",1,0xF9900) == 0) {
+            LOG_MSG("WARNING: Was not able to mark off 0xF9900 off-limits for PC-98 LIO graphics library");
         }
     }
 
