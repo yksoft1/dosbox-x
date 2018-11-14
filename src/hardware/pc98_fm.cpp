@@ -394,7 +394,7 @@ void PC98_FM_OnEnterPC98(Section *sec) {
 			if(soundrom.name[0])
 				LOG_MSG("PC-98 FM board BIOS file \"%s\" loaded at 0x%5x", soundrom.name, soundrom.address);
 			else
-				LOG_MSG("PC-98 FM board BIOS failed to load", soundrom.name);
+				LOG_MSG("PC-98 FM board BIOS failed to load");
 		//TODO: Initialize sound BIOS, hook INT D2h for it
 		
         // WARNING: Some parts of the borrowed code assume 44100, 22050, or 11025 and
