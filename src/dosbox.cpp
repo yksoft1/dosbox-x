@@ -1236,6 +1236,10 @@ void DOSBOX_SetupConfigSections(void) {
         "        or 386DX and 486 systems where the CPU communicated directly with the ISA bus (A24-A31 tied off)\n"
         "    26: 64MB aliasing. Some 486s had only 26 external address bits, some motherboards tied off A26-A31");
 
+    Pbool = secprop->Add_bool("pc-98 int 1b fdc timer wait",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, INT 1Bh floppy access will wait for the timer to count down before returning.\n"
+                    "This is needed for Ys II to run without crashing.");
+
     Pbool = secprop->Add_bool("pc-98 pic init to read isr",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("If set, the programmable interrupt controllers are initialized by default (if PC-98 mode)\n"
                     "so that the in-service interrupt status can be read immediately. There seems to be a common\n"
@@ -1406,12 +1410,6 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("cascade interrupt ignore in service",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, PIC emulation will allow slave pic interrupts even if the cascade interrupt is still \"in service\". This is OFF by default. It is a hack for troublesome games.");
-
-    // temporary option. If it turns out real PC-98 hardware acts like this, this option will be TRUE by default
-    Pbool = secprop->Add_bool("pc-98 mouse interrupt on port C write",Property::Changeable::WhenIdle,false);
-    Pbool->Set_help("If set, writing port C of the 8255 mouse interface in PC-98 mode will re-trigger the mouse interrupt.\n"
-                    "Some games use the mouse interrupt as a timer source. Set this option if the game requires you to\n"
-                    "move the mouse constantly to advance forward.");
 
     Pbool = secprop->Add_bool("enable slave pic",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Enable slave PIC (IRQ 8-15). Set this to 0 if you want to emulate a PC/XT type arrangement with IRQ 0-7 and no IRQ 2 cascade.");
