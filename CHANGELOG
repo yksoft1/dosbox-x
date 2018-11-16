@@ -1,4 +1,19 @@
 <next version>
+  - Update Metal Force mouse hack to become a more general
+    "fire interrupt on Port C write" with a dosbox.conf
+    option to enable. This fixes the requirement to move
+    the mouse constantly for "Amaranth" when enabled.
+  - Add to cascade interrupt hacks by offering an option
+    to ignore the "in service" bit of the PIC for the
+    cascade interrupt, while still tracking it for
+    the DOS game or interrupt. Handy for PC-98 games
+    that check the cascade "in service" bit before
+    acting on the interrupt (IRQ 8-15).
+  - DOS kernel fixed to limit it's private area and
+    UMB region to avoid overlapping the PC-98 SOUND
+    BIOS.
+  - PC-98 SOUND BIOS dummy stub added for games that
+    call into it.
   - Emulator hanging problem fixed when inputs are
     processed while running at a very low cycle count.
   - Added PC-98 LIO BIOS list and stub for games that
@@ -10,9 +25,6 @@
     keyboard data waiting when the DOS game or application
     calls INT 18h to read keyboard input. This fixes
     keyboard problems with Quarth.
-  - Added dosbox.conf settings to enable Auto EOI mode
-    in PC-98 mode. DOS game behavior suggests that
-    the platform may use Auto EOI.
   - PC-98 FDC BIOS emulation no longer reprograms the
     timer interrupt, but uses an alternate hack to
     avoid divide by zero fault with Ys II.
