@@ -1040,6 +1040,7 @@ public:
 
                 /* attach directly without using the swap list */
                 if (imageDiskList[drive-65] != NULL) {
+                    imageDiskChange[drive-65] = true;
                     imageDiskList[drive-65]->Release();
                     imageDiskList[drive-65] = NULL;
                 }
@@ -1080,6 +1081,10 @@ public:
             return;
         }
 
+        /* clear the disk change flag.
+         * Most OSes don't expect the disk change error signal when they first boot up */
+        imageDiskChange[drive-65] = false;
+
         bool has_read = false;
         bool pc98_sect128 = false;
         unsigned int bootsize = imageDiskList[drive-65]->getSectSize();
@@ -1088,10 +1093,12 @@ public:
             /* this may be one of those odd FDD images where track 0, head 0 is all 128-byte sectors
              * and the rest of the disk is 256-byte sectors. */
             if (imageDiskList[drive - 65]->Read_Sector(0, 0, 1, (Bit8u *)&bootarea, 128) == 0 &&
-                imageDiskList[drive - 65]->Read_Sector(0, 0, 2, (Bit8u *)&bootarea + 128, 128) == 0) {
-                LOG_MSG("First sector is 128 byte/sector. Booting from first two sectors.");
+                imageDiskList[drive - 65]->Read_Sector(0, 0, 2, (Bit8u *)&bootarea + 128, 128) == 0 &&
+                imageDiskList[drive - 65]->Read_Sector(0, 0, 3, (Bit8u *)&bootarea + 256, 128) == 0 &&
+                imageDiskList[drive - 65]->Read_Sector(0, 0, 4, (Bit8u *)&bootarea + 384, 128) == 0) {
+                LOG_MSG("First sector is 128 byte/sector. Booting from first four sectors.");
                 has_read = true;
-                bootsize = 256; // 128 x 2
+                bootsize = 512; // 128 x 4
                 pc98_sect128 = true;
             }
         }
@@ -3104,6 +3111,7 @@ private:
                 if (index > 1) IDE_Hard_Disk_Detach(index);
                 imageDiskList[index]->Release();
                 imageDiskList[index] = NULL;
+                imageDiskChange[index] = true;
                 return true;
             }
             WriteOut("No drive loaded at specified point\n");
@@ -3542,6 +3550,7 @@ private:
             imageDiskList[bios_drive_index]->Release();
         }
         imageDiskList[bios_drive_index] = image;
+        imageDiskChange[bios_drive_index] = true;
         image->Addref();
 
         // let FDC know if we mounted a floppy
@@ -3616,6 +3625,7 @@ private:
                 if (imageDiskList[index] == image) {
                     if (index > 1) IDE_Hard_Disk_Detach(index);
                     imageDiskList[index]->Release();
+                    imageDiskChange[index] = true;
                     imageDiskList[index] = NULL;
                 }
             }
