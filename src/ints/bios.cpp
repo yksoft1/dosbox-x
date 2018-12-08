@@ -3709,6 +3709,28 @@ static Bitu INT1C_PC98_Handler(void) {
     else if (reg_ah == 0x03) { /* continue interval timer */
         PC98_Interval_Timer_Continue();
     }
+    /* TODO: According to the PDF at
+     *
+     * http://hackipedia.org/browse.cgi/Computer/Platform/PC%2c%20NEC%20PC%2d98/Collections/PC%2d9801%20Bible%20%e6%9d%b1%e4%ba%ac%e7%90%86%e7%a7%91%e5%a4%a7%e5%ad%a6EIC%20%281994%29%2epdf
+     *
+     * There are additional functions
+     *
+     *  AH = 04h
+     *  ES:BX = ?
+     *
+     *  ---
+     *
+     *  AH = 05h
+     *  ES:BX = ?
+     *
+     *  ---
+     *
+     *  AH = 06h
+     *  CX = ? (1-FFFFh)
+     *  DX = ? (20h-8000h Hz)
+     *
+     * If any PC-98 games or applications rely on this, let me know. Adding a case for them is easy enough if anyone is interested. --J.C.
+     */
     else {
         LOG_MSG("PC-98 INT 1Ch unknown call AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X",
                 reg_ax,
@@ -5582,13 +5604,13 @@ private:
         void TIMER_BIOS_INIT_Configure();
 #if C_DEBUG
         void DEBUG_CheckCSIP();
-#endif
 
-#if C_HEAVY_DEBUG
+# if C_HEAVY_DEBUG
         /* the game/app obviously crashed, which is way more important
          * to log than what we do here in the BIOS at POST */
         void DEBUG_StopLog(void);
         DEBUG_StopLog();
+# endif
 #endif
 
         if (bios_first_init) {

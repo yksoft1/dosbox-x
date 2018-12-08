@@ -178,6 +178,10 @@ void CPU_Core_Dyn_X86_Cache_Init(bool enable_cache);
 void CPU_Core_Dyn_X86_Cache_Close(void);
 void CPU_Core_Dyn_X86_SetFPUMode(bool dh_fpu);
 void CPU_Core_Dyn_X86_Cache_Reset(void);
+#elif (C_DYNREC)
+void CPU_Core_Dynrec_Init(void);
+void CPU_Core_Dynrec_Cache_Init(bool enable_cache);
+void CPU_Core_Dynrec_Cache_Close(void);
 #endif
 
 void menu_update_cputype(void) {
@@ -268,6 +272,12 @@ void menu_update_core(void) {
 #if (C_DYNAMIC_X86)
     mainMenu.get_item("mapper_dynamic").
         check(cpudecoder == &CPU_Core_Dyn_X86_Run).
+        enable(allow_dynamic && (cpudecoder != &CPU_Core_Prefetch_Run)).
+        refresh_item(mainMenu);
+#endif
+#if (C_DYNREC)
+    mainMenu.get_item("mapper_dynamic").
+        check(cpudecoder == &CPU_Core_Dynrec_Run).
         enable(allow_dynamic && (cpudecoder != &CPU_Core_Prefetch_Run)).
         refresh_item(mainMenu);
 #endif
@@ -2182,6 +2192,11 @@ void CPU_SET_CRX(Bitu cr,Bitu value) {
 					cpudecoder=&CPU_Core_Dyn_X86_Run;
 					strcpy(core_mode, "dynamic");
 				}
+#elif (C_DYNREC)
+				if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CORE) {
+					CPU_Core_Dynrec_Cache_Init(true);
+					cpudecoder=&CPU_Core_Dynrec_Run;
+				}
 #endif
 				CPU_AutoDetermineMode<<=CPU_AUTODETERMINE_SHIFT;
 			} else {
@@ -2733,8 +2748,20 @@ void CPU_ENTER(bool use32,Bitu bytes,Bitu level) {
 	reg_esp=(reg_esp&cpu.stack.notmask)|((sp_index)&cpu.stack.mask);
 }
 
+void CPU_SyncCycleMaxToProp(void) {
+    char tmp[64];
+
+    Section* sec=control->GetSection("cpu");
+	Section_prop * secprop = static_cast<Section_prop *>(sec);
+    Prop_multival* p = secprop->Get_multival("cycles");
+    Property* prop = p->GetSection()->Get_prop("type");
+    sprintf(tmp,"%llu",(unsigned long long)CPU_CycleMax);
+    prop->SetValue(tmp);
+}
+
 void CPU_CycleIncrease(bool pressed) {
 	if (!pressed) return;
+
 	if (CPU_CycleAutoAdjust) {
 		CPU_CyclePercUsed+=5;
 		if (CPU_CyclePercUsed>105) CPU_CyclePercUsed=105;
@@ -2747,7 +2774,7 @@ void CPU_CycleIncrease(bool pressed) {
 		} else {
 			CPU_CycleMax = (Bit32s)(CPU_CycleMax + CPU_CycleUp);
 		}
-	    
+
 		CPU_CycleLeft=0;CPU_Cycles=0;
 		if (CPU_CycleMax==old_cycles) CPU_CycleMax++;
 		if (CPU_AutoDetermineMode&CPU_AUTODETERMINE_CYCLES) {
@@ -2758,10 +2785,12 @@ void CPU_CycleIncrease(bool pressed) {
             if (CPU_CycleMax > 15000 && cpudecoder != &CPU_Core_Dyn_X86_Run)
                 LOG_MSG("CPU speed: fixed %ld cycles. If you need more than 20000, try core=dynamic in DOSBox's options.",CPU_CycleMax);
             else
+// TODO: Add C_DYNREC version
 #endif
                 LOG_MSG("CPU speed: fixed %ld cycles.",CPU_CycleMax);
         }
 		GFX_SetTitle(CPU_CycleMax,-1,-1,false);
+        CPU_SyncCycleMaxToProp();
 	}
 }
 
@@ -2790,6 +2819,7 @@ void CPU_CycleDecrease(bool pressed) {
 		    LOG_MSG("CPU speed: fixed %ld cycles.",CPU_CycleMax);
 		}
 		GFX_SetTitle(CPU_CycleMax,-1,-1,false);
+        CPU_SyncCycleMaxToProp();
 	}
 }
 
@@ -2836,7 +2866,7 @@ static void CPU_ToggleNormalCore(bool pressed) {
     }
 }
 
-#if (C_DYNAMIC_X86)
+#if (C_DYNAMIC_X86) || (C_DYNREC)
 static void CPU_ToggleDynamicCore(bool pressed) {
     if (!pressed)
 	return;
@@ -3019,6 +3049,8 @@ public:
 #endif
 #if (C_DYNAMIC_X86)
 		CPU_Core_Dyn_X86_Init();
+#elif (C_DYNREC)
+		CPU_Core_Dynrec_Init();
 #endif
 		MAPPER_AddHandler(CPU_CycleDecrease,MK_minus,MMODHOST,"cycledown","Dec Cycles",&item);
 		item->set_text("Decrement cycles");
@@ -3041,7 +3073,7 @@ public:
 		MAPPER_AddHandler(CPU_ToggleSimpleCore,MK_nothing,0,"simple","SimpleCore", &item);
 		item->set_text("Simple core");
 #endif
-#if (C_DYNAMIC_X86)
+#if (C_DYNAMIC_X86) || (C_DYNREC)
 		MAPPER_AddHandler(CPU_ToggleDynamicCore,MK_nothing,0,"dynamic","DynCore",&item);
 		item->set_text("Dynamic core");
 #endif
@@ -3222,6 +3254,9 @@ public:
 		} else if (core == "dynamic_nodhfpu") {
 			cpudecoder=&CPU_Core_Dyn_X86_Run;
 			CPU_Core_Dyn_X86_SetFPUMode(false);
+#elif (C_DYNREC)
+		} else if (core == "dynamic") {
+			cpudecoder=&CPU_Core_Dynrec_Run;
 #endif
 		} else {
 			strcpy(core_mode,"normal");
@@ -3231,6 +3266,8 @@ public:
 
 #if (C_DYNAMIC_X86)
 		CPU_Core_Dyn_X86_Cache_Init((core == "dynamic") || (core == "dynamic_nodhfpu"));
+#elif (C_DYNREC)
+		CPU_Core_Dynrec_Cache_Init( core == "dynamic" );
 #endif
 
 		CPU_ArchitectureType = CPU_ARCHTYPE_MIXED;
@@ -3406,6 +3443,8 @@ void CPU_ShutDown(Section* sec) {
 
 #if (C_DYNAMIC_X86)
 	CPU_Core_Dyn_X86_Cache_Close();
+#elif (C_DYNREC)
+	CPU_Core_Dynrec_Cache_Close();
 #endif
 	delete test;
 }
@@ -3566,6 +3605,7 @@ void CPU_Init() {
 bool CPU::inited=false;
 
 
+// TODO: This looks to be unused
 Bit16u CPU_FindDecoderType( CPU_Decoder *decoder )
 {
     (void)decoder;//UNUSED
@@ -3595,7 +3635,7 @@ Bit16u CPU_FindDecoderType( CPU_Decoder *decoder )
 	return decoder_idx;
 }
 
-
+// TODO: This looks to be unused
 CPU_Decoder *CPU_IndexDecoderType( Bit16u decoder_idx )
 {
 	CPU_Decoder *cpudecoder;

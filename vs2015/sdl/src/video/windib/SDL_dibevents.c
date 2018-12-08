@@ -206,12 +206,14 @@ LRESULT DIB_HandleMessage(_THIS, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 	switch (msg) {
 		case WM_KILLFOCUS:
+# ifndef SDL_WIN32_HX_DOS
 			if (!SDL_resizing &&
 				 SDL_PublicSurface &&
 				(SDL_PublicSurface->flags & SDL_FULLSCREEN)) {
 				/* In fullscreen mode, this window must have focus... or else we must exit fullscreen mode! */
 				ShowWindow(ParentWindowHWND, SW_RESTORE);
 			}
+# endif
 			break;
 		case WM_SYSKEYDOWN:
 		case WM_KEYDOWN: {
@@ -1083,7 +1085,7 @@ int DIB_CreateWindow(_THIS)
 #ifdef SDL_WIN32_NO_PARENT_WINDOW
 # ifdef SDL_WIN32_HX_DOS
 		SDL_Window = CreateWindow(SDL_Appname, SDL_Appname,
-			WS_OVERLAPPED | WS_CAPTION | WS_MAXIMIZEBOX,
+			WS_POPUP, /* NTS: WS_OVERLAPPED implies WS_CAPTION */
 			0, 0, 640, 480, NULL, NULL, SDL_Instance, NULL);
 # else
 		SDL_Window = CreateWindow(SDL_Appname, SDL_Appname,

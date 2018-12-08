@@ -691,7 +691,7 @@ static const char *def_menu_cpu_core[] = {
     "mapper_full",
     "mapper_simple",
 #endif
-#if (C_DYNAMIC_X86)
+#if defined(C_DYNAMIC_X86) || defined(C_DYNREC)
     "mapper_dynamic",
 #endif
     NULL
@@ -725,9 +725,7 @@ static const char *def_menu_cpu[] = {
     "--",
     "mapper_cycleup",
     "mapper_cycledown",
-#if !defined(C_SDL2)
 	"mapper_editcycles",
-#endif
     "--",
     "CpuCoreMenu",
     "CpuTypeMenu",
@@ -822,13 +820,17 @@ static const char *def_menu_video_pc98[] = {
     NULL
 };
 
+/* video output debug ("VideoDebugMenu") */
+static const char *def_menu_video_debug[] = {
+    "mapper_blankrefreshtest",
+    NULL
+};
+
 /* video menu ("VideoMenu") */
 static const char *def_menu_video[] = {
-#if !defined(C_SDL2)
 	"mapper_aspratio",
 	"--",
-#endif
-#if !defined(C_SDL2) && !defined(HX_DOS)
+#if !defined(HX_DOS)
 	"mapper_fullscr",
 	"--",
 #endif
@@ -841,11 +843,11 @@ static const char *def_menu_video[] = {
 #endif
 #ifndef MACOSX
     "mapper_togmenu",
-# if !defined(C_SDL2) && !defined(HX_DOS)
+# if !defined(HX_DOS)
 	"--",
 # endif
 #endif
-#if !defined(C_SDL2) && !defined(HX_DOS)
+#if !defined(HX_DOS)
 	"mapper_resetsize",
 #endif
 	"--",
@@ -860,6 +862,8 @@ static const char *def_menu_video[] = {
     "VideoOverscanMenu",
     "VideoCompatMenu",
     "VideoPC98Menu",
+    "--",
+    "VideoDebugMenu",
     NULL
 };
 
@@ -875,10 +879,8 @@ static const char *def_menu_dos[] = {
 static const char *def_menu_dos_mouse[] = {
     "dos_mouse_enable_int33",
     "dos_mouse_y_axis_reverse",
-#if !defined(C_SDL2)
     "--",
     "dos_mouse_sensitivity",
-#endif
     NULL
 };
 
@@ -1057,6 +1059,9 @@ void ConstructMenu(void) {
     /* video PC-98 menu */
     ConstructSubMenu(mainMenu.get_item("VideoPC98Menu").get_master_id(), def_menu_video_pc98);
 
+    /* video debug menu */
+    ConstructSubMenu(mainMenu.get_item("VideoDebugMenu").get_master_id(), def_menu_video_debug);
+
     /* sound menu */
     ConstructSubMenu(mainMenu.get_item("SoundMenu").get_master_id(), def_menu_sound);
 
@@ -1094,6 +1099,14 @@ void RENDER_CallBack( GFX_CallBackFunctions_t function );
 void SetScaleForced(bool forced)
 {
 	render.scale.forced = forced;
+
+    Section_prop * section=static_cast<Section_prop *>(control->GetSection("render"));
+    Prop_multival* prop = section->Get_multival("scaler");
+    std::string scaler = prop->GetSection()->Get_string("type");
+
+	auto value = scaler + (render.scale.forced ? " forced" : "");
+	SetVal("render", "scaler", value);
+
 	RENDER_CallBack(GFX_CallBackReset);
     mainMenu.get_item("scaler_forced").check(render.scale.forced).refresh_item(mainMenu);
 }
@@ -1116,9 +1129,7 @@ extern bool dos_shell_running_program;
 bool GFX_GetPreventFullscreen(void);
 void DOSBox_ShowConsole();
 
-#if !defined(C_SDL2)
 void GUI_ResetResize(bool pressed);
-#endif
 
 std::string MSCDEX_Output(int num) {
 	std::string MSCDEX_MSG = "GUI: MSCDEX ";

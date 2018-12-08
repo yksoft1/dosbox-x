@@ -537,6 +537,17 @@ static void DIB_NormalUpdate(_THIS, int numrects, SDL_Rect *rects);
 
 static void DIB_ResizeWindow(_THIS, int width, int height, int prev_width, int prev_height, Uint32 flags)
 {
+#if defined(SDL_WIN32_HX_DOS)
+    /* Windows XP understands the window is maximized, and route cursor input like so.
+     * HX DOS needs a little help to let cursor input work correctly */
+    if (SDL_VideoSurface != NULL)
+        SetWindowPos(SDL_Window, HWND_TOP, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+	if (!IsZoomed(ParentWindowHWND))
+		ShowWindow(SDL_Window, SW_MAXIMIZE);
+
+	return;
+#endif
 	RECT bounds;
 	int x, y;
 
@@ -885,7 +896,7 @@ SDL_Surface *DIB_SetVideoMode(_THIS, SDL_Surface *current,
 	}
 
 #ifdef SDL_WIN32_HX_DOS
-	/* do not change window style */
+	/* nothing */
 #else
 	style = GetWindowLong(ParentWindowHWND/*SDL_Window*/, GWL_STYLE);
 	style &= ~(resizestyle|WS_MAXIMIZE);
@@ -916,11 +927,11 @@ SDL_Surface *DIB_SetVideoMode(_THIS, SDL_Surface *current,
 	}
 #endif
 
+#ifndef SDL_WIN32_HX_DOS
 	/* DJM: Don't piss of anyone who has setup his own window */
 	if ( !SDL_windowid )
 		SetWindowLong(ParentWindowHWND, GWL_STYLE, style);
 
-#ifndef SDL_WIN32_HX_DOS
 	/* show/hide menu according to fullscreen */
 	if ((current->flags & SDL_FULLSCREEN) == SDL_FULLSCREEN)
 		SetMenu(ParentWindowHWND, NULL);
