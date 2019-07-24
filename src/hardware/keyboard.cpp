@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -295,7 +295,6 @@ size_t KEYBOARD_BufferSpaceAvail()   // emendelson from dbDOS
 }                                   // end emendelson from dbDOS
 
 static void KEYBOARD_Add8042Response(Bit8u data) {
-    if(!keyb.enable_aux) return;
     if (keyb.buf8042_pos >= keyb.buf8042_len)
         keyb.buf8042_pos = keyb.buf8042_len = 0;
     else if (keyb.buf8042_len == 0)
@@ -516,7 +515,6 @@ void KEYBOARD_AUX_Write(Bitu val) {
 bool allow_keyb_reset = true;
 
 void On_Software_CPU_Reset();
-void restart_program(std::vector<std::string> & parameters);
 
 static void write_p60(Bitu port,Bitu val,Bitu iolen) {
     (void)port;//UNUSED
@@ -534,7 +532,7 @@ static void write_p60(Bitu port,Bitu val,Bitu iolen) {
             KEYBOARD_AddBuffer(0xfa);   /* Acknowledge */
             break;
         case 0xee:  /* Echo */
-            KEYBOARD_AddBuffer(0xee);   /* JC: The correct response is 0xEE, not 0xFA */
+            KEYBOARD_AddBuffer(0xee);   /* Echo */
             break;
         case 0xf0:  /* set scancode set */
             keyb.command=CMD_SETSCANSET;
@@ -685,6 +683,12 @@ static void write_p61(Bitu, Bitu val, Bitu) {
         PCSPEAKER_SetType(pit_clock_gate_enabled, pit_output_enabled);
     }
     port_61_data = val;
+}
+
+static Bitu read_p62(Bitu /*port*/,Bitu /*iolen*/) {
+    Bit8u ret = Bit8u(~0x20u);
+    if (TIMER_GetOutput2()) ret|=0x20u;
+    return ret;
 }
 
 static void write_p64(Bitu port,Bitu val,Bitu iolen) {
@@ -1659,6 +1663,7 @@ static IO_WriteHandleObject WriteHandler_8255prn_PC98[4];
 static IO_WriteHandleObject Reset_PC98;
 
 extern bool gdc_5mhz_mode;
+extern bool gdc_5mhz_mode_initial;
 
 //! \brief PC-98 Printer 8255 PPI emulation (Intel 8255A device)
 //!
@@ -1815,7 +1820,10 @@ public:
          *       It might help to look at the BIOS setup menus of 1990s PC-98 systems
          *       that offer toggling virtual versions of these DIP switches to see
          *       what the BIOS menu text says. */
-        return 0x63 | (gdc_5mhz_mode ? 0x00 : 0x80); // taken from a PC-9821 Lt2
+        /* NTS: Return the INITIAL setting of the GDC. Guest applications (like Windows 3.1)
+         *      can and will change it later. This must reflect the initial setting as if
+         *      what the BIOS had initially intended. */
+        return 0x63 | (gdc_5mhz_mode_initial ? 0x00 : 0x80); // taken from a PC-9821 Lt2
     }
     /* port B is input */
     virtual uint8_t inPortB(void) const {
@@ -1955,11 +1963,11 @@ static struct pc98_8251_keyboard_uart {
         nidx = (recv_in + 1) % 32;
         if (nidx == recv_out) {
             LOG_MSG("8251 device send recv overrun");
-            return;
         }
-
-        recv_buffer[recv_in] = b;
-        recv_in = nidx;
+        else {
+            recv_buffer[recv_in] = b;
+            recv_in = nidx;
+        }
 
         if (!rx_busy) {
             rx_busy = true;
@@ -1969,6 +1977,10 @@ static struct pc98_8251_keyboard_uart {
 
     unsigned char read_data(void) {
         rx_ready = false;
+        if (recv_in != recv_out && !rx_busy) {
+            rx_busy = true;
+            PIC_AddEvent(uart_rx_load,io_delay_ms,0);
+        }
         return data;
     }
 
@@ -2165,19 +2177,9 @@ static double pc98_mouse_tick_interval_ms(void) {
     return 1000.0/*ms*/ / pc98_mouse_rate_hz;
 }
 
-static double pc98_mouse_tick_time_ms(void) {
-    return fmod(PIC_FullIndex(),pc98_mouse_tick_interval_ms());
-}
-
 static double pc98_mouse_time_to_next_tick_ms(void) {
     const double x = pc98_mouse_tick_interval_ms();
     return x - fmod(PIC_FullIndex(),x);
-}
-
-static bool pc98_mouse_tick_signal(void) {
-    /* TODO: How is the 120Hz signal generated? If it's a square wave, what is the duty cycle? */
-    /*       At what point in the cycle is the interrupt generated? Beginning, or end? */
-    return pc98_mouse_tick_time_ms() < 0.1; /* GUESS: 100us = 0.1ms */
 }
 
 extern uint8_t MOUSE_IRQ;
@@ -2196,13 +2198,6 @@ static void pc98_mouse_tick_event(Bitu val) {
         PIC_AddEvent(pc98_mouse_tick_event,pc98_mouse_tick_interval_ms());
     else
         pc98_mouse_tick_scheduled = false;
-}
-
-static void pc98_mouse_tick_unschedule(void) {
-    if (pc98_mouse_tick_scheduled) {
-        pc98_mouse_tick_scheduled = false;
-        PIC_RemoveEvents(pc98_mouse_tick_event);
-    }
 }
 
 static void pc98_mouse_tick_schedule(void) {
@@ -2580,6 +2575,7 @@ void KEYBOARD_OnReset(Section *sec) {
         IO_RegisterReadHandler(0x60,read_p60,IO_MB);
         IO_RegisterWriteHandler(0x61,write_p61,IO_MB);
         IO_RegisterReadHandler(0x61,read_p61,IO_MB);
+        if (machine==MCH_CGA || machine==MCH_HERC) IO_RegisterReadHandler(0x62,read_p62,IO_MB);
         IO_RegisterWriteHandler(0x64,write_p64,IO_MB);
         IO_RegisterReadHandler(0x64,read_p64,IO_MB);
     }

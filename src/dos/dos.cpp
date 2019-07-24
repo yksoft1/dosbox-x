@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -34,6 +34,9 @@
 #include "parport.h"
 #include "serialport.h"
 #include "dos_network.h"
+
+Bitu INT29_HANDLER(void);
+Bit32u BIOS_get_PC98_INT_STUB(void);
 
 int ascii_toupper(int c) {
     if (c >= 'a' && c <= 'z')
@@ -122,7 +125,7 @@ Bit32u DOS_HMA_GET_FREE_SPACE() {
 	return (DOS_HMA_LIMIT() - start);
 }
 
-void DOS_HMA_CLAIMED(Bitu bytes) {
+void DOS_HMA_CLAIMED(Bit16u bytes) {
 	Bit32u limit = DOS_HMA_LIMIT();
 
 	if (limit == 0) E_Exit("HMA allocatiom bug: Claim function called when HMA allocation is not enabled");
@@ -208,7 +211,7 @@ const Bit8u DOS_DATE_months[] = {
 	0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
 };
 
-static void DOS_AddDays(Bitu days) {
+static void DOS_AddDays(Bit8u days) {
 	dos.date.day += days;
 	Bit8u monthlimit = DOS_DATE_months[dos.date.month];
 
@@ -473,7 +476,7 @@ static Bitu DOS_21Handler(void) {
                 Bit8u c=reg_dl;Bit16u n=1;
                 DOS_WriteFile(STDOUT,&c,&n);
                 //Not in the official specs, but happens nonetheless. (last written character)
-                reg_al = c;// reg_al=(c==9)?0x20:c; //Officially: tab to spaces
+                reg_al=(c==9)?0x20:c; //strangely, tab conversion to spaces is reflected here
             }
             break;
         case 0x03:      /* Read character from STDAUX */
@@ -532,8 +535,10 @@ static Bitu DOS_21Handler(void) {
                 default:
                     {
                         Bit8u c = reg_dl;Bit16u n = 1;
+                        dos.direct_output=true;
                         DOS_WriteFile(STDOUT,&c,&n);
-                        reg_al = reg_dl;
+                        dos.direct_output=false;
+                        reg_al=c;
                     }
                     break;
             };
@@ -563,6 +568,7 @@ static Bitu DOS_21Handler(void) {
                 while ((c=mem_readb(buf++))!='$') {
                     DOS_WriteFile(STDOUT,&c,&n);
                 }
+                reg_al=c;
             }
             break;
         case 0x0a:      /* Buffered Input */
@@ -576,6 +582,10 @@ static Bitu DOS_21Handler(void) {
                 for(;;) {
                     if (!DOS_BreakTest()) return CBRET_NONE;
                     DOS_ReadFile(STDIN,&c,&n);
+                    if (n == 0)				// End of file
+                        E_Exit("DOS:0x0a:Redirected input reached EOF");
+                    if (c == 10)			// Line feed
+                        continue;
                     if (c == 8) {           // Backspace
                         if (read) { //Something to backspace.
                             // STDOUT treats backspace as non-destructive.
@@ -775,7 +785,7 @@ static Bitu DOS_21Handler(void) {
                         SegSet16(es,SegValue(ss));
                         CALLBACK_RunRealInt(0x1c);
 
-                        Bitu memaddr = ((Bitu)SegValue(es) << 4u) + reg_bx;
+                        Bit32u memaddr = ((Bit32u)SegValue(es) << 4u) + reg_bx;
 
                         reg_sp += 6;
                         SegSet16(es,CPU_Pop16());
@@ -884,7 +894,7 @@ static Bitu DOS_21Handler(void) {
                     SegSet16(es,SegValue(ss));
                     CALLBACK_RunRealInt(0x1c);
 
-                    Bitu memaddr = ((PhysPt)SegValue(es) << 4u) + reg_bx;
+                    Bit32u memaddr = ((PhysPt)SegValue(es) << 4u) + reg_bx;
 
                     reg_sp += 6;
                     SegSet16(es,CPU_Pop16());
@@ -1017,10 +1027,10 @@ static Bitu DOS_21Handler(void) {
                 Bit8u drive=reg_dl;
                 if (!drive || reg_ah==0x1f) drive = DOS_GetDefaultDrive();
                 else drive--;
-                if (Drives[drive]) {
+                if (drive < DOS_DRIVES && Drives[drive] && !Drives[drive]->isRemovable()) {
                     reg_al = 0x00;
                     SegSet16(ds,dos.tables.dpb);
-                    reg_bx = drive;//Faking only the first entry (that is the driveletter)
+                    reg_bx = drive*9;
                     LOG(LOG_DOSMISC,LOG_ERROR)("Get drive parameter block.");
                 } else {
                     reg_al=0xff;
@@ -1417,6 +1427,9 @@ static Bitu DOS_21Handler(void) {
             reg_bx=dos.psp();
             break;
         case 0x52: {                /* Get list of lists */
+            Bit8u count=2; // floppy drives always counted
+            while (count<DOS_DRIVES && Drives[count] && !Drives[count]->isRemovable()) count++;
+            dos_infoblock.SetBlockDevices(count);
             RealPt addr=dos_infoblock.GetPointer();
             SegSet16(es,RealSeg(addr));
             reg_bx=RealOff(addr);
@@ -1746,16 +1759,23 @@ static Bitu DOS_21Handler(void) {
             break;
         case 0x69:                  /* Get/Set disk serial number */
             {
+                Bit16u old_cx=reg_cx;
                 switch(reg_al)      {
                     case 0x00:              /* Get */
-                        LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Get Disk serial number");
-                        CALLBACK_SCF(true);
+                        LOG(LOG_DOSMISC,LOG_WARN)("DOS:Get Disk serial number");
+                        reg_cl=0x66;// IOCTL function
                         break;
-                    case 0x01:
-                        LOG(LOG_DOSMISC,LOG_ERROR)("DOS:Set Disk serial number");
+                    case 0x01:              /* Set */
+                        LOG(LOG_DOSMISC,LOG_WARN)("DOS:Set Disk serial number");
+                        reg_cl=0x46;// IOCTL function
+                        break;
                     default:
                         E_Exit("DOS:Illegal Get Serial Number call %2X",reg_al);
-                }   
+                }
+                reg_ch=0x08;    // IOCTL category: disk drive
+                reg_ax=0x440d;  // Generic block device request
+                DOS_21Handler();
+                reg_cx=old_cx;
                 break;
             } 
         case 0x6c:                  /* Extended Open/Create */
@@ -1849,56 +1869,37 @@ static Bitu DOS_27Handler(void) {
 	return CBRET_NONE;
 }
 
-extern DOS_Device *DOS_CON;
-
-/* PC-98 INT DC CL=0x10 AH=0x00 DL=cjar */
-void PC98_INTDC_WriteChar(unsigned char b) {
-    if (DOS_CON != NULL) {
-        Bit16u sz = 1;
-
-        DOS_CON->Write(&b,&sz);
-    }
-}
-
-static Bitu INT29_HANDLER(void) {
-    if (DOS_CON != NULL) {
-        unsigned char b = reg_al;
-        Bit16u sz = 1;
-
-        DOS_CON->Write(&b,&sz);
-    }
-
-    return CBRET_NONE;
-}
-
 static Bitu DOS_25Handler(void) {
-	if (Drives[reg_al] == 0){
+	if (reg_al >= DOS_DRIVES || !Drives[reg_al] || Drives[reg_al]->isRemovable()) {
 		reg_ax = 0x8002;
 		SETFLAGBIT(CF,true);
 	} else {
+		if (reg_cx == 1 && reg_dx == 0) {
+			if (reg_al >= 2) {
+				PhysPt ptr = PhysMake(SegValue(ds),reg_bx);
+				// write some BPB data into buffer for MicroProse installers
+				mem_writew(ptr+0x1c,0x3f); // hidden sectors
+			}
+		} else {
+			LOG(LOG_DOSMISC,LOG_NORMAL)("int 25 called but not as disk detection drive %u",reg_al);
+			}
 		SETFLAGBIT(CF,false);
-		if ((reg_cx != 1) ||(reg_dx != 1))
-			LOG(LOG_DOSMISC,LOG_NORMAL)("int 25 called but not as diskdetection drive %X",reg_al);
-
-	   reg_ax = 0;
+		reg_ax = 0;
 	}
-	SETFLAGBIT(IF,true);
     return CBRET_NONE;
 }
 static Bitu DOS_26Handler(void) {
 	LOG(LOG_DOSMISC,LOG_NORMAL)("int 26 called: hope for the best!");
-	if (Drives[reg_al] == 0){
+	if (reg_al >= DOS_DRIVES || !Drives[reg_al] || Drives[reg_al]->isRemovable()) {	
 		reg_ax = 0x8002;
 		SETFLAGBIT(CF,true);
 	} else {
 		SETFLAGBIT(CF,false);
 		reg_ax = 0;
 	}
-	SETFLAGBIT(IF,true);
     return CBRET_NONE;
 }
 
-bool iret_only_for_debug_interrupts = true;
 bool enable_collating_uppercase = true;
 bool keep_private_area_on_boot = false;
 bool private_always_from_umb = false;
@@ -1992,7 +1993,7 @@ public:
         }
     }
 
-    Bitu DOS_Get_CPM_entry_direct(void) {
+    Bit32u DOS_Get_CPM_entry_direct(void) {
         return callback[8].Get_RealPointer();
     }
 
@@ -2023,7 +2024,6 @@ public:
 		private_always_from_umb = section->Get_bool("kernel allocation in umb");
 		minimum_dos_initial_private_segment = section->Get_hex("minimum dos initial private segment");
 		dos_con_use_int16_to_detect_input = section->Get_bool("con device use int 16h to detect keyboard input");
-		iret_only_for_debug_interrupts = section->Get_bool("write plain iretf for debug interrupts");
 		dbg_zero_on_dos_allocmem = section->Get_bool("zero memory on int 21h memory allocation");
 		MAXENV = (unsigned int)section->Get_int("maximum environment block size on exec");
 		ENV_KEEPFREE = (unsigned int)section->Get_int("additional environment block size on exec");
@@ -2123,7 +2123,7 @@ public:
             if (MEM_TotalPages() > 0x9C)
                 DOS_PRIVATE_SEGMENT_END = 0x9C00;
             else
-                DOS_PRIVATE_SEGMENT_END = (MEM_TotalPages() << (12 - 4)) - 1; /* NTS: Remember DOSBox's implementation reuses the last paragraph for UMB linkage */
+                DOS_PRIVATE_SEGMENT_END = (Bit16u)((MEM_TotalPages() << (12 - 4)) - 1); /* NTS: Remember DOSBox's implementation reuses the last paragraph for UMB linkage */
         }
 
         LOG(LOG_MISC,LOG_DEBUG)("DOS kernel structures will be allocated from pool 0x%04x-0x%04x",
@@ -2162,10 +2162,10 @@ public:
 	// iret
 	// retf  <- int 21 4c jumps here to mimic a retf Cyber
 
-		callback[2].Install(DOS_25Handler,CB_RETF,"DOS Int 25");
+		callback[2].Install(DOS_25Handler,CB_RETF_STI,"DOS Int 25");
 		callback[2].Set_RealVec(0x25);
 
-		callback[3].Install(DOS_26Handler,CB_RETF,"DOS Int 26");
+		callback[3].Install(DOS_26Handler,CB_RETF_STI,"DOS Int 26");
 		callback[3].Set_RealVec(0x26);
 
 		callback[4].Install(DOS_27Handler,CB_IRET,"DOS Int 27");
@@ -2210,6 +2210,29 @@ public:
 		//	pushf
 		//	... the rest is like int 21
 
+        if (IS_PC98_ARCH) {
+            /* Any interrupt vector pointing to the INT stub in the BIOS must be rewritten to point to a JMP to the stub
+             * residing in the DOS segment (60h) because some PC-98 resident drivers use segment 60h as a check for
+             * installed vs uninstalled (MUSIC.COM, Peret em Heru) */
+            Bit16u sg = DOS_GetMemory(1/*paragraph*/,"INT stub trampoline");
+            PhysPt sgp = (PhysPt)sg << (PhysPt)4u;
+
+            /* Re-base the pointer so the segment is 0x60 */
+            Bit32u veco = sgp - 0x600;
+            if (veco >= 0xFFF0u) E_Exit("INT stub trampoline out of bounds");
+            Bit32u vecp = RealMake(0x60,(Bit16u)veco);
+
+            mem_writeb(sgp+0,0xEA);
+            mem_writed(sgp+1,BIOS_get_PC98_INT_STUB());
+
+            for (unsigned int i=0;i < 0x100;i++) {
+                Bit32u vec = RealGetVec(i);
+
+                if (vec == BIOS_get_PC98_INT_STUB())
+                    mem_writed(i*4,vecp);
+            }
+        }
+
         /* NTS: HMA support requires XMS. EMS support may switch on A20 if VCPI emulation requires the odd megabyte */
         if ((!dos_in_hma || !section->Get_bool("xms")) && (MEM_A20_Enabled() || strcmp(section->Get_string("ems"),"false") != 0) &&
             cpm_compat_mode != CPM_COMPAT_OFF && cpm_compat_mode != CPM_COMPAT_DIRECT) {
@@ -2239,7 +2262,7 @@ public:
 				unsigned int segend;
 
 				seg = DOS_MEM_START;
-				DOS_MEM_START += DOS_PRIVATE_SEGMENT_Size;
+				DOS_MEM_START += (Bit16u)DOS_PRIVATE_SEGMENT_Size;
 				segend = DOS_MEM_START;
 
 				if (segend >= (MEM_TotalPages() << (12 - 4)))
@@ -2264,13 +2287,32 @@ public:
 		/* carry on setup */
 		DOS_SetupMemory();								/* Setup first MCB */
 
+        /* NTS: The reason PC-98 has a higher minimum free is that the MS-DOS kernel
+         *      has a larger footprint in memory, including fixed locations that
+         *      some PC-98 games will read directly, and an ANSI driver.
+         *
+         *      Some PC-98 games will have problems if loaded below a certain
+         *      threshhold as well.
+         *
+         *        Valkyrie: 0xE10 is not enough for the game to run. If a specific
+         *                  FM music selection is chosen, the remaining memory is
+         *                  insufficient for the game to start the battle.
+         *
+         *      The default assumes a DOS kernel and lower memory region of 32KB,
+         *      which might be a reasonable compromise so far.
+         *
+         * NOTES: A minimum mcb free value of at least 0xE10 is needed for Windows 3.1
+         *        386 enhanced to start, else it will complain about insufficient memory (?).
+         *        To get Windows 3.1 to run, either set "minimum mcb free=e10" or run
+         *        "LOADFIX" before starting Windows 3.1 */
+
         /* NTS: There is a mysterious memory corruption issue with some DOS games
          *      and applications when they are loaded at or around segment 0x800.
          *      This should be looked into. In the meantime, setting the MCB
          *      start segment before or after 0x800 helps to resolve these issues.
          *      It also puts DOSBox-X at parity with main DOSBox SVN behavior. */
         if (minimum_mcb_free == 0)
-            minimum_mcb_free = 0x100;
+            minimum_mcb_free = IS_PC98_ARCH ? 0x800 : 0x100;
         else if (minimum_mcb_free < minimum_mcb_segment)
             minimum_mcb_free = minimum_mcb_segment;
 
@@ -2312,6 +2354,8 @@ public:
 	
 		dos.version.major=5;
 		dos.version.minor=0;
+		dos.direct_output=false;
+		dos.internal_output=false;
 
 		std::string ver = section->Get_string("ver");
 		if (!ver.empty()) {
@@ -2339,6 +2383,13 @@ public:
 						dos.version.major, dos.version.minor);
 			}
 		}
+
+        if (IS_PC98_ARCH) {
+            void PC98_InitDefFuncRow(void);
+            PC98_InitDefFuncRow();
+
+            real_writeb(0x60,0x113,0x01); /* 25-line mode */
+        }
 	}
 	~DOS(){
 		/* NTS: We do NOT free the drives! The OS may use them later! */
@@ -2358,7 +2409,7 @@ void DOS_Write_HMA_CPM_jmp(void) {
     test->DOS_Write_HMA_CPM_jmp();
 }
 
-Bitu DOS_Get_CPM_entry_direct(void) {
+Bit32u DOS_Get_CPM_entry_direct(void) {
     assert(test != NULL);
     return test->DOS_Get_CPM_entry_direct();
 }
@@ -2383,8 +2434,7 @@ void DOS_ShutdownDrives() {
 	}
 }
 
-void update_pc98_function_row(bool enable);
-void DOS_UnsetupMemory();
+void update_pc98_function_row(unsigned char setting,bool force_redraw=false);
 void DOS_Casemap_Free();
 
 void DOS_DoShutDown() {
@@ -2393,9 +2443,8 @@ void DOS_DoShutDown() {
 		test = NULL;
 	}
 
-    if (IS_PC98_ARCH) update_pc98_function_row(false);
+    if (IS_PC98_ARCH) update_pc98_function_row(0);
 
-    DOS_UnsetupMemory();
     DOS_Casemap_Free();
 }
 

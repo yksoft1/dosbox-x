@@ -38,6 +38,10 @@ extern PFNGLBUFFERDATAARBPROC glBufferDataARB;
 extern PFNGLMAPBUFFERARBPROC glMapBufferARB;
 extern PFNGLUNMAPBUFFERARBPROC glUnmapBufferARB;
 
+#if defined(C_SDL2)
+# include <SDL_video.h>
+#endif
+
 struct SDL_OpenGL {
     bool inited;
     Bitu pitch;
@@ -52,6 +56,9 @@ struct SDL_OpenGL {
     bool pixel_buffer_object;
     int menudraw_countdown;
     int clear_countdown;
+#if defined(C_SDL2)
+    SDL_GLContext context = NULL;
+#endif
 };
 
 extern SDL_OpenGL sdl_opengl;

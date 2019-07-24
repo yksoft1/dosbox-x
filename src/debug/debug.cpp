@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -22,6 +22,7 @@
 
 #include <string.h>
 #include <list>
+#include <vector>
 #include <ctype.h>
 #include <fstream>
 #include <iomanip>
@@ -32,10 +33,13 @@ using namespace std;
 #include "debug.h"
 #include "cross.h" //snprintf
 #include "cpu.h"
+#include "fpu.h"
 #include "video.h"
 #include "pic.h"
+#include "vga.h"
 #include "mapper.h"
 #include "cpu.h"
+#include "pc98_gdc.h"
 #include "callback.h"
 #include "inout.h"
 #include "mixer.h"
@@ -58,6 +62,69 @@ static struct termios consolesettings;
 #endif
 int old_cursor_state;
 
+const char *egc_fgc_modes[4] = {
+    "pattern",
+    "background",
+    "foreground",
+    "(invalid)",
+};
+
+bool pc98_pegc_linear_framebuffer_enabled(void);
+
+extern bool                 pc98_crt_mode;
+extern uint8_t              GDC_display_plane;
+extern uint8_t              GDC_display_plane_pending;
+extern bool                 pc98_256kb_boundary;
+extern bool                         gdc_5mhz_mode;
+extern bool                         enable_pc98_egc;
+extern bool                         enable_pc98_grcg;
+extern bool                         enable_pc98_16color;
+extern bool                         enable_pc98_256color;
+extern bool                         enable_pc98_256color_planar;
+extern bool                         enable_pc98_188usermod;
+extern bool                         GDC_vsync_interrupt;
+extern bool                         pc98_graphics_hide_odd_raster_200line;
+extern bool                         pc98_attr4_graphic;
+extern bool                         egc_enable_enable;
+extern uint8_t                      pc98_gdc_tile_counter;
+extern uint8_t                      pc98_gdc_modereg;
+extern egc_quad                     pc98_gdc_tiles;
+
+extern uint16_t                     pc98_egc_raw_values[8];
+
+extern uint16_t                     a1_font_load_addr;
+extern uint8_t                      a1_font_char_offset;
+
+extern egc_quad             pc98_egc_bgcm;
+extern egc_quad             pc98_egc_fgcm;
+
+extern uint8_t                     pc98_egc_access;
+extern uint8_t                     pc98_egc_srcmask[2]; /* host given (Neko: egc.srcmask) */
+extern uint8_t                     pc98_egc_maskef[2]; /* effective (Neko: egc.mask2) */
+extern uint8_t                     pc98_egc_mask[2]; /* host given (Neko: egc.mask) */
+
+extern uint8_t                     pc98_egc_fgc;
+extern uint8_t                     pc98_egc_lead_plane;
+extern uint8_t                     pc98_egc_compare_lead;
+extern uint8_t                     pc98_egc_lightsource;
+extern uint8_t                     pc98_egc_shiftinput;
+extern uint8_t                     pc98_egc_regload;
+extern uint8_t                     pc98_egc_rop;
+extern uint8_t                     pc98_egc_foreground_color;
+extern uint8_t                     pc98_egc_background_color;
+
+extern bool                        pc98_egc_shift_descend;
+extern uint8_t                     pc98_egc_shift_destbit;
+extern uint8_t                     pc98_egc_shift_srcbit;
+extern uint16_t                    pc98_egc_shift_length;
+
+extern unsigned char        pc98_text_first_row_scanline_start;  /* port 70h */
+extern unsigned char        pc98_text_first_row_scanline_end;    /* port 72h */
+extern unsigned char        pc98_text_row_scanline_blank_at;     /* port 74h */
+extern unsigned char        pc98_text_row_scroll_lines;          /* port 76h */
+extern unsigned char        pc98_text_row_scroll_count_start;    /* port 78h */
+extern unsigned char        pc98_text_row_scroll_num_lines;      /* port 7Ah */
+
 extern bool logBuffSuppressConsole;
 extern bool logBuffSuppressConsoleNeedUpdate;
 
@@ -73,6 +140,7 @@ static void LogLDT(void);
 static void LogIDT(void);
 static void LogXMS(void);
 static void LogEMS(void);
+static void LogFNKEY(void);
 static void LogPages(char* selname);
 static void LogCPUInfo(void);
 static void OutputVecTable(char* filename);
@@ -84,6 +152,63 @@ void DEBUG_DrawInput(void) {
     DrawInput();
 }
 
+void DEBUG_BeginPagedContent(void);
+void DEBUG_EndPagedContent(void);
+Bitu MEM_PageMaskActive(void);
+Bit32u MEM_get_address_bits();
+Bitu MEM_TotalPages(void);
+Bitu MEM_PageMask(void);
+
+static void LogEMUMachine(void) {
+    DEBUG_BeginPagedContent();
+
+    DEBUG_ShowMsg("Emulator machine:");
+
+    {
+        const char *m = "?",*svga = "";
+
+        switch (machine) {
+            case MCH_HERC:      m="Hercules";   break;
+            case MCH_CGA:       m="CGA";        break;
+            case MCH_TANDY:     m="Tandy";      break;
+            case MCH_PCJR:      m="PCjr";       break;
+            case MCH_EGA:       m="EGA";        break;
+            case MCH_VGA:       m="VGA";        break;
+            case MCH_AMSTRAD:   m="Amstrad";    break;
+            case MCH_PC98:      m="PC-98";      break;
+            case MCH_FM_TOWNS:  m="FM Towns";   break;
+            case MCH_MCGA:      m="MCGA";       break;
+            case MCH_MDA:       m="MDA";        break;
+            default:            break;
+        };
+
+        switch (svgaCard) {
+            case SVGA_None:             svga="";                break;
+            case SVGA_S3Trio:           svga="S3 Trio";         break;
+            case SVGA_TsengET4K:        svga="Tseng ET4000";    break;
+            case SVGA_TsengET3K:        svga="Tseng ET3000";    break;
+            case SVGA_ParadisePVGA1A:   svga="Paradise PVGA1A"; break;
+        };
+
+        DEBUG_ShowMsg("Machine: %s %s",m,svga);
+    }
+
+    DEBUG_EndPagedContent();
+}
+
+static void LogEMUMem(void) {
+    DEBUG_BeginPagedContent();
+
+    DEBUG_ShowMsg("Emulator memory:");
+    DEBUG_ShowMsg("A20 gate:                    %s",MEM_A20_Enabled() ? "ON" : "OFF");
+    DEBUG_ShowMsg("CPU address bits:            %u",(unsigned int)MEM_get_address_bits());
+    DEBUG_ShowMsg("CPU address mask:            0x%lx",((unsigned long)MEM_PageMask() << 12UL) | 0xFFFUL);
+    DEBUG_ShowMsg("CPU address mask current:    0x%lx",((unsigned long)MEM_PageMaskActive() << 12UL) | 0xFFFUL);
+    DEBUG_ShowMsg("Memory reported size:        %lu bytes",(unsigned long)MEM_TotalPages() << 12UL);
+
+    DEBUG_EndPagedContent();
+}
+
 bool XMS_Active(void);
 
 Bitu XMS_GetTotalHandles(void);
@@ -92,22 +217,23 @@ bool XMS_GetHandleInfo(Bitu &phys_location,Bitu &size,Bitu &lockcount,bool &free
 LoopHandler *old_loop = NULL;
 
 char* AnalyzeInstruction(char* inst, bool saveSelector);
-Bit32u GetHexValue(char* str, char*& hex);
+Bit32u GetHexValue(char* const str, char* &hex,bool *parsed=NULL);
+void SkipSpace(char*& hex);
 
 #if 0
 class DebugPageHandler : public PageHandler {
 public:
-	Bitu readb(PhysPt /*addr*/) {
+	Bit8u readb(PhysPt /*addr*/) {
 	}
-	Bitu readw(PhysPt /*addr*/) {
+	Bit16u readw(PhysPt /*addr*/) {
 	}
-	Bitu readd(PhysPt /*addr*/) {
+	Bit32u readd(PhysPt /*addr*/) {
 	}
-	void writeb(PhysPt /*addr*/,Bitu /*val*/) {
+	void writeb(PhysPt /*addr*/,Bit8u /*val*/) {
 	}
-	void writew(PhysPt /*addr*/,Bitu /*val*/) {
+	void writew(PhysPt /*addr*/,Bit16u /*val*/) {
 	}
-	void writed(PhysPt /*addr*/,Bitu /*val*/) {
+	void writed(PhysPt /*addr*/,Bit32u /*val*/) {
 	}
 };
 #endif
@@ -199,7 +325,7 @@ Bit64u LinMakeProt(Bit16u selector, Bit32u offset)
     if (cpu.gdt.GetDescriptor(selector,desc)) {
         if (selector >= 8 && desc.Type() != 0) {
             if (offset <= desc.GetLimit())
-                return desc.GetBase()+offset;
+                return desc.GetBase()+(Bit64u)offset;
         }
     }
 
@@ -211,7 +337,7 @@ Bit64u GetAddress(Bit16u seg, Bit32u offset)
 	if (cpu.pmode && !(reg_flags & FLAG_VM))
         return LinMakeProt(seg,offset);
 
-	if (seg==SegValue(cs)) return SegPhys(cs)+offset;
+	if (seg==SegValue(cs)) return SegPhys(cs)+(Bit64u)offset;
 	return ((Bit64u)seg<<4u)+offset;
 }
 
@@ -276,26 +402,31 @@ bool GetDescriptorInfo(char* selname, char* out1, char* out2)
 class CDebugVar
 {
 public:
-	CDebugVar(char* _name, PhysPt _adr) { adr=_adr; safe_strncpy(name,_name,16); };
+	CDebugVar(char* _name, PhysPt _adr) { adr=_adr; safe_strncpy(name,_name,16); hasvalue = false; value = 0; };
 	
-	char*	GetName(void) { return name; };
-	PhysPt	GetAdr (void) { return adr;  };
+	char*  GetName (void)                 { return name; };
+	PhysPt GetAdr  (void)                 { return adr; };
+	void   SetValue(bool has, Bit16u val) { hasvalue = has; value=val; };
+	Bit16u GetValue(void)                 { return value; };
+	bool   HasValue(void)                 { return hasvalue; };
 
 private:
 	PhysPt  adr;
-	char	name[16];
+	char    name[16];
+	bool    hasvalue;
+	Bit16u  value;
 
 public: 
-	static void			InsertVariable	(char* name, PhysPt adr);
-	static CDebugVar*	FindVar			(PhysPt adr);
-	static void			DeleteAll		();
-	static bool			SaveVars		(char* name);
-	static bool			LoadVars		(char* name);
+	static void       InsertVariable(char* name, PhysPt adr);
+	static CDebugVar* FindVar       (PhysPt adr);
+	static void       DeleteAll     ();
+	static bool       SaveVars      (char* name);
+	static bool       LoadVars      (char* name);
 
-	static std::list<CDebugVar*>	varList;
+	static std::vector<CDebugVar*> varList;
 };
 
-std::list<CDebugVar*> CDebugVar::varList;
+std::vector<CDebugVar*> CDebugVar::varList;
 
 
 /********************/
@@ -314,34 +445,38 @@ public:
 
 	CBreakpoint(void);
 	void					SetAddress		(Bit16u seg, Bit32u off)	{ location = (PhysPt)GetAddress(seg,off); type = BKPNT_PHYSICAL; segment = seg; offset = off; };
-	void					SetAddress		(PhysPt adr)				{ location = adr;				type = BKPNT_PHYSICAL; };
-	void					SetInt			(Bit8u _intNr, Bit16u ah)	{ intNr = _intNr, ahValue = ah; type = BKPNT_INTERRUPT; };
+	void					SetAddress		(PhysPt adr)				{ location = adr; type = BKPNT_PHYSICAL; };
+	void					SetInt			(Bit8u _intNr, Bit16u ah, Bit16u al)	{ intNr = _intNr, ahValue = ah; alValue = al; type = BKPNT_INTERRUPT; };
 	void					SetOnce			(bool _once)				{ once = _once; };
 	void					SetType			(EBreakpoint _type)			{ type = _type; };
 	void					SetValue		(Bit8u value)				{ ahValue = value; };
+	void					SetOther		(Bit8u other)				{ alValue = other; };	
 
 	bool					IsActive		(void)						{ return active; };
 	void					Activate		(bool _active);
 
 	EBreakpoint				GetType			(void)						{ return type; };
 	bool					GetOnce			(void)						{ return once; };
-	PhysPt					GetLocation		(void)						{ if (GetType()!=BKPNT_INTERRUPT)	return location;	else return 0; };
+	PhysPt					GetLocation		(void)						{ return location; };
 	Bit16u					GetSegment		(void)						{ return segment; };
 	Bit32u					GetOffset		(void)						{ return offset; };
-	Bit8u					GetIntNr		(void)						{ if (GetType()==BKPNT_INTERRUPT)	return intNr;		else return 0; };
-	Bit16u					GetValue		(void)						{ if (GetType()!=BKPNT_PHYSICAL)	return ahValue;		else return 0; };
+	Bit8u					GetIntNr		(void)						{ return intNr; };
+	Bit16u					GetValue		(void)						{ return ahValue; };
+	Bit16u					GetOther		(void)						{ return alValue; };
 
 	// statics
 	static CBreakpoint*		AddBreakpoint		(Bit16u seg, Bit32u off, bool once);
-	static CBreakpoint*		AddIntBreakpoint	(Bit8u intNum, Bit16u ah, bool once);
+	static CBreakpoint*		AddIntBreakpoint	(Bit8u intNum, Bit16u ah, Bit16u al, bool once);
 	static CBreakpoint*		AddMemBreakpoint	(Bit16u seg, Bit32u off);
-	static void				ActivateBreakpoints	(PhysPt adr, bool activate);
-	static bool				CheckBreakpoint		(PhysPt adr);
-	static bool				CheckBreakpoint		(Bitu seg, Bitu off);
-	static bool				CheckIntBreakpoint	(PhysPt adr, Bit8u intNr, Bit16u ahValue);
-	static bool				IsBreakpoint		(PhysPt where);
-	static bool				IsBreakpointDrawn	(PhysPt where);
-	static bool				DeleteBreakpoint	(PhysPt where);
+	static void				DeactivateBreakpoints();
+	static void				ActivateBreakpoints	();
+	static void				ActivateBreakpointsExceptAt(PhysPt adr);
+	static bool				CheckBreakpoint		(Bit16u seg, Bit32u off);
+	static bool				CheckIntBreakpoint	(PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue);
+	static CBreakpoint*		FindPhysBreakpoint	(Bit16u seg, Bit32u off, bool once);
+	static CBreakpoint*		FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* skip);
+	static bool				IsBreakpoint		(Bit16u seg, Bit32u off);
+	static bool				DeleteBreakpoint	(Bit16u seg, Bit32u off);
 	static bool				DeleteByIndex		(Bit16u index);
 	static void				DeleteAll			(void);
 	static void				ShowList			(void);
@@ -351,38 +486,61 @@ private:
 	EBreakpoint	type;
 	// Physical
 	PhysPt		location;
+#if !C_HEAVY_DEBUG
 	Bit8u		oldData;
+#endif
 	Bit16u		segment;
 	Bit32u		offset;
 	// Int
 	Bit8u		intNr;
 	Bit16u		ahValue;
+	Bit16u		alValue;
 	// Shared
 	bool		active;
 	bool		once;
 
 	static std::list<CBreakpoint*>	BPoints;
-public:
-	static CBreakpoint*				ignoreOnce;
 };
 
-CBreakpoint::CBreakpoint(void):type(BKPNT_UNKNOWN),location(0),segment(0),offset(0),intNr(0),ahValue(0),active(false),once(false) { }
+CBreakpoint::CBreakpoint(void):type(BKPNT_UNKNOWN),location(0),
+#if !C_HEAVY_DEBUG
+oldData(0xCC),
+#endif
+segment(0),offset(0),intNr(0),ahValue(0),alValue(0),active(false),once(false) { }
 
 void CBreakpoint::Activate(bool _active)
 {
 #if !C_HEAVY_DEBUG
-	if (GetType()==BKPNT_PHYSICAL) {
+	if (GetType() == BKPNT_PHYSICAL) {
 		if (_active) {
 			// Set 0xCC and save old value
 			Bit8u data = mem_readb(location);
-			if (data!=0xCC) {
+			if (data != 0xCC) {
 				oldData = data;
 				mem_writeb(location,0xCC);
+			} else if (!active) {
+				// Another activate breakpoint is already here.
+				// Find it, and copy its oldData value
+				CBreakpoint *bp = FindOtherActiveBreakpoint(location, this);
+
+				if (!bp || bp->oldData == 0xCC) {
+					// This might also happen if there is a real 0xCC instruction here
+					DEBUG_ShowMsg("DEBUG: Internal error while activating breakpoint.\n");
+					oldData = 0xCC;
+				} else
+					oldData = bp->oldData;
 			};
 		} else {
-			// Remove 0xCC and set old value
-			if (mem_readb (location)==0xCC) {
-				mem_writeb(location,oldData);
+			if (mem_readb(location) == 0xCC) {
+				if (oldData == 0xCC)
+					DEBUG_ShowMsg("DEBUG: Internal error while deactivating breakpoint.\n");
+
+				// Check if we are the last active breakpoint at this location
+				bool otherActive = (FindOtherActiveBreakpoint(location, this) != 0);
+
+				// If so, remove 0xCC and set old value
+				if (!otherActive)
+					mem_writeb(location, oldData);
 			};
 		}
 	}
@@ -392,8 +550,6 @@ void CBreakpoint::Activate(bool _active)
 
 // Statics
 std::list<CBreakpoint*> CBreakpoint::BPoints;
-CBreakpoint*			CBreakpoint::ignoreOnce = 0;
-Bitu					ignoreAddressOnce = 0;
 
 CBreakpoint* CBreakpoint::AddBreakpoint(Bit16u seg, Bit32u off, bool once)
 {
@@ -404,10 +560,10 @@ CBreakpoint* CBreakpoint::AddBreakpoint(Bit16u seg, Bit32u off, bool once)
 	return bp;
 }
 
-CBreakpoint* CBreakpoint::AddIntBreakpoint(Bit8u intNum, Bit16u ah, bool once)
+CBreakpoint* CBreakpoint::AddIntBreakpoint(Bit8u intNum, Bit16u ah, Bit16u al, bool once)
 {
 	CBreakpoint* bp = new CBreakpoint();
-	bp->SetInt			(intNum,ah);
+	bp->SetInt			(intNum,ah,al);
 	bp->SetOnce			(once);
 	BPoints.push_front	(bp);
 	return bp;
@@ -423,43 +579,47 @@ CBreakpoint* CBreakpoint::AddMemBreakpoint(Bit16u seg, Bit32u off)
 	return bp;
 }
 
-void CBreakpoint::ActivateBreakpoints(PhysPt adr, bool activate)
+void CBreakpoint::ActivateBreakpoints()
 {
 	// activate all breakpoints
 	std::list<CBreakpoint*>::iterator i;
-	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
-		bp = (*i);
-		// Do not activate, when bp is an actual address
-		if (activate && (bp->GetType()==BKPNT_PHYSICAL) && (bp->GetLocation()==adr)) {
-			// Do not activate :)
-			continue;
-		}
-		bp->Activate(activate);	
-	}
+	for (i = BPoints.begin(); i != BPoints.end(); ++i)
+		(*i)->Activate(true);
 }
 
-bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
+void CBreakpoint::DeactivateBreakpoints()
+{
+	// deactivate all breakpoints
+	std::list<CBreakpoint*>::iterator i;
+	for (i = BPoints.begin(); i != BPoints.end(); ++i)
+		(*i)->Activate(false);
+}
+
+void CBreakpoint::ActivateBreakpointsExceptAt(PhysPt adr)
+{
+	// activate all breakpoints, except those at adr
+	std::list<CBreakpoint*>::iterator i;
+	for (i = BPoints.begin(); i != BPoints.end(); ++i) {
+		CBreakpoint* bp = (*i);
+		// Do not activate breakpoints at adr
+		if (bp->GetType() == BKPNT_PHYSICAL && bp->GetLocation() == adr)
+			continue;
+		bp->Activate(true);
+	};
+}
+
+bool CBreakpoint::CheckBreakpoint(Bit16u seg, Bit32u off)
 // Checks if breakpoint is valid and should stop execution
 {
-	if ((ignoreAddressOnce!=0) && (GetAddress(seg,off)==ignoreAddressOnce)) {
-		ignoreAddressOnce = 0;
-		return false;
-	} else
-		ignoreAddressOnce = 0;
+	// Quick exit if there are no breakpoints
+	if (BPoints.empty()) return false;
 
 	// Search matching breakpoint
 	std::list<CBreakpoint*>::iterator i;
 	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
+	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
 		bp = (*i);
 		if ((bp->GetType()==BKPNT_PHYSICAL) && bp->IsActive() && (bp->GetSegment()==seg) && (bp->GetOffset()==off)) {
-			// Ignore Once ?
-			if (ignoreOnce==bp) {
-				ignoreOnce=0;
-				bp->Activate(true);
-				return false;
-			};
 			// Found, 
 			if (bp->GetOnce()) {
 				// delete it, if it should only be used once
@@ -467,8 +627,14 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 				bp->Activate(false);
 				delete bp;
 			} else {
-				ignoreOnce = bp;
-			};
+				// Also look for once-only breakpoints at this address
+				bp = FindPhysBreakpoint(seg, off, true);
+				if (bp) {
+					BPoints.remove(bp);
+					bp->Activate(false);
+					delete bp;
+				}
+			}
 			return true;
 		} 
 #if C_HEAVY_DEBUG
@@ -489,7 +655,7 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 				if (bp->GetType()==BKPNT_MEMORY_LINEAR) address = bp->GetOffset();
 				else address = (Bitu)GetAddress(bp->GetSegment(),bp->GetOffset());
 				Bit8u value=0;
-				if (mem_readb_checked(address,&value)) return false;
+				if (mem_readb_checked((PhysPt)address,&value)) return false;
 				if (bp->GetValue() != value) {
 					// Yup, memory value changed
 					DEBUG_ShowMsg("DEBUG: Memory breakpoint %s: %04X:%04X - %02X -> %02X\n",(bp->GetType()==BKPNT_MEMORY_PROT)?"(Prot)":"",bp->GetSegment(),bp->GetOffset(),bp->GetValue(),value);
@@ -503,36 +669,28 @@ bool CBreakpoint::CheckBreakpoint(Bitu seg, Bitu off)
 	return false;
 }
 
-bool CBreakpoint::CheckIntBreakpoint(PhysPt adr, Bit8u intNr, Bit16u ahValue)
+bool CBreakpoint::CheckIntBreakpoint(PhysPt adr, Bit8u intNr, Bit16u ahValue, Bit16u alValue)
 // Checks if interrupt breakpoint is valid and should stop execution
 {
-	if ((ignoreAddressOnce!=0) && (adr==ignoreAddressOnce)) {
-		ignoreAddressOnce = 0;
-		return false;
-	} else
-		ignoreAddressOnce = 0;
+	if (BPoints.empty()) return false;
+
+    // unused
+    (void)adr;
 
 	// Search matching breakpoint
 	std::list<CBreakpoint*>::iterator i;
 	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
+	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
 		bp = (*i);
 		if ((bp->GetType()==BKPNT_INTERRUPT) && bp->IsActive() && (bp->GetIntNr()==intNr)) {
-			if ((bp->GetValue()==BPINT_ALL) || (bp->GetValue()==ahValue)) {
+			if (((bp->GetValue()==BPINT_ALL) || (bp->GetValue()==ahValue)) && ((bp->GetOther()==BPINT_ALL) || (bp->GetOther()==alValue))) {
 				// Ignore it once ?
-				if (ignoreOnce==bp) {
-					ignoreOnce=0;
-					bp->Activate(true);
-					return false;
-				};
 				// Found
 				if (bp->GetOnce()) {
 					// delete it, if it should only be used once
 					(BPoints.erase)(i);
 					bp->Activate(false);
 					delete bp;
-				} else {
-					ignoreOnce = bp;
 				}
 				return true;
 			}
@@ -545,7 +703,7 @@ void CBreakpoint::DeleteAll()
 {
 	std::list<CBreakpoint*>::iterator i;
 	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
+	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
 		bp = (*i);
 		bp->Activate(false);
 		delete bp;
@@ -560,7 +718,7 @@ bool CBreakpoint::DeleteByIndex(Bit16u index)
 	int nr = 0;
 	std::list<CBreakpoint*>::iterator i;
 	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
+	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
 		if (nr==index) {
 			bp = (*i);
 			(BPoints.erase)(i);
@@ -573,69 +731,75 @@ bool CBreakpoint::DeleteByIndex(Bit16u index)
 	return false;
 }
 
-bool CBreakpoint::DeleteBreakpoint(PhysPt where) 
+CBreakpoint* CBreakpoint::FindPhysBreakpoint(Bit16u seg, Bit32u off, bool once)
 {
-	// Search matching breakpoint
+	if (BPoints.empty()) return 0;
+#if !C_HEAVY_DEBUG
+	PhysPt adr = GetAddress(seg, off);
+#endif
+	// Search for matching breakpoint
 	std::list<CBreakpoint*>::iterator i;
 	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
+	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
 		bp = (*i);
-		if ((bp->GetType()==BKPNT_PHYSICAL) && (bp->GetLocation()==where)) {
-			(BPoints.erase)(i);
-			bp->Activate(false);
-			delete bp;
-			return true;
-		}
+#if C_HEAVY_DEBUG
+		// Heavy debugging breakpoints are triggered by matching seg:off
+		bool atLocation = bp->GetSegment() == seg && bp->GetOffset() == off;
+#else
+		// Normal debugging breakpoints are triggered at an address
+		bool atLocation = bp->GetLocation() == adr;
+#endif
+
+		if (bp->GetType() == BKPNT_PHYSICAL && atLocation && bp->GetOnce() == once)
+			return bp;
 	}
+
+	return 0;
+}
+
+CBreakpoint* CBreakpoint::FindOtherActiveBreakpoint(PhysPt adr, CBreakpoint* skip)
+{
+	std::list<CBreakpoint*>::iterator i;
+	for (i = BPoints.begin(); i != BPoints.end(); ++i) {
+		CBreakpoint* bp = (*i);
+		if (bp != skip && bp->GetType() == BKPNT_PHYSICAL && bp->GetLocation() == adr && bp->IsActive())
+			return bp;
+	}
+	return 0;
+}
+
+// is there a permanent breakpoint at address ?
+bool CBreakpoint::IsBreakpoint(Bit16u seg, Bit32u off)
+{
+	return FindPhysBreakpoint(seg, off, false) != 0;
+}
+
+bool CBreakpoint::DeleteBreakpoint(Bit16u seg, Bit32u off)
+{
+	CBreakpoint* bp = FindPhysBreakpoint(seg, off, false);
+	if (bp) {
+		BPoints.remove(bp);
+		delete bp;
+		return true;
+	}
+
 	return false;
 }
 
-bool CBreakpoint::IsBreakpoint(PhysPt adr) 
-// is there a breakpoint at address ?
-{
-	// Search matching breakpoint
-	std::list<CBreakpoint*>::iterator i;
-	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
-		bp = (*i);
-		if ((bp->GetType()==BKPNT_PHYSICAL) && (bp->GetSegment()==adr)) {
-			return true;
-		}
-		if ((bp->GetType()==BKPNT_PHYSICAL) && (bp->GetLocation()==adr)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-bool CBreakpoint::IsBreakpointDrawn(PhysPt adr) 
-// valid breakpoint, that should be drawn ?
-{
-	// Search matching breakpoint
-	std::list<CBreakpoint*>::iterator i;
-	CBreakpoint* bp;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
-		bp = (*i);
-		if ((bp->GetType()==BKPNT_PHYSICAL) && (bp->GetLocation()==adr)) {
-			// Only draw, if breakpoint is not only once, 
-			return !bp->GetOnce();
-		}
-	}
-	return false;
-}
 
 void CBreakpoint::ShowList(void)
 {
 	// iterate list 
 	int nr = 0;
 	std::list<CBreakpoint*>::iterator i;
-	for(i=BPoints.begin(); i != BPoints.end(); i++) {
+	for(i=BPoints.begin(); i != BPoints.end(); ++i) {
 		CBreakpoint* bp = (*i);
 		if (bp->GetType()==BKPNT_PHYSICAL) {
 			DEBUG_ShowMsg("%02X. BP %04X:%04X\n",nr,bp->GetSegment(),bp->GetOffset());
 		} else if (bp->GetType()==BKPNT_INTERRUPT) {
-			if (bp->GetValue()==BPINT_ALL)	DEBUG_ShowMsg("%02X. BPINT %02X\n",nr,bp->GetIntNr());					
-			else							DEBUG_ShowMsg("%02X. BPINT %02X AH=%02X\n",nr,bp->GetIntNr(),bp->GetValue());
+			if (bp->GetValue()==BPINT_ALL) DEBUG_ShowMsg("%02X. BPINT %02X\n",nr,bp->GetIntNr());
+			else if (bp->GetOther()==BPINT_ALL) DEBUG_ShowMsg("%02X. BPINT %02X AH=%02X\n",nr,bp->GetIntNr(),bp->GetValue());
+			else DEBUG_ShowMsg("%02X. BPINT %02X AH=%02X AL=%02X\n",nr,bp->GetIntNr(),bp->GetValue(),bp->GetOther());
 		} else if (bp->GetType()==BKPNT_MEMORY) {
 			DEBUG_ShowMsg("%02X. BPMEM %04X:%04X (%02X)\n",nr,bp->GetSegment(),bp->GetOffset(),bp->GetValue());
 		} else if (bp->GetType()==BKPNT_MEMORY_PROT) {
@@ -649,34 +813,35 @@ void CBreakpoint::ShowList(void)
 
 bool DEBUG_Breakpoint(void)
 {
-	/* First get the phyiscal address and check for a set Breakpoint */
+	/* First get the physical address and check for a set Breakpoint */
 	if (!CBreakpoint::CheckBreakpoint(SegValue(cs),reg_eip)) return false;
 	// Found. Breakpoint is valid
-	PhysPt where=(Bitu)GetAddress(SegValue(cs),reg_eip);
-	CBreakpoint::ActivateBreakpoints(where,false);	// Deactivate all breakpoints
+//	PhysPt where=(PhysPt)GetAddress(SegValue(cs),reg_eip);
+	CBreakpoint::DeactivateBreakpoints();	// Deactivate all breakpoints
 	return true;
 }
 
 bool DEBUG_IntBreakpoint(Bit8u intNum)
 {
-	/* First get the phyiscal address and check for a set Breakpoint */
-	PhysPt where=(Bitu)GetAddress(SegValue(cs),reg_eip);
-	if (!CBreakpoint::CheckIntBreakpoint(where,intNum,reg_ah)) return false;
+	/* First get the physical address and check for a set Breakpoint */
+	PhysPt where=(PhysPt)GetAddress(SegValue(cs),reg_eip);
+	if (!CBreakpoint::CheckIntBreakpoint(where,intNum,reg_ah,reg_al)) return false;
 	// Found. Breakpoint is valid
-	CBreakpoint::ActivateBreakpoints(where,false);	// Deactivate all breakpoints
+	CBreakpoint::DeactivateBreakpoints();	// Deactivate all breakpoints
 	return true;
 }
 
 static bool StepOver()
 {
 	exitLoop = false;
-	PhysPt start=(Bitu)GetAddress(SegValue(cs),reg_eip);
+	PhysPt start=(PhysPt)GetAddress(SegValue(cs),reg_eip);
 	char dline[200];Bitu size;
 	size=DasmI386(dline, start, reg_eip, cpu.code.big);
 
 	if (strstr(dline,"call") || strstr(dline,"int") || strstr(dline,"loop") || strstr(dline,"rep")) {
-		CBreakpoint::AddBreakpoint		(SegValue(cs),reg_eip+size, true);
-		CBreakpoint::ActivateBreakpoints(start, true);
+		// Don't add a temporary breakpoint if there's already one here
+		if (!CBreakpoint::FindPhysBreakpoint(SegValue(cs), (Bit32u)(reg_eip+size), true))
+			CBreakpoint::AddBreakpoint(SegValue(cs),(Bit32u)(reg_eip+size), true);
 		debugging=false;
 
         logBuffSuppressConsole = false;
@@ -687,7 +852,6 @@ static bool StepOver()
 
 		DrawCode();
 		mainMenu.get_item("mapper_debugger").check(false).refresh_item(mainMenu);
-		DOSBOX_SetNormalLoop();
 		return true;
 	} 
 	return false;
@@ -717,11 +881,14 @@ static void DrawData(void) {
 	Bit8u ch;
 	Bit32u add = dataOfs;
 	Bit64u address;
-    int w,h;
+    int w,h,y;
 
 	/* Data win */	
     getmaxyx(dbg.win_data,h,w);
-	for (int y=0;y<h;y++) {
+
+    if ((paging.enabled || cpu.pmode) && dbg.data_view != DBGBlock::DATV_PHYSICAL) h--;
+
+	for (y=0;y<h;y++) {
 		// Address
         if (dbg.data_view == DBGBlock::DATV_SEGMENTED) {
             wattrset (dbg.win_data,0);
@@ -788,7 +955,36 @@ static void DrawData(void) {
                 add++;
             }
         }
-	}	
+	}
+
+    if ((paging.enabled || cpu.pmode) && dbg.data_view != DBGBlock::DATV_PHYSICAL) {
+        /* one line was set aside for this information */
+        wattrset (dbg.win_data,0);
+        if (dbg.data_view == DBGBlock::DATV_SEGMENTED) {
+            address = GetAddress(dataSeg,dataOfs);
+            if (address != mem_no_address)
+                mvwprintw (dbg.win_data,y,0," LIN=%08X ",(unsigned int)address);
+            else
+                mvwprintw (dbg.win_data,y,0," LIN=XXXXXXXX ");
+        }
+        else {
+            address = dataOfs;
+            mvwprintw (dbg.win_data,y,0,"              ");
+        }
+
+        if (!mem_readb_checked((PhysPt)address,&ch)) {
+            Bitu naddr = PAGING_GetPhysicalAddress((PhysPt)address);
+            mvwprintw (dbg.win_data,y,14,"PHY=%08X ",(unsigned int)naddr);
+        }
+        else {
+            mvwprintw (dbg.win_data,y,14,"PHY=XXXXXXXX ");
+        }
+
+        wclrtoeol(dbg.win_data);
+
+        y++;
+    }
+
 	wrefresh(dbg.win_data);
 }
 
@@ -899,14 +1095,20 @@ bool DEBUG_IsPagingOutput(void);
 
 static void DrawInput(void) {
     if (!debugging) {
+        if (has_colors())
+        {
         wbkgdset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
         wattrset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
+        }
 
         mvwprintw(dbg.win_inp,0,0,"%s","(Running)");
         wclrtoeol(dbg.win_inp);
     } else if (DEBUG_IsPagingOutput()) {
+        if (has_colors())
+        {
         wbkgdset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
         wattrset(dbg.win_inp,COLOR_PAIR(PAIR_GREEN_BLACK));
+        }
 
         mvwprintw(dbg.win_inp,0,0,"%s","^ Paged content: Hit ENTER to continue, Q to exit paging");
         wclrtoeol(dbg.win_inp);
@@ -920,11 +1122,13 @@ static void DrawInput(void) {
         mvwprintw(dbg.win_inp,0,0,"%c-> %s%c",
                 (codeViewData.ovrMode?'O':'I'),dispPtr,(*curPtr?' ':'_'));
         wclrtoeol(dbg.win_inp); // not correct in pdcurses if full line
+        mvwchgat(dbg.win_inp,10,0,3,0,(PAIR_BLACK_GREY),NULL);
         if (*curPtr) {
             mvwchgat(dbg.win_inp,0,(int)(curPtr-dispPtr+4),1,0,(PAIR_BLACK_GREY),NULL);
         } 
     }
 
+    wattrset(dbg.win_inp,0);
     wrefresh(dbg.win_inp);
 }
 
@@ -968,12 +1172,12 @@ static void DrawCode(void) {
 				codeViewData.cursorSeg = codeViewData.useCS;
 				codeViewData.cursorOfs = disEIP;
 				saveSel = true;
-			} else if (CBreakpoint::IsBreakpointDrawn((PhysPt)start)) {
+			} else if (CBreakpoint::IsBreakpoint(codeViewData.useCS, disEIP)) {
                 wbkgdset(dbg.win_code,COLOR_PAIR(PAIR_GREY_RED));
 				wattrset(dbg.win_code,COLOR_PAIR(PAIR_GREY_RED));			
 			} else {
                 wbkgdset(dbg.win_code,0);
-				wattrset(dbg.win_code,0);			
+                wattrset(dbg.win_code,0);
 			}
 		}
 
@@ -1041,9 +1245,9 @@ static void DrawCode(void) {
 
         wclrtoeol(dbg.win_code);
 
-        disEIP+=size;
+        disEIP+=(Bit32u)size;
 
-		if (i==0) codeViewData.firstInstSize = size;
+		if (i==0) codeViewData.firstInstSize = (Bit16u)size;
 		if (i==4) codeViewData.useEIPmid	 = disEIP;
 	}
 
@@ -1074,88 +1278,159 @@ void DEBUG_CheckCSIP() {
 /*    User input    */
 /********************/
 
-Bit32u GetHexValue(char* str, char*& hex)
+void SkipSpace(char*& hex) {
+    while (*hex == ' ') hex++;
+}
+
+Bit32u GetHexValue(char* const str, char* &hex,bool *parsed)
 {
 	Bit32u	value = 0;
 	Bit32u regval = 0;
 	hex = str;
-	while (*hex==' ') hex++;
-	if (strstr(hex,"EAX")==hex) { hex+=3; regval = reg_eax; };
-	if (strstr(hex,"EBX")==hex) { hex+=3; regval = reg_ebx; };
-	if (strstr(hex,"ECX")==hex) { hex+=3; regval = reg_ecx; };
-	if (strstr(hex,"EDX")==hex) { hex+=3; regval = reg_edx; };
-	if (strstr(hex,"ESI")==hex) { hex+=3; regval = reg_esi; };
-	if (strstr(hex,"EDI")==hex) { hex+=3; regval = reg_edi; };
-	if (strstr(hex,"EBP")==hex) { hex+=3; regval = reg_ebp; };
-	if (strstr(hex,"ESP")==hex) { hex+=3; regval = reg_esp; };
-	if (strstr(hex,"EIP")==hex) { hex+=3; regval = reg_eip; };
-	if (strstr(hex,"AX")==hex) { hex+=2; regval = reg_ax; };
-	if (strstr(hex,"BX")==hex) { hex+=2; regval = reg_bx; };
-	if (strstr(hex,"CX")==hex) { hex+=2; regval = reg_cx; };
-	if (strstr(hex,"DX")==hex) { hex+=2; regval = reg_dx; };
-	if (strstr(hex,"SI")==hex) { hex+=2; regval = reg_si; };
-	if (strstr(hex,"DI")==hex) { hex+=2; regval = reg_di; };
-	if (strstr(hex,"BP")==hex) { hex+=2; regval = reg_bp; };
-	if (strstr(hex,"SP")==hex) { hex+=2; regval = reg_sp; };
-	if (strstr(hex,"IP")==hex) { hex+=2; regval = reg_ip; };
-	if (strstr(hex,"CS")==hex) { hex+=2; regval = SegValue(cs); };
-	if (strstr(hex,"DS")==hex) { hex+=2; regval = SegValue(ds); };
-	if (strstr(hex,"ES")==hex) { hex+=2; regval = SegValue(es); };
-	if (strstr(hex,"FS")==hex) { hex+=2; regval = SegValue(fs); };
-	if (strstr(hex,"GS")==hex) { hex+=2; regval = SegValue(gs); };
-	if (strstr(hex,"SS")==hex) { hex+=2; regval = SegValue(ss); };
+	while (*hex == ' ') hex++;
+
+	if (strncmp(hex,"EFLAGS",6) == 0) { hex+=6; regval = (Bit32u)reg_flags; } else
+	if (strncmp(hex,"FLAGS",5) == 0) { hex+=5; regval = (Bit32u)reg_flags; } else
+
+	if (strncmp(hex,"IOPL",4) == 0) { hex+=4; regval = (reg_flags & FLAG_IOPL) >> 12u; } else
+
+	if (strncmp(hex,"CR0",3) == 0) { hex+=3; regval = (Bit32u)cpu.cr0; } else
+	if (strncmp(hex,"CR2",3) == 0) { hex+=3; regval = (Bit32u)paging.cr2; } else
+	if (strncmp(hex,"CR3",3) == 0) { hex+=3; regval = (Bit32u)paging.cr3; } else
+
+	if (strncmp(hex,"EAX",3) == 0) { hex+=3; regval = reg_eax; } else
+	if (strncmp(hex,"EBX",3) == 0) { hex+=3; regval = reg_ebx; } else
+	if (strncmp(hex,"ECX",3) == 0) { hex+=3; regval = reg_ecx; } else
+	if (strncmp(hex,"EDX",3) == 0) { hex+=3; regval = reg_edx; } else
+	if (strncmp(hex,"ESI",3) == 0) { hex+=3; regval = reg_esi; } else
+	if (strncmp(hex,"EDI",3) == 0) { hex+=3; regval = reg_edi; } else
+	if (strncmp(hex,"EBP",3) == 0) { hex+=3; regval = reg_ebp; } else
+	if (strncmp(hex,"ESP",3) == 0) { hex+=3; regval = reg_esp; } else
+	if (strncmp(hex,"EIP",3) == 0) { hex+=3; regval = reg_eip; } else
+
+	if (strncmp(hex,"AX",2) == 0)  { hex+=2; regval = reg_ax; } else
+	if (strncmp(hex,"BX",2) == 0)  { hex+=2; regval = reg_bx; } else
+	if (strncmp(hex,"CX",2) == 0)  { hex+=2; regval = reg_cx; } else
+	if (strncmp(hex,"DX",2) == 0)  { hex+=2; regval = reg_dx; } else
+	if (strncmp(hex,"SI",2) == 0)  { hex+=2; regval = reg_si; } else
+	if (strncmp(hex,"DI",2) == 0)  { hex+=2; regval = reg_di; } else
+	if (strncmp(hex,"BP",2) == 0)  { hex+=2; regval = reg_bp; } else
+	if (strncmp(hex,"SP",2) == 0)  { hex+=2; regval = reg_sp; } else
+	if (strncmp(hex,"IP",2) == 0)  { hex+=2; regval = reg_ip; } else
+
+	if (strncmp(hex,"AL",2) == 0) { hex+=2; regval = reg_al; } else
+	if (strncmp(hex,"BL",2) == 0) { hex+=2; regval = reg_bl; } else
+	if (strncmp(hex,"CL",2) == 0) { hex+=2; regval = reg_cl; } else
+	if (strncmp(hex,"DL",2) == 0) { hex+=2; regval = reg_dl; } else
+
+	if (strncmp(hex,"AH",2) == 0) { hex+=2; regval = reg_ah; } else
+	if (strncmp(hex,"BH",2) == 0) { hex+=2; regval = reg_bh; } else
+	if (strncmp(hex,"CH",2) == 0) { hex+=2; regval = reg_ch; } else
+	if (strncmp(hex,"DH",2) == 0) { hex+=2; regval = reg_dh; } else
+
+	if (strncmp(hex,"CS",2) == 0)  { hex+=2; regval = SegValue(cs); } else
+	if (strncmp(hex,"DS",2) == 0)  { hex+=2; regval = SegValue(ds); } else
+	if (strncmp(hex,"ES",2) == 0)  { hex+=2; regval = SegValue(es); } else
+	if (strncmp(hex,"FS",2) == 0)  { hex+=2; regval = SegValue(fs); } else
+	if (strncmp(hex,"GS",2) == 0)  { hex+=2; regval = SegValue(gs); } else
+	if (strncmp(hex,"SS",2) == 0)  { hex+=2; regval = SegValue(ss); } else
+
+	if (strncmp(hex,"AC",2) == 0) { hex+=2; regval = GETFLAG(AC); } else
+    if (strncmp(hex,"AF",2) == 0) { hex+=2; regval = GETFLAG(AF); } else
+	if (strncmp(hex,"CF",2) == 0) { hex+=2; regval = GETFLAG(CF); } else
+	if (strncmp(hex,"DF",2) == 0) { hex+=2; regval = GETFLAG(DF); } else
+	if (strncmp(hex,"ID",2) == 0) { hex+=2; regval = GETFLAG(ID); } else
+	if (strncmp(hex,"IF",2) == 0) { hex+=2; regval = GETFLAG(IF); } else
+	if (strncmp(hex,"NT",2) == 0) { hex+=2; regval = GETFLAG(NT); } else
+	if (strncmp(hex,"OF",2) == 0) { hex+=2; regval = GETFLAG(OF); } else
+	if (strncmp(hex,"PF",2) == 0) { hex+=2; regval = GETFLAG(PF); } else
+	if (strncmp(hex,"SF",2) == 0) { hex+=2; regval = GETFLAG(SF); } else
+	if (strncmp(hex,"TF",2) == 0) { hex+=2; regval = GETFLAG(TF); } else
+	if (strncmp(hex,"VM",2) == 0) { hex+=2; regval = GETFLAG(VM); } else
+	if (strncmp(hex,"ZF",2) == 0) { hex+=2; regval = GETFLAG(ZF); }
 
 	while (*hex) {
-		if ((*hex>='0') && (*hex<='9')) value = (value<<4u) + ((Bit32u)(*hex)) - '0';
-		else if ((*hex>='A') && (*hex<='F')) value = (value<<4u) + ((Bit32u)(*hex)) - 'A' + 10u;
+		if 		((*hex >= '0') && (*hex <= '9')) value = (value<<4u) + ((Bit32u)(*hex)) - '0';
+		else if ((*hex >= 'A') && (*hex <= 'F')) value = (value<<4u) + ((Bit32u)(*hex)) - 'A' + 10u;
 		else { 
-			if(*hex == '+') {hex++;return regval + value + GetHexValue(hex,hex); };
-			if(*hex == '-') {hex++;return regval + value - GetHexValue(hex,hex); };
-			break; // No valid char
+			if (*hex == '+') {hex++;return regval + value + GetHexValue(hex,hex,parsed); } else
+			if (*hex == '-') {hex++;return regval + value - GetHexValue(hex,hex,parsed); }
+			else break; // No valid char
 		}
 		hex++;
 	}
 
+    if (parsed != NULL)
+        *parsed = (hex != str);
+
 	return regval + value;
 }
 
-bool ChangeRegister(char* str)
+bool ChangeRegister(char* const str)
 {
 	char* hex = str;
-	while (*hex==' ') hex++;
-	if (strstr(hex,"EAX")==hex) { hex+=3; reg_eax = GetHexValue(hex,hex); } else
-	if (strstr(hex,"EBX")==hex) { hex+=3; reg_ebx = GetHexValue(hex,hex); } else
-	if (strstr(hex,"ECX")==hex) { hex+=3; reg_ecx = GetHexValue(hex,hex); } else
-	if (strstr(hex,"EDX")==hex) { hex+=3; reg_edx = GetHexValue(hex,hex); } else
-	if (strstr(hex,"ESI")==hex) { hex+=3; reg_esi = GetHexValue(hex,hex); } else
-	if (strstr(hex,"EDI")==hex) { hex+=3; reg_edi = GetHexValue(hex,hex); } else
-	if (strstr(hex,"EBP")==hex) { hex+=3; reg_ebp = GetHexValue(hex,hex); } else
-	if (strstr(hex,"ESP")==hex) { hex+=3; reg_esp = GetHexValue(hex,hex); } else
-	if (strstr(hex,"EIP")==hex) { hex+=3; reg_eip = GetHexValue(hex,hex); } else
-	if (strstr(hex,"AX")==hex) { hex+=2; reg_ax = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"BX")==hex) { hex+=2; reg_bx = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"CX")==hex) { hex+=2; reg_cx = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"DX")==hex) { hex+=2; reg_dx = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"SI")==hex) { hex+=2; reg_si = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"DI")==hex) { hex+=2; reg_di = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"BP")==hex) { hex+=2; reg_bp = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"SP")==hex) { hex+=2; reg_sp = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"IP")==hex) { hex+=2; reg_ip = (Bit16u)GetHexValue(hex,hex); } else
-	if (strstr(hex,"CS")==hex) { hex+=2; SegSet16(cs,(Bit16u)GetHexValue(hex,hex)); } else
-	if (strstr(hex,"DS")==hex) { hex+=2; SegSet16(ds,(Bit16u)GetHexValue(hex,hex)); } else
-	if (strstr(hex,"ES")==hex) { hex+=2; SegSet16(es,(Bit16u)GetHexValue(hex,hex)); } else
-	if (strstr(hex,"FS")==hex) { hex+=2; SegSet16(fs,(Bit16u)GetHexValue(hex,hex)); } else
-	if (strstr(hex,"GS")==hex) { hex+=2; SegSet16(gs,(Bit16u)GetHexValue(hex,hex)); } else
-	if (strstr(hex,"SS")==hex) { hex+=2; SegSet16(ss,(Bit16u)GetHexValue(hex,hex)); } else
-	if (strstr(hex,"AF")==hex) { hex+=2; SETFLAGBIT(AF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"CF")==hex) { hex+=2; SETFLAGBIT(CF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"DF")==hex) { hex+=2; SETFLAGBIT(DF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"IF")==hex) { hex+=2; SETFLAGBIT(IF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"OF")==hex) { hex+=2; SETFLAGBIT(OF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"ZF")==hex) { hex+=2; SETFLAGBIT(ZF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"PF")==hex) { hex+=2; SETFLAGBIT(PF,GetHexValue(hex,hex)); } else
-	if (strstr(hex,"SF")==hex) { hex+=2; SETFLAGBIT(SF,GetHexValue(hex,hex)); } else
-	{ return false; };
+
+    while (*hex) {
+    	while (*hex==' ') hex++;
+
+    	if (strstr(hex,"EFLAGS")==hex) { hex+=6; CPU_SetFlags(GetHexValue(hex,hex),FMASK_ALL); } else
+    	if (strstr(hex,"FLAGS")==hex) { hex+=5; CPU_SetFlags(GetHexValue(hex,hex),FMASK_ALL & 0xFFFFu); } else
+
+        //             "IOPL"
+
+    	if (strncmp(hex,"EAX",3) == 0) { hex+=3; reg_eax = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"EBX",3) == 0) { hex+=3; reg_ebx = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"ECX",3) == 0) { hex+=3; reg_ecx = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"EDX",3) == 0) { hex+=3; reg_edx = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"ESI",3) == 0) { hex+=3; reg_esi = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"EDI",3) == 0) { hex+=3; reg_edi = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"EBP",3) == 0) { hex+=3; reg_ebp = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"ESP",3) == 0) { hex+=3; reg_esp = GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"EIP",3) == 0) { hex+=3; reg_eip = GetHexValue(hex,hex); } else
+
+    	if (strncmp(hex,"AX",2) == 0) { hex+=2; reg_ax = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"BX",2) == 0) { hex+=2; reg_bx = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"CX",2) == 0) { hex+=2; reg_cx = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"DX",2) == 0) { hex+=2; reg_dx = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"SI",2) == 0) { hex+=2; reg_si = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"DI",2) == 0) { hex+=2; reg_di = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"BP",2) == 0) { hex+=2; reg_bp = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"SP",2) == 0) { hex+=2; reg_sp = (Bit16u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"IP",2) == 0) { hex+=2; reg_ip = (Bit16u)GetHexValue(hex,hex); } else
+
+	    if (strncmp(hex,"AL",2) == 0) { hex+=2; reg_al = (Bit8u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"BL",2) == 0) { hex+=2; reg_bl = (Bit8u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"CL",2) == 0) { hex+=2; reg_cl = (Bit8u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"DL",2) == 0) { hex+=2; reg_dl = (Bit8u)GetHexValue(hex,hex); } else
+
+    	if (strncmp(hex,"AH",2) == 0) { hex+=2; reg_ah = (Bit8u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"BH",2) == 0) { hex+=2; reg_bh = (Bit8u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"CH",2) == 0) { hex+=2; reg_ch = (Bit8u)GetHexValue(hex,hex); } else
+    	if (strncmp(hex,"DH",2) == 0) { hex+=2; reg_dh = (Bit8u)GetHexValue(hex,hex); } else
+
+    	if (strncmp(hex,"CS",2) == 0) { hex+=2; SegSet16(cs,(Bit16u)GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"DS",2) == 0) { hex+=2; SegSet16(ds,(Bit16u)GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"ES",2) == 0) { hex+=2; SegSet16(es,(Bit16u)GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"FS",2) == 0) { hex+=2; SegSet16(fs,(Bit16u)GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"GS",2) == 0) { hex+=2; SegSet16(gs,(Bit16u)GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"SS",2) == 0) { hex+=2; SegSet16(ss,(Bit16u)GetHexValue(hex,hex)); } else
+
+        if (strncmp(hex,"AC",2) == 0) { hex+=2; SETFLAGBIT(AC,GetHexValue(hex,hex)); } else
+        if (strncmp(hex,"AF",2) == 0) { hex+=2; SETFLAGBIT(AF,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"CF",2) == 0) { hex+=2; SETFLAGBIT(CF,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"DF",2) == 0) { hex+=2; SETFLAGBIT(DF,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"ID",2) == 0) { hex+=2; SETFLAGBIT(ID,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"IF",2) == 0) { hex+=2; SETFLAGBIT(IF,GetHexValue(hex,hex)); } else
+        //             "NT"
+    	if (strncmp(hex,"OF",2) == 0) { hex+=2; SETFLAGBIT(OF,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"PF",2) == 0) { hex+=2; SETFLAGBIT(PF,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"SF",2) == 0) { hex+=2; SETFLAGBIT(SF,GetHexValue(hex,hex)); } else
+    	if (strncmp(hex,"TF",2) == 0) { hex+=2; SETFLAGBIT(TF,GetHexValue(hex,hex)); } else
+        //             "VM"
+	    if (strncmp(hex,"ZF",2) == 0) { hex+=2; SETFLAGBIT(ZF,GetHexValue(hex,hex)); } else
+    	{ return false; };
+    }
+
 	return true;
 }
 
@@ -1165,10 +1440,15 @@ void DBGUI_NextWindowIfActiveHidden(void);
 void DEBUG_BeginPagedContent(void);
 void DEBUG_EndPagedContent(void);
 
+std::string pc98_egc_shift_debug_status(void);
+
+static void LogFPUInfo(void);
+
 bool ParseCommand(char* str) {
-	char* found = str;
-	for(char* idx = found;*idx != 0; idx++)
-		*idx = toupper(*idx);
+    std::string copy_str = str;
+    for (auto &c : copy_str) c = toupper(c);
+    copy_str += '\0'; /* paranoid */
+	char* found = &(copy_str[0]); /* cannot use std::string c_str(), that is const char* */
 
 	found = trim(found);
 	string s_found(found);
@@ -1244,7 +1524,7 @@ bool ParseCommand(char* str) {
 		return true;
 	};
 
-	if (command == "MEMDUMPBIN") { // Dump memory to file bineary
+	if (command == "MEMDUMPBIN") { // Dump memory to file binary
 		Bit16u seg = (Bit16u)GetHexValue(found,found); found++;
 		Bit32u ofs = GetHexValue(found,found); found++;
 		Bit32u num = GetHexValue(found,found); found++;
@@ -1292,25 +1572,81 @@ bool ParseCommand(char* str) {
 		return true;
 	};
 
+    if (command == "EV") { // echo value (for viewing contents through GetHexValue
+        std::string cpptmp;
+        char tmp[128];
+        bool parsed;
+
+        SkipSpace(found);
+        DEBUG_ShowMsg("EV of '%s' is:",found);
+
+        while (*found) {
+            Bit32u value = GetHexValue(found,found,&parsed); SkipSpace(found);
+            if (!parsed) {
+                DEBUG_ShowMsg("GetHexValue parse error at %s",found);
+                break;
+            }
+            sprintf(tmp,"%lx",(unsigned long)value);
+            if (!cpptmp.empty()) cpptmp += " ";
+            cpptmp += tmp;
+        }
+
+        DEBUG_ShowMsg("%s",cpptmp.c_str());
+        return true;
+    }
+	
+	if (command == "ADDLOG") {
+		if(found && *found)	DEBUG_ShowMsg("NOTICE: %s\n",found);
+		return true;
+	};
+
 	if (command == "SR") { // Set register value
 		DEBUG_ShowMsg("DEBUG: Set Register %s.\n",(ChangeRegister(found)?"success":"failure"));
 		return true;
 	};
 
 	if (command == "SM") { // Set memory with following values
-		Bit16u seg = (Bit16u)GetHexValue(found,found); found++;
-		Bit32u ofs = GetHexValue(found,found); found++;
+		Bit16u seg = (Bit16u)GetHexValue(found,found); SkipSpace(found);
+		Bit32u ofs = GetHexValue(found,found); SkipSpace(found);
 		Bit16u count = 0;
-		while (*found) {
-			while (*found==' ') found++;
-			if (*found) {
-				Bit8u value = (Bit8u)GetHexValue(found,found);
-				if(*found) found++;
-				mem_writeb_checked((PhysPt)GetAddress(seg,ofs+count),value);
-				count++;
-			}
-		};
-		DEBUG_ShowMsg("DEBUG: Memory changed.\n");
+        bool parsed;
+
+        while (*found) {
+            char prefix = 'B';
+            Bit32u value;
+
+            /* allow d: w: b: prefixes */
+            if ((*found == 'B' || *found == 'W' || *found == 'D') && found[1] == ':') {
+                prefix = *found; found += 2;
+                value = GetHexValue(found,found,&parsed);
+            }
+            else {
+                value = GetHexValue(found,found,&parsed);
+            }
+
+            SkipSpace(found);
+            if (!parsed) {
+                DEBUG_ShowMsg("GetHexValue parse error at %s",found);
+                break;
+            }
+
+            if (prefix == 'D') {
+                mem_writed_checked((PhysPt)GetAddress(seg,ofs+count),value);
+                count += 4;
+            }
+            else if (prefix == 'W') {
+                mem_writew_checked((PhysPt)GetAddress(seg,ofs+count),value);
+                count += 2;
+            }
+            else if (prefix == 'B') {
+                mem_writeb_checked((PhysPt)GetAddress(seg,ofs+count),value);
+                count++;
+            }
+        };
+
+        if (count > 0)
+            DEBUG_ShowMsg("DEBUG: Memory changed (%u bytes)\n",(unsigned int)count);
+
 		return true;
 	};
 
@@ -1355,14 +1691,21 @@ bool ParseCommand(char* str) {
 
 	if (command == "BPINT") { // Add Interrupt Breakpoint
 		Bit8u intNr	= (Bit8u)GetHexValue(found,found);
-		bool all = !(*found);found++;
-		Bit8u valAH	= (Bit8u)GetHexValue(found,found);
+		bool all = !(*found);
+		Bit8u valAH = (Bit8u)GetHexValue(found,found);
 		if ((valAH==0x00) && (*found=='*' || all)) {
-			CBreakpoint::AddIntBreakpoint(intNr,BPINT_ALL,false);
+			CBreakpoint::AddIntBreakpoint(intNr,BPINT_ALL,BPINT_ALL,false);
 			DEBUG_ShowMsg("DEBUG: Set interrupt breakpoint at INT %02X\n",intNr);
 		} else {
-			CBreakpoint::AddIntBreakpoint(intNr,valAH,false);
-			DEBUG_ShowMsg("DEBUG: Set interrupt breakpoint at INT %02X AH=%02X\n",intNr,valAH);
+			all = !(*found);
+			Bit8u valAL = (Bit8u)GetHexValue(found,found);
+			if ((valAL==0x00) && (*found=='*' || all)) {
+				CBreakpoint::AddIntBreakpoint(intNr,valAH,BPINT_ALL,false);
+				DEBUG_ShowMsg("DEBUG: Set interrupt breakpoint at INT %02X AH=%02X\n",intNr,valAH);
+			} else {
+				CBreakpoint::AddIntBreakpoint(intNr,valAH,valAL,false);
+				DEBUG_ShowMsg("DEBUG: Set interrupt breakpoint at INT %02X AH=%02X AL=%02X\n",intNr,valAH,valAL);
+			}
 		}
 		return true;
 	};
@@ -1398,8 +1741,7 @@ bool ParseCommand(char* str) {
             DEBUG_RefreshPage(0);
         }
 
-        CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip,true);						
-        ignoreAddressOnce = SegPhys(cs)+reg_eip;
+        CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		mainMenu.get_item("mapper_debugger").check(false).refresh_item(mainMenu);
         DOSBOX_SetNormalLoop();	
         return true;
@@ -1415,14 +1757,17 @@ bool ParseCommand(char* str) {
         void MEM_A20_Enable(bool enabled);
         bool MEM_A20_Enabled(void);
 
+        command.clear();
 		stream >> command;
 
         if (command == "ON" || command == "1")
             MEM_A20_Enable(true);
         else if (command == "OFF" || command == "0")
             MEM_A20_Enable(false);
-        else
+        else if (command == "")
             DEBUG_ShowMsg("A20 gate is %s",MEM_A20_Enabled() ? "ON" : "OFF");
+        else
+            return false;
 
         return true;
     }
@@ -1435,6 +1780,7 @@ bool ParseCommand(char* str) {
 
         DEBUG_BeginPagedContent();
 
+        command.clear();
 		stream >> command;
 
         if (command == "MASKIRQ") {
@@ -1467,8 +1813,12 @@ bool ParseCommand(char* str) {
             int irq = atoi(what.c_str());
             DEBUG_PICSignal(irq,true);
         }
-        else {
+        else if (command == "") {
             DEBUG_LogPIC();
+        }
+        else {
+            DEBUG_EndPagedContent();
+            return false;
         }
 
         DEBUG_EndPagedContent();
@@ -1487,8 +1837,12 @@ bool ParseCommand(char* str) {
 	};
 
 	if (command == "D") { // Set data overview
-		dataSeg = (Bit16u)GetHexValue(found,found); found++;
-		dataOfs = GetHexValue(found,found);
+		dataSeg = (Bit16u)GetHexValue(found,found); SkipSpace(found);
+        if (*found == ':') { // allow seg:off syntax
+            found++;
+            SkipSpace(found);
+        }
+		dataOfs = GetHexValue(found,found); SkipSpace(found);
         dbg.set_data_view(DBGBlock::DATV_SEGMENTED);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
@@ -1496,7 +1850,7 @@ bool ParseCommand(char* str) {
 
 	if (command == "DV") { // Set data overview
         dataSeg = 0;
-		dataOfs = GetHexValue(found,found);
+		dataOfs = GetHexValue(found,found); SkipSpace(found);
         dbg.set_data_view(DBGBlock::DATV_VIRTUAL);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
@@ -1504,7 +1858,7 @@ bool ParseCommand(char* str) {
 
 	if (command == "DP") { // Set data overview
         dataSeg = 0;
-		dataOfs = GetHexValue(found,found);
+		dataOfs = GetHexValue(found,found); SkipSpace(found);
         dbg.set_data_view(DBGBlock::DATV_PHYSICAL);
 		DEBUG_ShowMsg("DEBUG: Set data overview to %04X:%04X\n",dataSeg,dataOfs);
 		return true;
@@ -1540,8 +1894,7 @@ bool ParseCommand(char* str) {
 		cpuLogCounter = (int)GetHexValue(found,found);
 
 		debugging = false;
-		CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip,true);						
-		ignoreAddressOnce = SegPhys(cs)+reg_eip;
+		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		DOSBOX_SetNormalLoop();	
 		return true;
 	};
@@ -1560,7 +1913,7 @@ bool ParseCommand(char* str) {
 		Bit8u intNr = (Bit8u)GetHexValue(found,found);
 		DEBUG_ShowMsg("DEBUG: Starting INT %02X\n",intNr);
 		CBreakpoint::AddBreakpoint(SegValue(cs),reg_eip, true);
-		CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip-1,true);
+		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip-1);
 		debugging = false;
 		DrawCode();
 		mainMenu.get_item("mapper_debugger").check(false).refresh_item(mainMenu);
@@ -1583,6 +1936,9 @@ bool ParseCommand(char* str) {
         else if (command == "KERN") LogDOSKernMem();
         else if (command == "XMS") LogXMS();
         else if (command == "EMS") LogEMS();
+        else if (command == "FNKEY") LogFNKEY();
+        else return false;
+
 		return true;
 	}
 
@@ -1590,6 +1946,436 @@ bool ParseCommand(char* str) {
         stream >> command;
 
         if (command == "MEM") LogBIOSMem();
+        else return false;
+
+        return true;
+    }
+
+    if (command == "VGA") {
+        stream >> command;
+
+        if (IS_PC98_ARCH) {
+            DEBUG_ShowMsg("VGA debugger commands not available in PC-98 mode");
+            return false;
+        }
+
+        if (command == "CRTC") {
+            DEBUG_ShowMsg("VGA CRTC info: index=%02xh readonly=%u",vga.crtc.index,vga.crtc.read_only?1:0);
+            DEBUG_ShowMsg("htotal=%02xh hdend=%02xh strhb=%02xh endhb=%02xh strrt=%02xh endrt=%02xh",
+                vga.crtc.horizontal_total,              vga.crtc.horizontal_display_end,
+                vga.crtc.start_horizontal_blanking,     vga.crtc.end_horizontal_blanking,
+                vga.crtc.start_horizontal_retrace,      vga.crtc.end_horizontal_retrace);
+            DEBUG_ShowMsg("vtotal=%02xh overflow=%02xh prerwscn=%02xh maxscnl=%02xh offset=%02xh",
+                vga.crtc.vertical_total,                vga.crtc.overflow,
+                vga.crtc.preset_row_scan,               vga.crtc.maximum_scan_line,
+                vga.crtc.offset);
+            DEBUG_ShowMsg("curs-st=%02xh curs-en=%02xh start-addr=%02x%02xh curs-loc=%02x%02xh",
+                vga.crtc.cursor_start,                  vga.crtc.cursor_end,
+                vga.crtc.start_address_high,            vga.crtc.start_address_low,
+                vga.crtc.cursor_location_high,          vga.crtc.cursor_location_low);
+            DEBUG_ShowMsg("strvrt=%02xh endvrt=%02xh vdend=%02xh underline=%02xh modectrl=%02xh",
+                vga.crtc.vertical_retrace_start,        vga.crtc.vertical_retrace_end,
+                vga.crtc.vertical_display_end,          vga.crtc.underline_location,
+                vga.crtc.mode_control);
+            DEBUG_ShowMsg("strvhb=%02xh endvhb=%02xh linecomp=%02xh",
+                vga.crtc.start_vertical_blanking,       vga.crtc.end_vertical_blanking,
+                vga.crtc.line_compare);
+        }
+        else if (command == "GC") {
+            DEBUG_ShowMsg("VGA Graphics controller info: index=%02xh setreset=%02xh",vga.gfx.index,vga.gfx.set_reset);
+            DEBUG_ShowMsg("enablesetreset=%02xh color-comp=%02xh data-rotate=%02xh rdmapsel=%02xh",
+                vga.gfx.enable_set_reset,   vga.gfx.color_compare,  vga.gfx.data_rotate,
+                vga.gfx.read_map_select);
+            DEBUG_ShowMsg("mode=%02xh misc=%02xh color-dont-care=%02xh bitmask=%02xh",
+                vga.gfx.mode,               vga.gfx.miscellaneous,  vga.gfx.color_dont_care,
+                vga.gfx.bit_mask);
+        }
+        else if (command == "DAC") {
+            // FIXME: Remove this var, use vga.dac.bits == 8 instead!
+            extern bool vga_8bit_dac;
+
+            DEBUG_ShowMsg("VGA DAC info: bits=%u pel_mask=%02xh pel_index[RGB]=%02xh",
+                vga_8bit_dac ? 8 : 6,//FIXME
+                vga.dac.pel_mask,       vga.dac.pel_index);
+            DEBUG_ShowMsg("state=%02xh write_index=%02xh read_index=%02xh first_changed=%u",
+                vga.dac.state,          vga.dac.write_index,
+                vga.dac.read_index,     (unsigned int)vga.dac.first_changed);
+            DEBUG_ShowMsg("hidac_counter=%u reg02=%02xh",
+                vga.dac.hidac_counter,  vga.dac.reg02);
+        }
+        else if (command == "DACPAL") {
+            std::string cpptmp;
+            char tmp[64];
+
+            DEBUG_BeginPagedContent();
+
+            DEBUG_ShowMsg("VGA DAC palette (RGB):");
+            for (unsigned int i=0;i < 256;i += 8) {
+                sprintf(tmp,"%02x: ",i);
+                cpptmp = tmp;
+
+                for (unsigned int c=0;c < 8;c++) {
+                    sprintf(tmp,"%02x%02x%02x%c",
+                        vga.dac.rgb[i+c].red,
+                        vga.dac.rgb[i+c].green,
+                        vga.dac.rgb[i+c].blue,
+                        c == 3 ? '-' : ' '
+                    );
+                    cpptmp += tmp;
+                }
+
+                DEBUG_ShowMsg("%s",cpptmp.c_str());
+            }
+
+            DEBUG_EndPagedContent();
+        }
+        else if (command == "SEQ") {
+            DEBUG_ShowMsg("VGA Sequencer info: index=%02xh",vga.seq.index);
+            DEBUG_ShowMsg("reset=%02xh clockmode=%02xh map_mask=%02xh charmapsel=%02xh memmode=%02xh",
+                vga.seq.reset,      vga.seq.clocking_mode,      vga.seq.map_mask,
+                vga.seq.character_map_select,                   vga.seq.memory_mode);
+        }
+        else if (command == "AC") {
+            std::string cpptmp;
+            char tmp[64];
+
+            DEBUG_ShowMsg("VGA Attribute Controller info: attrindexmode=%u",vga.internal.attrindex?1:0);
+            DEBUG_ShowMsg("mode_control=%02xh horz-pel-pan=%02xh overscan-color=%02xh",
+                vga.attr.mode_control,  vga.attr.horizontal_pel_panning,
+                vga.attr.overscan_color);
+            DEBUG_ShowMsg("color-plane-en=%02xh color-select=%02xh index=%02xh",
+                vga.attr.color_plane_enable,    vga.attr.color_select,  vga.attr.index);
+            DEBUG_ShowMsg("disabled-by-index=%u disabled-by-idx1-bit5=%u",
+                vga.attr.disabled & 1 ? 1 : 0,
+                vga.attr.disabled & 2 ? 1 : 0);
+
+            cpptmp = " ";
+            for (unsigned int i=0;i < 16;i++) {
+                sprintf(tmp,"%02x%c",vga.attr.palette[i],((i&3) == 3 && i != 15) ? '-' : ' ');
+                cpptmp += tmp;
+            }
+
+            DEBUG_ShowMsg("palette={%s}",cpptmp.c_str());
+        }
+        else if (command == "DRAW") {
+            DEBUG_ShowMsg("VGA draw info: resizing=%u width=%lu height=%lu blocks=%lu",
+                vga.draw.resizing?1:0,(unsigned long)vga.draw.width,(unsigned long)vga.draw.height,(unsigned long)vga.draw.blocks);
+            DEBUG_ShowMsg("address=%lxh panning=%lu bytes-skip=%lu lin-mask=%lx pln-mask=%lx",
+                (unsigned long)vga.draw.address,(unsigned long)vga.draw.panning,(unsigned long)vga.draw.bytes_skip,
+                (unsigned long)vga.draw.linear_mask,(unsigned long)vga.draw.planar_mask);
+            DEBUG_ShowMsg("addr-add=%lxh line-length=%lu addrline-total=%lu addrline=%lu",
+                (unsigned long)vga.draw.address_add,(unsigned long)vga.draw.line_length,
+                (unsigned long)vga.draw.address_line_total,(unsigned long)vga.draw.address_line);
+            DEBUG_ShowMsg("line-total=%lu vblank-skip=%lu lines-done=%lu split-line=%lu",
+                (unsigned long)vga.draw.lines_total,(unsigned long)vga.draw.vblank_skip,
+                (unsigned long)vga.draw.lines_done,(unsigned long)vga.draw.split_line);
+            DEBUG_ShowMsg("byte-pan-shft=%lu render-stop=%lu render-max=%lu scrn-ratio=%.3f",
+                (unsigned long)vga.draw.byte_panning_shift,(unsigned long)vga.draw.render_step,
+                (unsigned long)vga.draw.render_max,(double)vga.draw.screen_ratio);
+            DEBUG_ShowMsg("blinking=%lu blink=%u char9dot=%u has-split=%u vret-trig=%u",
+                (unsigned long)vga.draw.blinking,vga.draw.blink?1:0,
+                vga.draw.char9dot?1:0,vga.draw.has_split?1:0,
+                vga.draw.vret_triggered?1:0);
+            DEBUG_ShowMsg("bpp=%lu curs-addr=%lxh curs-s=%u curs-e=%u curs-c=%u curs-d=%u curs-en=%u",
+                (unsigned long)vga.draw.bpp,
+                (unsigned long)vga.draw.cursor.address,
+                vga.draw.cursor.sline,
+                vga.draw.cursor.eline,
+                vga.draw.cursor.count,
+                vga.draw.cursor.delay,
+                vga.draw.cursor.enabled);
+// TODO: Remove vga.draw.refresh, appears to be unused
+        }
+        else if (command == "MODE") {
+            DEBUG_ShowMsg("VGA mode info:");
+            DEBUG_ShowMsg("mode=%s vref=%.3fHz href=%.3fHz chrclk=%.3fHz dotclk=%.3fHz",
+                mode_texts[vga.mode],1000.0/vga.draw.delay.vtotal,1000.0/vga.draw.delay.htotal,
+                vga.draw.clock,vga.draw.oscclock);
+            DEBUG_ShowMsg("disp-start=%lxh real-start=%lxh retrace=%u scanlen=%lu cursor-start=%lxh",
+                (unsigned long)vga.config.display_start,
+                (unsigned long)vga.config.real_start,
+                vga.config.retrace?1:0,
+                (unsigned long)vga.config.scan_len,
+                (unsigned long)vga.config.cursor_start);
+            DEBUG_ShowMsg("line-compare=%lu chained=%u compat-chain4=%u pel-pan=%u hline-skip=%u",
+                (unsigned long)vga.config.line_compare,
+                vga.config.chained,
+                (unsigned int)vga.config.compatible_chain4,
+                (unsigned int)vga.config.pel_panning,
+                (unsigned int)vga.config.hlines_skip);
+            DEBUG_ShowMsg("byte-skip=%u addr-shift=%u rd-mode=%u wr-mode=%u rdmap-sel=%u",
+                (unsigned int)vga.config.bytes_skip,
+                (unsigned int)vga.config.addr_shift,
+                (unsigned int)vga.config.read_mode,
+                (unsigned int)vga.config.write_mode,
+                (unsigned int)vga.config.read_map_select);
+            DEBUG_ShowMsg("col-dont-care=%u color-compare=%u data-rotate=%u raster-op=%02xh",
+                (unsigned int)vga.config.color_dont_care,
+                (unsigned int)vga.config.color_compare,
+                (unsigned int)vga.config.data_rotate,
+                (unsigned int)vga.config.raster_op);
+            DEBUG_ShowMsg("fbmsk=%x fmmsk=%x fnmmsk=%x fsr=%x fnesr=%x fesr=%x feasr=%x",
+                (unsigned int)vga.config.full_bit_mask,
+                (unsigned int)vga.config.full_map_mask,
+                (unsigned int)vga.config.full_not_map_mask,
+                (unsigned int)vga.config.full_set_reset,
+                (unsigned int)vga.config.full_not_enable_set_reset,
+                (unsigned int)vga.config.full_enable_set_reset,
+                (unsigned int)vga.config.full_enable_and_set_reset);
+        }
+        else {
+            return false;
+        }
+
+        return true;
+   }
+
+    if (command == "PC98") {
+        stream >> command;
+
+        if (!IS_PC98_ARCH) {
+            DEBUG_ShowMsg("PC-98 debugger commands not available except in PC-98 mode");
+            return false;
+        }
+
+        if (command == "MODE") {
+            DEBUG_ShowMsg("Mode info:");
+            DEBUG_ShowMsg("mode=%s vref=%.3fHz href=%.3fHz chrclk=%.3fHz dotclk=%.3fHz",
+                mode_texts[vga.mode],1000.0/vga.draw.delay.vtotal,1000.0/vga.draw.delay.htotal,
+                vga.draw.clock,vga.draw.oscclock);
+        }
+        else if (command == "GRAPHICS") {
+            const auto &gdc = pc98_gdc[GDC_SLAVE];
+            std::string cpptmp;
+
+            cpptmp.clear();
+            if (gdc_analog) {
+                if (pc98_gdc_vramop & (1 << VOPBIT_VGA))
+                    cpptmp += "'256-color packed' ";
+                else
+                    cpptmp += "'16-color planar' ";
+            }
+            else {
+                cpptmp += "'8-color planar' ";
+            }
+
+            if (egc_enable_enable) /* Port 6Ah, 0x06/0x07 to enable EGC enable commands 0x04/0x05 */
+                cpptmp += "EGC-ENABL ";
+            if (pc98_gdc_vramop & (1 << VOPBIT_EGC)) /* Port 6Ah, 0x04/0x05 */
+                cpptmp += "EGC ";
+            if (pc98_gdc_vramop & (2 << VOPBIT_GRCG)) /* Port 7Ch, bits [7:6]. bit 7 (2 << VOPBIT_GRCG) is the enable. */
+                cpptmp += "GRCG ";
+
+            if (gdc.display_enable)
+                cpptmp += "ENABLED ";
+            else
+                cpptmp += "DISABLED ";
+
+            if (gdc.doublescan) {
+                if (pc98_graphics_hide_odd_raster_200line)
+                    cpptmp += "200-LINE-EVEN-SCAN ";
+                else
+                    cpptmp += "DOUBLESCAN ";
+            }
+
+            if (pc98_pegc_linear_framebuffer_enabled())
+                cpptmp += "PEGC-LFB ";
+
+            if (pc98_gdc_vramop & (1 << VOPBIT_PEGC_PLANAR))
+                cpptmp += "256-PLANAR ";
+
+            DEBUG_ShowMsg("PC-98 graphics mode: %s",cpptmp.c_str());
+
+            /*--------------------*/
+
+            cpptmp.clear();
+            DEBUG_ShowMsg("PC-98 page display: cpu=%u display-pending=%u display-active=%u pitch=%u",
+                    (pc98_gdc_vramop & (1 << VOPBIT_ACCESS))?1:0,
+                    GDC_display_plane_pending,
+                    GDC_display_plane,
+                    gdc.display_pitch);
+
+            /*--------------------*/
+
+            cpptmp.clear();
+            DEBUG_ShowMsg("PC-98 status: gdc5mhz=%u vsync-int-trig=%u rowheight=%u lines-drawn=%u",
+                gdc_5mhz_mode,GDC_vsync_interrupt,gdc.row_height,(unsigned int)vga.draw.lines_done);
+            DEBUG_ShowMsg("  cur-row-line=%u cur-scan=0x%x cur-partition=%u/%u part-remline=%u",
+                gdc.row_line,gdc.scan_address,gdc.display_partition,gdc.display_partition_mask+1,gdc.display_partition_rem_lines);
+            DEBUG_ShowMsg("  vram-bound=%uKB",
+                pc98_256kb_boundary?256:128);
+
+            /*--------------------*/
+
+            cpptmp.clear();
+            {
+                char tmp[16];
+                for (unsigned int i=0;i < 16;i++) {
+                    sprintf(tmp,"%02x%c",gdc.param_ram[i],((i&3) == 3 && i != 15) ? '-' : ' ');
+                    cpptmp += tmp;
+                }
+            }
+            DEBUG_ShowMsg("PC-98 GDC PRAM: wptr=%u %s",gdc.param_ram_wptr,cpptmp.c_str());
+
+            /*---------------------*/
+            cpptmp.clear();
+            DEBUG_ShowMsg("PC-98 GRCG: active=%u mode=%s tilecount=%u modereg(7Ch)=%02xh",
+                (pc98_gdc_vramop & (2 << VOPBIT_GRCG))?1:0,
+                (pc98_gdc_vramop & (1 << VOPBIT_GRCG))?"Read/Modify/Write":"TCR/TDW",
+                pc98_gdc_tile_counter,
+                pc98_gdc_modereg);
+
+            /*---------------------*/
+            cpptmp.clear();
+            DEBUG_ShowMsg("PC-98 GRGC tiles: [%02x %02x] [%02x %02x] [%02x %02x] [%02x %02x]",
+                pc98_gdc_tiles[0].b[0],
+                pc98_gdc_tiles[0].b[1],
+                pc98_gdc_tiles[1].b[0],
+                pc98_gdc_tiles[1].b[1],
+                pc98_gdc_tiles[2].b[0],
+                pc98_gdc_tiles[2].b[1],
+                pc98_gdc_tiles[3].b[0],
+                pc98_gdc_tiles[3].b[1]);
+        }
+        else if (command == "TEXT") {
+            const auto &gdc = pc98_gdc[GDC_MASTER];
+            std::string cpptmp;
+
+            cpptmp.clear();
+            if (gdc.display_enable)
+                cpptmp += "ENABLED ";
+            else
+                cpptmp += "DISABLED ";
+
+            if (gdc.doublescan)
+                cpptmp += "DOUBLESCAN ";
+
+            if (pc98_attr4_graphic)
+                cpptmp += "SIMPLE-GRPH ";
+            else
+                cpptmp += "VERT-LINE ";
+
+            DEBUG_ShowMsg("PC-98 text mode: %s",cpptmp.c_str());
+
+            /*--------------------*/
+
+            cpptmp.clear();
+            DEBUG_ShowMsg("PC-98 display/cursor: pitch=%u curs-en=%u curs-blink=%u curs-blinkrate=%u",
+                gdc.display_pitch,
+                gdc.cursor_enable,
+                gdc.cursor_blink,
+                gdc.cursor_blink_rate);
+
+            DEBUG_ShowMsg("  curs-blink-count=%u curs-blink-state=%u/4 crt-mode=%u",
+                gdc.cursor_blink_count,
+                gdc.cursor_blink_state,
+                pc98_crt_mode?1:0);
+
+            /*--------------------*/
+
+            cpptmp.clear();
+            DEBUG_ShowMsg("PC-98 status: gdc5mhz=%u vsync-int-trig=%u rowheight=%u lines-drawn=%u",
+                gdc_5mhz_mode,GDC_vsync_interrupt,gdc.row_height,(unsigned int)vga.draw.lines_done);
+            DEBUG_ShowMsg("  cur-row-line=%u cur-scan=0x%x cur-partition=%u/%u part-remline=%u",
+                gdc.row_line,gdc.scan_address,gdc.display_partition,gdc.display_partition_mask+1,gdc.display_partition_rem_lines);
+
+            /*--------------------*/
+
+            cpptmp.clear();
+            {
+                char tmp[16];
+                for (unsigned int i=0;i < 16;i++) {
+                    sprintf(tmp,"%02x%c",gdc.param_ram[i],((i&3) == 3 && i != 15) ? '-' : ' ');
+                    cpptmp += tmp;
+                }
+            }
+            DEBUG_ShowMsg("PC-98 GDC PRAM: wptr=%u %s",gdc.param_ram_wptr,cpptmp.c_str());
+
+            /*--------------------*/
+
+            DEBUG_ShowMsg("PC-98 CG raster: row-scan=[start=%u/32 end-incl=%u/32] blank-at-in-charcell=%u/32",
+                    pc98_text_first_row_scanline_start,
+                    pc98_text_first_row_scanline_end,
+                    pc98_text_row_scanline_blank_at);
+
+            DEBUG_ShowMsg("PC-98 CG scrollregion: countstart=%u char-rows=%u lines=%u",
+                    pc98_text_row_scroll_count_start,
+                    pc98_text_row_scroll_num_lines,
+                    pc98_text_row_scroll_lines);
+        }
+        else if (command == "CGIO") {
+            DEBUG_ShowMsg("PC-98 CG I/O port state (A1h-A9h odd): char-row=%u char-code=0x%04x",
+                    a1_font_char_offset,
+                    a1_font_load_addr);
+        }
+        else if (command == "EGC") {
+            DEBUG_ShowMsg("PC-98 EGC Raw registers:");
+            DEBUG_ShowMsg("  4A0h even: %04xh %04xh %04xh %04xh",
+                pc98_egc_raw_values[0],
+                pc98_egc_raw_values[1],
+                pc98_egc_raw_values[2],
+                pc98_egc_raw_values[3]);
+            DEBUG_ShowMsg("  4A8h even: %04xh %04xh %04xh %04xh bitplane-access=%02xh",
+                pc98_egc_raw_values[4],
+                pc98_egc_raw_values[5],
+                pc98_egc_raw_values[6],
+                pc98_egc_raw_values[7],
+                pc98_egc_access);
+            DEBUG_ShowMsg("  bg-color=%02xh bgcm=[%02xh %02xh] [%02xh %02xh] [%02xh %02xh] [%02xh %02xh]",
+                pc98_egc_background_color,
+                pc98_egc_bgcm[0].b[0],
+                pc98_egc_bgcm[0].b[1],
+                pc98_egc_bgcm[1].b[0],
+                pc98_egc_bgcm[1].b[1],
+                pc98_egc_bgcm[2].b[0],
+                pc98_egc_bgcm[2].b[1],
+                pc98_egc_bgcm[3].b[0],
+                pc98_egc_bgcm[3].b[1]);
+            DEBUG_ShowMsg("  fg-color=%02xh fgcm=[%02xh %02xh] [%02xh %02xh] [%02xh %02xh] [%02xh %02xh]",
+                pc98_egc_foreground_color,
+                pc98_egc_fgcm[0].b[0],
+                pc98_egc_fgcm[0].b[1],
+                pc98_egc_fgcm[1].b[0],
+                pc98_egc_fgcm[1].b[1],
+                pc98_egc_fgcm[2].b[0],
+                pc98_egc_fgcm[2].b[1],
+                pc98_egc_fgcm[3].b[0],
+                pc98_egc_fgcm[3].b[1]);
+            DEBUG_ShowMsg("  fgc-select=%d=%s lead-plane=%u srcmask=[%02xh %02xh]",
+                pc98_egc_fgc,
+                egc_fgc_modes[pc98_egc_fgc],
+                pc98_egc_lead_plane,
+                pc98_egc_srcmask[0],pc98_egc_srcmask[1]);
+            DEBUG_ShowMsg("  mask=[%02xh %02xh] mask-effective=[%02xh %02xh] ROP=%02xh",
+                pc98_egc_mask[0],pc98_egc_mask[1],
+                pc98_egc_maskef[0],pc98_egc_maskef[1],
+                pc98_egc_rop);
+            DEBUG_ShowMsg("  compare-lead-plane=%u lightsource=%u shiftinput=%u regload=%u",
+                pc98_egc_compare_lead,
+                pc98_egc_lightsource,
+                pc98_egc_shiftinput,
+                pc98_egc_regload);
+            DEBUG_ShowMsg("  shift-desc=%u shf-destbit=%u shf-srcbit=%u shf-length=%u",
+                pc98_egc_shift_descend,
+                pc98_egc_shift_destbit,
+                pc98_egc_shift_srcbit,
+                pc98_egc_shift_length);
+            DEBUG_ShowMsg("  %s",
+                pc98_egc_shift_debug_status().c_str());
+        }
+        else {
+            return false;
+        }
+
+        return true;
+    }
+
+    if (command == "EMU") {
+        stream >> command;
+
+        if (command == "MEM") LogEMUMem();
+        else if (command == "MACHINE") LogEMUMachine();
+        else return false;
 
         return true;
     }
@@ -1604,6 +2390,48 @@ bool ParseCommand(char* str) {
         return true;
     }
 
+    if (command == "INP" || command == "INB") {
+        Bit16u port = (Bit16u)GetHexValue(found,found);
+        Bit8u r = IO_ReadB(port);
+        DEBUG_ShowMsg("Result: %x",(unsigned int)r);
+        return true;
+    }
+
+    if (command == "INW") {
+        Bit16u port = (Bit16u)GetHexValue(found,found);
+        Bit16u r = IO_ReadW(port);
+        DEBUG_ShowMsg("Result: %x",(unsigned int)r);
+        return true;
+    }
+
+    if (command == "IND") {
+        Bit16u port = (Bit16u)GetHexValue(found,found);
+        Bit32u r = IO_ReadD(port);
+        DEBUG_ShowMsg("Result: %x",(unsigned int)r);
+        return true;
+    }
+
+    if (command == "OUTP" || command == "OUTB") {
+        Bit16u port = (Bit16u)GetHexValue(found,found);
+        Bit8u r = (Bit8u)GetHexValue(found,found);
+        IO_WriteB(port,r);
+        return true;
+    }
+
+    if (command == "OUTW") {
+        Bit16u port = (Bit16u)GetHexValue(found,found);
+        Bit16u r = (Bit16u)GetHexValue(found,found);
+        IO_WriteW(port,r);
+        return true;
+    }
+
+    if (command == "OUTD") {
+        Bit16u port = (Bit16u)GetHexValue(found,found);
+        Bit32u r = (Bit32u)GetHexValue(found,found);
+        IO_WriteD(port,r);
+        return true;
+    }
+
 	if (command == "GDT") {LogGDT(); return true;}
 	
 	if (command == "LDT") {LogLDT(); return true;}
@@ -1613,6 +2441,8 @@ bool ParseCommand(char* str) {
 	if (command == "PAGING") {LogPages(found); return true;}
 
 	if (command == "CPU") {LogCPUInfo(); return true;}
+
+	if (command == "FPU") {LogFPUInfo(); return true;}
 
 	if (command == "INTVEC") {
 		if (found[0] != 0) {
@@ -1625,8 +2455,20 @@ bool ParseCommand(char* str) {
 		if (found[0] != 0) {
 			Bit8u intNr = (Bit8u)GetHexValue(found,found);
 			DEBUG_ShowMsg("DEBUG: Set code overview to interrupt handler %X\n",intNr);
-			codeViewData.useCS	= mem_readw(intNr*4u+2u);
-			codeViewData.useEIP = mem_readw(intNr*4u);
+            if (cpu.pmode) {
+                Descriptor gate;
+                if (cpu.idt.GetDescriptor((Bitu)intNr<<3u,gate)) {
+                    codeViewData.useCS	= (Bit16u)gate.GetSelector();
+                    codeViewData.useEIP = (Bit32u)gate.GetOffset();
+                }
+                else {
+                    DEBUG_ShowMsg("INTHAND unable to retrieve vector");
+                }
+            }
+            else {
+                codeViewData.useCS	= mem_readw(intNr*4u+2u);
+                codeViewData.useEIP = mem_readw(intNr*4u);
+            }
 			codeViewData.cursorPos = 0;
 			return true;
 		}
@@ -1661,21 +2503,11 @@ bool ParseCommand(char* str) {
 	if (command == "HELP" || command == "?") {
         DEBUG_BeginPagedContent();
 		DEBUG_ShowMsg("Debugger commands (enter all values in hex or as register):\n");
-		DEBUG_ShowMsg("--------------------------------------------------------------------------\n");
-		DEBUG_ShowMsg("F3/F6                     - Previous command in history.\n");
-		DEBUG_ShowMsg("F4/F7                     - Next command in history.\n");
-		DEBUG_ShowMsg("F5                        - Run.\n");
-		DEBUG_ShowMsg("F9                        - Set/Remove breakpoint.\n");
-		DEBUG_ShowMsg("F10/F11                   - Step over / trace into instruction.\n");
-		DEBUG_ShowMsg("ALT + D/E/S/X/B           - Set data view to DS:SI/ES:DI/SS:SP/DS:DX/ES:BX.\n");
-		DEBUG_ShowMsg("Escape                    - Clear input line.");
-		DEBUG_ShowMsg("Up/Down                   - Scroll up/down in the current window.\n");
-		DEBUG_ShowMsg("Page Up/Down              - Page up/down in the current window.\n");
-		DEBUG_ShowMsg("Home/End                  - Move to begin/end of the current window.\n");
-        DEBUG_ShowMsg("TAB                       - Select next window\n");
+		DEBUG_ShowMsg("Commands------------------------------------------------\n");
 		DEBUG_ShowMsg("BP     [segment]:[offset] - Set breakpoint.\n");
 		DEBUG_ShowMsg("BPINT  [intNr] *          - Set interrupt breakpoint.\n");
-		DEBUG_ShowMsg("BPINT  [intNr] [ah]       - Set interrupt breakpoint with ah.\n");
+		DEBUG_ShowMsg("BPINT  [intNr] [ah] *     - Set interrupt breakpoint with ah.\n");
+		DEBUG_ShowMsg("BPINT  [intNr] [ah] [al]  - Set interrupt breakpoint with ah and al.\n");
 #if C_HEAVY_DEBUG
 		DEBUG_ShowMsg("BPM    [segment]:[offset] - Set memory breakpoint (memory change).\n");
 		DEBUG_ShowMsg("BPPM   [selector]:[offset]- Set pmode-memory breakpoint (memory change).\n");
@@ -1690,14 +2522,17 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("LOG [num]                 - Write cpu log file.\n");
 		DEBUG_ShowMsg("LOGS/LOGL [num]           - Write short/long cpu log file.\n");
 		DEBUG_ShowMsg("HEAVYLOG                  - Enable/Disable automatic cpu log when dosbox exits.\n");
-		DEBUG_ShowMsg("ZEROPROTECT               - Enable/Disable zero code execution detecion.\n");
+		DEBUG_ShowMsg("ZEROPROTECT               - Enable/Disable zero code execution detection.\n");
 #endif
-		DEBUG_ShowMsg("SR [reg] [value]          - Set register value.\n");
-		DEBUG_ShowMsg("SM [seg]:[off] [val] [.]..- Set memory with following values.\n");	
+		DEBUG_ShowMsg("SR [reg] [value]          - Set register value. Multiple pairs allowed.\n");
+		DEBUG_ShowMsg("SM [seg]:[off] [val] [.]..- Set memory with following values.\n");
+        DEBUG_ShowMsg("EV [value [value] ...]    - Show register value(s).\n");
 	
 		DEBUG_ShowMsg("IV [seg]:[off] [name]     - Create var name for memory address.\n");
 		DEBUG_ShowMsg("SV [filename]             - Save var list in file.\n");
 		DEBUG_ShowMsg("LV [filename]             - Load var list from file.\n");
+		
+		DEBUG_ShowMsg("ADDLOG [message]          - Add message to the log file.\n");
 
 		DEBUG_ShowMsg("MEMDUMP [seg]:[off] [len] - Write memory to file memdump.txt.\n");
 		DEBUG_ShowMsg("MEMDUMPBIN [s]:[o] [len]  - Write memory to file memdump.bin.\n");
@@ -1714,7 +2549,22 @@ bool ParseCommand(char* str) {
 		DEBUG_ShowMsg("EXTEND                    - Toggle additional info.\n");
 		DEBUG_ShowMsg("TIMERIRQ                  - Run the system timer.\n");
 
+        DEBUG_ShowMsg("IN[P|W|D] [port]          - I/O port read byte/word/dword.\n");
+        DEBUG_ShowMsg("OUT[P|W|D] [port] [data]  - I/O port write byte/word/dword.\n");
+
 		DEBUG_ShowMsg("HELP                      - Help\n");
+		DEBUG_ShowMsg("Keys------------------------------------------------\n");
+		DEBUG_ShowMsg("F3/F6                     - Previous command in history.\n");
+		DEBUG_ShowMsg("F4/F7                     - Next command in history.\n");
+		DEBUG_ShowMsg("F5                        - Run.\n");
+		DEBUG_ShowMsg("F9                        - Set/Remove breakpoint.\n");
+		DEBUG_ShowMsg("F10/F11                   - Step over / trace into instruction.\n");
+		DEBUG_ShowMsg("ALT + D/E/S/X/B           - Set data view to DS:SI/ES:DI/SS:SP/DS:DX/ES:BX.\n");
+		DEBUG_ShowMsg("Escape                    - Clear input line.");
+		DEBUG_ShowMsg("Up/Down                   - Scroll up/down in the current window.\n");
+		DEBUG_ShowMsg("Page Up/Down              - Page up/down in the current window.\n");
+		DEBUG_ShowMsg("Home/End                  - Move to begin/end of the current window.\n");
+        DEBUG_ShowMsg("TAB                       - Select next window\n");
         DEBUG_EndPagedContent();
 		
 		return true;
@@ -1790,7 +2640,7 @@ char* AnalyzeInstruction(char* inst, bool saveSelector) {
 		// Variable found ?
 		CDebugVar* var = CDebugVar::FindVar(address);
 		if (var) {
-			// Replace occurence
+			// Replace occurrence
 			char* pos1 = strchr(inst,'[');
 			char* pos2 = strchr(inst,']');
 			if (pos1 && pos2) {
@@ -1955,6 +2805,8 @@ void win_code_ui_up(int count) {
 
 Bit32u DEBUG_CheckKeys(void) {
 	Bits ret=0;
+	bool numberrun = false;
+	bool skipDraw = false;
 	int key=getch();
 
 	/* FIXME: This is supported by PDcurses, except I cannot figure out how to trigger it.
@@ -1965,8 +2817,27 @@ Bit32u DEBUG_CheckKeys(void) {
         DEBUG_DrawScreen();
         return 0;
     }
+	
+	if (key >='1' && key <='5' && strlen(codeViewData.inputStr) == 0) {
+		const Bit32s v[] ={5,500,1000,5000,10000};
+		CPU_Cycles= v[key - '1'];
 
-	if (key>0) {
+		skipFirstInstruction = true;
+
+		ret = (*cpudecoder)();
+		SetCodeWinStart();
+
+		/* Setup variables so we end up at the proper ret processing */
+		numberrun = true;
+
+		// Don't redraw the screen if it's going to get redrawn immediately
+		// afterwards, to avoid resetting oldregs.
+		if (ret == (Bits)debugCallback)
+			skipDraw = true;
+		key = -1;
+	}
+
+	if (key>0 || numberrun) {
 #if defined(WIN32) && defined(__PDCURSES__)
 		switch (key) {
 		case PADENTER:	key=0x0A;	break;
@@ -2177,7 +3048,7 @@ Bit32u DEBUG_CheckKeys(void) {
 		case KEY_F(5):	// Run Program
                 DrawRegistersUpdateOld();
 				debugging=false;
-
+				DrawCode(); // update code window to show "running" status
                 logBuffSuppressConsole = false;
                 if (logBuffSuppressConsoleNeedUpdate) {
                     logBuffSuppressConsoleNeedUpdate = false;
@@ -2189,35 +3060,47 @@ Bit32u DEBUG_CheckKeys(void) {
                 if (cpudecoder == DEBUG_NullCPUCore)
                     ret = -1; /* DEBUG_Loop() must exit */
 
-				CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip,true);						
-				ignoreAddressOnce = SegPhys(cs)+reg_eip;
 				mainMenu.get_item("mapper_debugger").check(false).refresh_item(mainMenu);
-				DOSBOX_SetNormalLoop();	
+
+				skipFirstInstruction = true; // for heavy debugger
+				CPU_Cycles = 1;
+				ret=(*cpudecoder)();
+
+				// ensure all breakpoints are activated
+				CBreakpoint::ActivateBreakpoints();
+
+				skipDraw = true; // don't update screen after this instruction
+
+				DOSBOX_SetNormalLoop();
 				break;
 		case KEY_F(9):	// Set/Remove Breakpoint
-				{	PhysPt ptr = (PhysPt)GetAddress(codeViewData.cursorSeg,codeViewData.cursorOfs);
-					if (CBreakpoint::IsBreakpoint(ptr)) {
-						CBreakpoint::DeleteBreakpoint(ptr);
+				if (CBreakpoint::IsBreakpoint(codeViewData.cursorSeg, codeViewData.cursorOfs)) {
+					if (CBreakpoint::DeleteBreakpoint(codeViewData.cursorSeg, codeViewData.cursorOfs))
 						DEBUG_ShowMsg("DEBUG: Breakpoint deletion success.\n");
-					}
-					else {
-						CBreakpoint::AddBreakpoint(codeViewData.cursorSeg, codeViewData.cursorOfs, false);
-						DEBUG_ShowMsg("DEBUG: Set breakpoint at %04X:%04X\n",codeViewData.cursorSeg,codeViewData.cursorOfs);
-					}
+					else
+						DEBUG_ShowMsg("DEBUG: Failed to delete breakpoint.\n");
+				}
+				else {
+					CBreakpoint::AddBreakpoint(codeViewData.cursorSeg, codeViewData.cursorOfs, false);
+					DEBUG_ShowMsg("DEBUG: Set breakpoint at %04X:%04X\n",codeViewData.cursorSeg,codeViewData.cursorOfs);
 				}
 				break;
 		case KEY_F(10):	// Step over inst
                 DrawRegistersUpdateOld();
-				if (StepOver()) return 0;
-				else {
-					exitLoop = false;
+				if (StepOver()) {
 					skipFirstInstruction = true; // for heavy debugger
 					CPU_Cycles = 1;
 					ret=(*cpudecoder)();
-					SetCodeWinStart();
-					CBreakpoint::ignoreOnce = 0;
+
+					DOSBOX_SetNormalLoop();
+
+					// ensure all breakpoints are activated
+					CBreakpoint::ActivateBreakpoints();
+					skipDraw = true;
+					break;
 				}
-				break;
+				// If we aren't stepping over something, do a normal step.
+				// NB: Fall-through
 		case KEY_F(11):	// trace into
                 DrawRegistersUpdateOld();
 				exitLoop = false;
@@ -2225,24 +3108,26 @@ Bit32u DEBUG_CheckKeys(void) {
 				CPU_Cycles = 1;
 				ret = (*cpudecoder)();
 				SetCodeWinStart();
-				CBreakpoint::ignoreOnce = 0;
 				break;
         case 0x09: //TAB
                 void DBGUI_NextWindow(void);
                 DBGUI_NextWindow();
                 break;
 		case 0x0A: //Parse typed Command
-				codeViewData.inputStr[MAXCMDLEN] = '\0';
-				if(ParseCommand(codeViewData.inputStr)) {
-					char* cmd = ltrim(codeViewData.inputStr);
-					if (histBuff.empty() || *--histBuff.end()!=cmd)
-						histBuff.push_back(cmd);
-					if (histBuff.size() > MAX_HIST_BUFFER) histBuff.pop_front();
-					histBuffPos = histBuff.end();
-					ClearInputLine();
-				} else { 
-					codeViewData.inputPos = (int)strlen(codeViewData.inputStr);
-				} 
+                if (codeViewData.inputPos > 0) {
+                    codeViewData.inputStr[MAXCMDLEN] = '\0';
+                    if(ParseCommand(codeViewData.inputStr)) {
+                        char* cmd = ltrim(codeViewData.inputStr);
+                        if (histBuff.empty() || *--histBuff.end()!=cmd)
+                            histBuff.push_back(cmd);
+                        if (histBuff.size() > MAX_HIST_BUFFER) histBuff.pop_front();
+                        histBuffPos = histBuff.end();
+                        ClearInputLine();
+                    } else {
+                        DEBUG_ShowMsg("*** Debugger command not recognized");
+                        codeViewData.inputPos = (int)strlen(codeViewData.inputStr);
+                    }
+                }
 				break;
 		case KEY_BACKSPACE: //backspace (linux)
 		case 0x7f:	// backspace in some terminal emulators (linux)
@@ -2279,22 +3164,23 @@ Bit32u DEBUG_CheckKeys(void) {
 				}
 				break;
 		}
-		if (ret<0) return ret;
+		if (ret<0) return (Bit32u)ret;
 		if (ret>0) {
-			if (GCC_UNLIKELY(ret >= CB_MAX)) 
+			if (GCC_UNLIKELY(ret >= (Bits)CB_MAX)) 
 				ret = 0;
 			else
 				ret = (Bits)(*CallBack_Handlers[ret])();
 			if (ret) {
 				exitLoop=true;
 				CPU_Cycles=CPU_CycleLeft=0;
-				return ret;
+				return (Bit32u)ret;
 			}
 		}
 		ret=0;
-		DEBUG_DrawScreen();
+		if (!skipDraw)
+			DEBUG_DrawScreen();
 	}
-	return ret;
+	return (Bit32u)ret;
 }
 
 Bitu DEBUG_LastRunningUpdate = 0;
@@ -2343,7 +3229,7 @@ Bitu DEBUG_Loop(void) {
         SDL_Delay(1);
         if ((oldCS!=SegValue(cs)) || (oldEIP!=reg_eip)) {
             CBreakpoint::AddBreakpoint(oldCS,oldEIP,true);
-            CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip,true);
+            CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
             debugging=false;
 
             logBuffSuppressConsole = false;
@@ -2360,12 +3246,14 @@ Bitu DEBUG_Loop(void) {
 
         /* between DEBUG_Enable and DEBUG_Loop CS:EIP can change */
         if (check_rescroll) {
-            Bitu ocs,oip,ocr;
+            Bit16u ocs;
+            Bit32u oip;
+            int ocr;
 
             check_rescroll = false;
             ocs = codeViewData.useCS;
             oip = codeViewData.useEIP;
-            ocr = (Bitu)codeViewData.cursorPos;
+            ocr = codeViewData.cursorPos;
             SetCodeWinStart();
             if (ocs != codeViewData.useCS ||
                     oip != codeViewData.useEIP) {
@@ -2451,7 +3339,8 @@ static void LogMCBChain(Bit16u mcb_segment) {
 	DOS_MCB mcb(mcb_segment);
 	char filename[9]; // 8 characters plus a terminating NUL
 	const char *psp_seg_note;
-	PhysPt dataAddr = PhysMake(dataSeg,dataOfs);// location being viewed in the "Data Overview"
+	Bit16u DOS_dataOfs = static_cast<Bit16u>(dataOfs); //Realmode addressing only
+	PhysPt dataAddr = PhysMake(dataSeg,DOS_dataOfs);// location being viewed in the "Data Overview"
 
 	// loop forever, breaking out of the loop once we've processed the last MCB
 	while (true) {
@@ -2481,7 +3370,7 @@ static void LogMCBChain(Bit16u mcb_segment) {
 		PhysPt mcbStartAddr = PhysMake(mcb_segment+1,0);
 		PhysPt mcbEndAddr = PhysMake(mcb_segment+1+mcb.GetSize(),0);
 		if (dataAddr >= mcbStartAddr && dataAddr < mcbEndAddr) {
-			LOG(LOG_MISC,LOG_ERROR)("   (data addr %04hX:%04X is %u bytes past this MCB)",dataSeg,dataOfs,dataAddr - mcbStartAddr);
+			LOG(LOG_MISC,LOG_ERROR)("   (data addr %04hX:%04X is %u bytes past this MCB)",dataSeg,DOS_dataOfs,dataAddr - mcbStartAddr);
 		}
 
 		// if we've just processed the last MCB in the chain, break out of the loop
@@ -2525,9 +3414,18 @@ const char *EMS_Type_String(void);
 Bitu EMS_Max_Handles(void);
 bool EMS_Active(void);
 
+static void LogFNKEY(void) {
+    DEBUG_BeginPagedContent();
+
+    void DEBUG_INTDC_FnKeyMapInfo(void);
+    DEBUG_INTDC_FnKeyMapInfo();
+
+    DEBUG_EndPagedContent();
+}
+
 static void LogEMS(void) {
     Bitu h_size;
-    PhysPt h_addr;
+    PhysPt xh_addr;
     std::string h_name;
 
     if (dos_kernel_disabled) {
@@ -2545,16 +3443,16 @@ static void LogEMS(void) {
     LOG(LOG_MISC,LOG_ERROR)("EMS memory (type %s) handles:",EMS_Type_String());
     LOG(LOG_MISC,LOG_ERROR)("Handle Address  Size (bytes)    Name");
     for (Bitu h=0;h < EMS_Max_Handles();h++) {
-        if (EMS_GetHandle(/*&*/h_size,/*&*/h_addr,/*&*/h_name,h)) {
+        if (EMS_GetHandle(/*&*/h_size,/*&*/xh_addr,/*&*/h_name,h)) {
             LOG(LOG_MISC,LOG_ERROR)("%6lu %08lx %08lx %s",
                 (unsigned long)h,
-                (unsigned long)h_addr,
+                (unsigned long)xh_addr,
                 (unsigned long)h_size,
                 h_name.c_str());
         }
     }
 
-    bool EMS_GetMapping(Bitu &handle,Bitu &log_page,Bitu ems_page);
+    bool EMS_GetMapping(Bitu &handle,Bit16u &log_page,Bitu ems_page);
     Bitu GetEMSPageFrameSegment(void);
     Bitu GetEMSPageFrameSize(void);
 
@@ -2564,20 +3462,21 @@ static void LogEMS(void) {
     LOG(LOG_MISC,LOG_ERROR)("Handle Page(p/l) Address");
 
     for (Bitu p=0;p < (GetEMSPageFrameSize() >> 14UL);p++) {
-        Bitu log_page,handle;
+        Bit16u log_page;
+        Bitu handle;
 
         if (EMS_GetMapping(handle,log_page,p)) {
             char tmp[192] = {0};
 
-            h_addr = 0;
+            xh_addr = 0;
             h_size = 0;
             h_name.clear();
-            EMS_GetHandle(/*&*/h_size,/*&*/h_addr,/*&*/h_name,handle);
+            EMS_GetHandle(/*&*/h_size,/*&*/xh_addr,/*&*/h_name,handle);
 
-            if (h_addr != 0)
+            if (xh_addr != 0)
                 sprintf(tmp," virt -> %08lx-%08lx phys",
-                    (unsigned long)h_addr + (log_page << 14UL),
-                    (unsigned long)h_addr + (log_page << 14UL) + (1 << 14UL) - 1);
+                    (unsigned long)(xh_addr + ((PhysPt)log_page << 14u)),
+                    (unsigned long)(xh_addr + ((PhysPt)log_page << 14u) + (1u << 14u) - 1u));
 
             LOG(LOG_MISC,LOG_ERROR)("%6lu %4lu/%4lu %08lx-%08lx%s",(unsigned long)handle,
                 (unsigned long)p,(unsigned long)log_page,
@@ -2657,8 +3556,31 @@ static void LogDOSKernMem(void) {
 static void LogMCBS(void)
 {
     if (dos_kernel_disabled) {
-        LOG(LOG_MISC,LOG_ERROR)("Cannot enumerate MCB list while DOS kernel is inactive.");
-        return;
+        if (boothax == BOOTHAX_MSDOS) {
+            if (guest_msdos_LoL == 0 || guest_msdos_mcb_chain == 0) {
+                LOG(LOG_MISC,LOG_ERROR)("Cannot enumerate MCB list while DOS kernel is inactive, and DOSBox-X has not yet determined the MCB list of the guest MS-DOS operating system");
+                return;
+            }
+
+            DEBUG_BeginPagedContent();
+
+            try {
+                LOG(LOG_MISC,LOG_ERROR)("MCB Seg  Size (bytes)  PSP Seg (notes)  Filename");
+                LOG(LOG_MISC,LOG_ERROR)("Conventional memory:");
+                LogMCBChain(guest_msdos_mcb_chain);
+            }
+            catch (GuestPageFaultException &pf) {
+                (void)pf;//unused
+                LOG(LOG_MISC,LOG_ERROR)("(Enumeration caused page fault within the guest)");
+            }
+
+            DEBUG_EndPagedContent();
+            return;
+        }
+        else {
+            LOG(LOG_MISC,LOG_ERROR)("Cannot enumerate MCB list while DOS kernel is inactive.");
+            return;
+        }
     }
 
     DEBUG_BeginPagedContent();
@@ -2681,7 +3603,7 @@ static void LogGDT(void)
 	Descriptor desc;
 	Bitu length = cpu.gdt.GetLimit();
 	PhysPt address = cpu.gdt.GetBase();
-	PhysPt max	   = address + length;
+	PhysPt max	   = (PhysPt)(address + length);
 	Bitu i = 0;
 
     DEBUG_BeginPagedContent();
@@ -2706,7 +3628,7 @@ static void LogLDT(void) {
 	if (!cpu.gdt.GetDescriptor(ldtSelector,desc)) return;
 	Bitu length = desc.GetLimit();
 	PhysPt address = desc.GetBase();
-	PhysPt max	   = address + length;
+	PhysPt max	   = (PhysPt)(address + length);
 	Bitu i = 0;
 
     DEBUG_BeginPagedContent();
@@ -2751,12 +3673,12 @@ void LogPages(char* selname) {
 		Bitu sel = GetHexValue(selname,selname);
 		if ((sel==0x00) && ((*selname==0) || (*selname=='*'))) {
 			for (unsigned int i=0; i<0xfffff; i++) {
-				Bitu table_addr=((Bitu)paging.base.page<<12u)+(i >> 10u)*4u;
+				Bitu table_addr=((Bitu)paging.base.page<<12u)+(i >> 10u)*(Bitu)4u;
 				X86PageEntry table;
-				table.load=phys_readd(table_addr);
+				table.load=phys_readd((PhysPt)table_addr);
 				if (table.block.p) {
 					X86PageEntry entry;
-					Bitu entry_addr=((Bitu)table.block.base<<12u)+(i & 0x3ffu)*4u;
+                    PhysPt entry_addr=((PhysPt)table.block.base<<12u)+(i & 0x3ffu)* 4u;
 					entry.load=phys_readd(entry_addr);
 					if (entry.block.p) {
 						sprintf(out1,"page %05Xxxx -> %04Xxxx  flags [uw] %x:%x::%x:%x [d=%x|a=%x]",
@@ -2769,11 +3691,11 @@ void LogPages(char* selname) {
 		} else {
 			Bitu table_addr=(paging.base.page<<12u)+(sel >> 10u)*4u;
 			X86PageEntry table;
-			table.load=phys_readd(table_addr);
+			table.load=phys_readd((PhysPt)table_addr);
 			if (table.block.p) {
 				X86PageEntry entry;
 				Bitu entry_addr=((Bitu)table.block.base<<12u)+(sel & 0x3ffu)*4u;
-				entry.load=phys_readd(entry_addr);
+				entry.load=phys_readd((PhysPt)entry_addr);
 				sprintf(out1,"page %05lXxxx -> %04lXxxx  flags [puw] %x:%x::%x:%x::%x:%x",
 					(unsigned long)sel,
 					(unsigned long)entry.block.base,
@@ -2789,6 +3711,35 @@ void LogPages(char* selname) {
 			}
 		}
 	}
+
+    DEBUG_EndPagedContent();
+}
+
+const char *FPU_tag(unsigned int i) {
+    switch (i) {
+        case TAG_Valid: return "Valid";
+        case TAG_Zero:  return "Zero";
+        case TAG_Weird: return "Weird";
+        case TAG_Empty: return "Empty";
+    };
+
+    return "?";
+}
+
+static void LogFPUInfo(void) {
+    DEBUG_BeginPagedContent();
+
+    LOG(LOG_MISC,LOG_ERROR)("FPU TOP=%u",(unsigned int)fpu.top);
+
+    for (unsigned int i=0;i < 8;i++) {
+        unsigned int adj = STV(i);
+
+#if defined(HAS_LONG_DOUBLE)//probably shouldn't allow struct to change size based on this
+        LOG(LOG_MISC,LOG_ERROR)(" st(%u): %s val=%.9f",i,FPU_tag(fpu.tags[adj]),(double)fpu.regs_80[adj].v);
+#else
+        LOG(LOG_MISC,LOG_ERROR)(" st(%u): %s use80=%u val=%.9f",i,FPU_tag(fpu.tags[adj]),fpu.use80[adj],fpu.regs[adj].d);
+#endif
+    }
 
     DEBUG_EndPagedContent();
 }
@@ -2838,7 +3789,7 @@ static void LogCPUInfo(void) {
 static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
 	static char empty[23] = { 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,0 };
 
-	PhysPt start = GetAddress(segValue,eipValue);
+	PhysPt start = (PhysPt)GetAddress(segValue,eipValue);
 	char dline[200];Bitu size;
 	size = DasmI386(dline, start, reg_eip, cpu.code.big);
 	char* res = empty;
@@ -2861,7 +3812,7 @@ static void LogInstruction(Bit16u segValue, Bit32u eipValue,  ofstream& out) {
 		char ibytes[200]="";	char tmpc[200];
 		for (Bitu i=0; i<size; i++) {
 			Bit8u value;
-			if (mem_readb_checked(start+i,&value)) sprintf(tmpc,"%s","?? ");
+			if (mem_readb_checked((PhysPt)(start+i),&value)) sprintf(tmpc,"%s","?? ");
 			else sprintf(tmpc,"%02X ",value);
 			strcat(ibytes,tmpc);
 		}
@@ -2931,17 +3882,10 @@ public:
 		Bit16u oldss	= SegValue(ss);
 		Bit32u oldesp	= reg_esp;
 
-		// Workaround : Allocate Stack Space
-		Bit16u segment;
-		Bit16u size = 0x200 / 0x10;
-		if (DOS_AllocateMemory(&segment,&size)) {
-			SegSet16(ss,segment);
-			reg_sp = 0x200;
-			// Start shell
-			DOS_Shell shell;
-			shell.Execute(filename,args);
-			DOS_FreeMemory(segment);
-		}
+		// Start shell
+		DOS_Shell shell;
+		shell.Execute(filename,args);
+
 		// set old reg values
 		SegSet16(ss,oldss);
 		reg_esp = oldesp;
@@ -2963,14 +3907,14 @@ void DEBUG_CheckExecuteBreakpoint(Bit16u seg, Bit32u off)
 #if C_DEBUG
     if (debugger_break_on_exec) {
 		CBreakpoint::AddBreakpoint(seg,off,true);		
-		CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip,true);	
+		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
         debugger_break_on_exec = false;
     }
 #endif
 #if 0
 	if (pDebugcom && pDebugcom->IsActive()) {
 		CBreakpoint::AddBreakpoint(seg,off,true);		
-		CBreakpoint::ActivateBreakpoints(SegPhys(cs)+reg_eip,true);	
+		CBreakpoint::ActivateBreakpointsExceptAt(SegPhys(cs)+reg_eip);
 		pDebugcom = 0;
 	};
 #endif
@@ -2991,6 +3935,8 @@ void DBGBlock::set_data_view(unsigned int view) {
 
     if (data_view != view) {
         data_view  = view;
+
+        if (win_data) wclear(win_data);
 
         switch (view) {
             case DATV_SEGMENTED:
@@ -3102,7 +4048,7 @@ void CDebugVar::InsertVariable(char* name, PhysPt adr)
 
 void CDebugVar::DeleteAll(void) 
 {
-	std::list<CDebugVar*>::iterator i;
+	std::vector<CDebugVar*>::iterator i;
 	CDebugVar* bp;
 	for(i=varList.begin(); i != varList.end(); i++) {
 		bp = static_cast<CDebugVar*>(*i);
@@ -3113,17 +4059,19 @@ void CDebugVar::DeleteAll(void)
 
 CDebugVar* CDebugVar::FindVar(PhysPt pt)
 {
-	std::list<CDebugVar*>::iterator i;
+	if (varList.empty()) return 0;
+
+	std::vector<CDebugVar*>::size_type s = varList.size();
 	CDebugVar* bp;
-	for(i=varList.begin(); i != varList.end(); i++) {
-		bp = static_cast<CDebugVar*>(*i);
-		if (bp->GetAdr()==pt) return bp;
+	for(std::vector<CDebugVar*>::size_type i = 0; i != s; i++) {
+		bp = static_cast<CDebugVar*>(varList[i]);
+		if (bp->GetAdr() == pt) return bp;
 	}
 	return 0;
 }
 
 bool CDebugVar::SaveVars(char* name) {
-	if (varList.size()>65535) return false;
+	if (varList.size() > 65535) return false;
 
 	FILE* f = fopen(name,"wb+");
 	if (!f) return false;
@@ -3132,7 +4080,7 @@ bool CDebugVar::SaveVars(char* name) {
 	Bit16u num = (Bit16u)varList.size();
 	fwrite(&num,1,sizeof(num),f);
 
-	std::list<CDebugVar*>::iterator i;
+	std::vector<CDebugVar*>::iterator i;
 	CDebugVar* bp;
 	for(i=varList.begin(); i != varList.end(); i++) {
 		bp = static_cast<CDebugVar*>(*i);
@@ -3213,7 +4161,7 @@ static void SaveMemoryBin(Bit16u seg, Bit32u ofs1, Bit32u num) {
 		return;
 	}
 
-	for (Bitu x = 0; x < num;x++) {
+	for (Bit32u x = 0; x < num;x++) {
 		Bit8u val;
 		if (mem_readb_checked((PhysPt)GetAddress(seg,ofs1+x),&val)) val=0;
 		fwrite(&val,1,1,f);
@@ -3242,33 +4190,46 @@ static void OutputVecTable(char* filename) {
 static void DrawVariables(void) {
 	if (CDebugVar::varList.empty()) return;
 
-	std::list<CDebugVar*>::iterator i;
 	CDebugVar *dv;
 	char buffer[DEBUG_VAR_BUF_LEN];
+	std::vector<CDebugVar*>::size_type s = CDebugVar::varList.size();
+	bool windowchanges = false;
 
-	int idx = 0;
-	for(i=CDebugVar::varList.begin(); i != CDebugVar::varList.end(); i++, idx++) {
+	for(std::vector<CDebugVar*>::size_type i = 0; i != s; i++) {
 
-		if (idx == 4*3) {
+		if (i == 4*3) {
 			/* too many variables */
 			break;
 		}
 
-		dv = static_cast<CDebugVar*>(*i);
-
+		dv = static_cast<CDebugVar*>(CDebugVar::varList[i]);
 		Bit16u value;
-		if (mem_readw_checked(dv->GetAdr(),&value))
+		bool varchanges = false;
+		bool has_no_value = mem_readw_checked(dv->GetAdr(),&value);
+		if (has_no_value) {
 			snprintf(buffer,DEBUG_VAR_BUF_LEN, "%s", "??????");
-		else
-			snprintf(buffer,DEBUG_VAR_BUF_LEN, "0x%04x", value);
+			dv->SetValue(false,0);
+			varchanges = true;
+		} else {
+			if ( dv->HasValue() && dv->GetValue() == value) {
+				; //It already had a value and it didn't change (most likely case)
+			} else {
+				dv->SetValue(true,value);
+				snprintf(buffer,DEBUG_VAR_BUF_LEN, "0x%04x", value);
+				varchanges = true;
+			}
+		}
 
-		int y = idx / 3;
-		int x = (idx % 3) * 26;
-		mvwprintw(dbg.win_var, y, x, dv->GetName());
-		mvwprintw(dbg.win_var, y,  (x + DEBUG_VAR_BUF_LEN + 1) , buffer);
+		if (varchanges) {
+			unsigned int y = (unsigned int)(i / 3u);
+			unsigned int x = (i % 3u) * 26u;
+			mvwprintw(dbg.win_var, (int)y,  (int)x, dv->GetName());
+			mvwprintw(dbg.win_var, (int)y, ((int)x + DEBUG_VAR_BUF_LEN + 1) , buffer);
+			windowchanges = true; //Something has changed in this window
+		}
 	}
 
-	wrefresh(dbg.win_var);
+	if (windowchanges) wrefresh(dbg.win_var);
 }
 #undef DEBUG_VAR_BUF_LEN
 // HEAVY DEBUGGING STUFF
@@ -3312,7 +4273,7 @@ void DEBUG_HeavyLogInstruction(void) {
 
 	static char empty[23] = { 32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,0 };
 
-	PhysPt start = GetAddress(SegValue(cs),reg_eip);
+	PhysPt start = (PhysPt)GetAddress(SegValue(cs),reg_eip);
 	char dline[200];
 	DasmI386(dline, start, reg_eip, cpu.code.big);
 	char* res = empty;
@@ -3403,6 +4364,7 @@ bool DEBUG_HeavyIsBreakpoint(void) {
 			cpuLogCounter--;
 		}
 		if (cpuLogCounter<=0) {
+			cpuLogFile.flush();
 			cpuLogFile.close();
 			DEBUG_ShowMsg("DEBUG: cpu log LOGCPU.TXT created\n");
 			cpuLog = false;

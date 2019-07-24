@@ -24,7 +24,7 @@ Bitu OUTPUT_SURFACE_GetBestMode(Bitu flags)
     else testbpp = 0;
 
     if (sdl.desktop.fullscreen)
-        gotbpp = (unsigned int)SDL_VideoModeOK(640, 480, testbpp,
+        gotbpp = (unsigned int)SDL_VideoModeOK(640, 480, (int)testbpp,
         (unsigned int)SDL_FULLSCREEN | (unsigned int)SDL_HWSURFACE | (unsigned int)SDL_HWPALETTE);
     else
         gotbpp = sdl.desktop.bpp;
@@ -96,7 +96,7 @@ retry:
     if (render.aspect) aspectCorrectExtend(width, height);
 #endif
 
-    sdl.clip.w = width; sdl.clip.h = height;
+    sdl.clip.w = (Uint16)width; sdl.clip.h = (Uint16)height;
     if (sdl.desktop.fullscreen)
     {
         Uint32 wflags = SDL_FULLSCREEN | SDL_HWPALETTE |
@@ -113,7 +113,7 @@ retry:
             int fw = (std::max)((int)sdl.desktop.full.width,  (sdl.clip.x+sdl.clip.w));
             int fh = (std::max)((int)sdl.desktop.full.height, (sdl.clip.y+sdl.clip.h));
 
-            sdl.surface = SDL_SetVideoMode(fw, fh, bpp, wflags);
+            sdl.surface = SDL_SetVideoMode(fw, fh, (int)bpp, wflags);
             sdl.deferred_resize = false;
             sdl.must_redraw_all = true;
 
@@ -132,7 +132,7 @@ retry:
         else
         {
             sdl.clip.x = 0; sdl.clip.y = 0;
-            sdl.surface = SDL_SetVideoMode(width, height, bpp, wflags);
+            sdl.surface = SDL_SetVideoMode((int)width, (int)height, (int)bpp, wflags);
             sdl.deferred_resize = false;
             sdl.must_redraw_all = true;
         }
@@ -183,12 +183,14 @@ retry:
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
         if (mainMenu.isVisible())
         {
-            /* enforce a minimum 640x400 surface size.
-             * the menus are useless below 640x400 */
-            if (consider_width < (640 + (sdl.overscan_width * 2)))
-                consider_width = (640 + (sdl.overscan_width * 2));
-            if (consider_height < (400 + (sdl.overscan_width * 2) + (unsigned int)menuheight))
-                consider_height = (400 + (sdl.overscan_width * 2) + (unsigned int)menuheight);
+            extern unsigned int min_sdldraw_menu_width;
+            extern unsigned int min_sdldraw_menu_height;
+            /* enforce a minimum 500x300 surface size.
+             * the menus are useless below 500x300 */
+            if (consider_width < (min_sdldraw_menu_width + (sdl.overscan_width * 2)))
+                consider_width = (min_sdldraw_menu_width + (sdl.overscan_width * 2));
+            if (consider_height < (min_sdldraw_menu_height + (sdl.overscan_width * 2) + (unsigned int)menuheight))
+                consider_height = (min_sdldraw_menu_height + (sdl.overscan_width * 2) + (unsigned int)menuheight);
         }
 #endif
 
@@ -236,9 +238,11 @@ retry:
                 (unsigned int)final_width,
                 (unsigned int)final_height);
 
-            sdl.surface = SDL_SetVideoMode(final_width, final_height, bpp,
+            sdl.surface = SDL_SetVideoMode((int)final_width, (int)final_height, (int)bpp,
                 (unsigned int)((sdl.draw.flags & GFX_CAN_RANDOM) ? SDL_SWSURFACE : SDL_HWSURFACE) |
+#ifdef SDL_DOSBOX_X_SPECIAL
                 (unsigned int)SDL_HAX_NOREFRESH |
+#endif
                 (unsigned int)SDL_RESIZABLE);
 
             sdl.deferred_resize = false;
@@ -274,7 +278,7 @@ retry:
             SDL_InitSubSystem(SDL_INIT_VIDEO);
             GFX_SetIcon(); // set icon again
 
-            sdl.surface = SDL_SetVideoMode(width, height, bpp, SDL_HWSURFACE);
+            sdl.surface = SDL_SetVideoMode((int)width, (int)height, (int)bpp, SDL_HWSURFACE);
             sdl.deferred_resize = false;
             sdl.must_redraw_all = true;
 
@@ -325,7 +329,7 @@ retry:
         if (sdl_xbrz.enable)
         {
             bool old_scale_on = sdl_xbrz.scale_on;
-            xBRZ_SetScaleParameters(sdl.draw.width, sdl.draw.height, sdl.clip.w, sdl.clip.h);
+            xBRZ_SetScaleParameters((int)sdl.draw.width, (int)sdl.draw.height, sdl.clip.w, sdl.clip.h);
             if (sdl_xbrz.scale_on != old_scale_on) {
                 // when we are scaling, we ask render code not to do any aspect correction
                 // when we are not scaling, render code is allowed to do aspect correction at will
@@ -343,6 +347,7 @@ retry:
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     mainMenu.screenWidth = (size_t)sdl.surface->w;
+    mainMenu.screenHeight = (size_t)sdl.surface->h;
     mainMenu.updateRect();
     mainMenu.setRedraw();
     GFX_DrawSDLMenu(mainMenu, mainMenu.display_list);

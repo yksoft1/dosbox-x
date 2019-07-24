@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 switch (inst.code.load) {
@@ -344,7 +344,7 @@ l_M_Ed:
 	case D_PUSHAw:
 		if (CPU_ArchitectureType<CPU_ARCHTYPE_80186) goto illegalopcode;
 		{
-			Bitu old_esp = reg_esp;
+			Bit32u old_esp = reg_esp;
 			try {
 				Bit16u old_sp = (CPU_ArchitectureType >= CPU_ARCHTYPE_286 ? reg_sp : (reg_sp-10));
 				Push_16(reg_ax);Push_16(reg_cx);Push_16(reg_dx);Push_16(reg_bx);
@@ -359,9 +359,9 @@ l_M_Ed:
 		} goto nextopcode;
 	case D_PUSHAd:
 		{
-			Bitu old_esp = reg_esp;
+			Bit32u old_esp = reg_esp;
 			try {
-				Bitu tmpesp = reg_esp;
+				Bit32u tmpesp = reg_esp;
 				Push_32(reg_eax);Push_32(reg_ecx);Push_32(reg_edx);Push_32(reg_ebx);
 				Push_32(tmpesp);Push_32(reg_ebp);Push_32(reg_esi);Push_32(reg_edi);
 			}
@@ -375,7 +375,7 @@ l_M_Ed:
 	case D_POPAw:
 		if (CPU_ArchitectureType<CPU_ARCHTYPE_80186) goto illegalopcode;
 		{
-			Bitu old_esp = reg_esp;
+			Bit32u old_esp = reg_esp;
 			try {
 				reg_di=Pop_16();reg_si=Pop_16();reg_bp=Pop_16();Pop_16();//Don't save SP
 				reg_bx=Pop_16();reg_dx=Pop_16();reg_cx=Pop_16();reg_ax=Pop_16();
@@ -389,7 +389,7 @@ l_M_Ed:
 		} goto nextopcode;
 	case D_POPAd:
 		{
-			Bitu old_esp = reg_esp;
+			Bit32u old_esp = reg_esp;
 			try {
 				reg_edi=Pop_32();reg_esi=Pop_32();reg_ebp=Pop_32();Pop_32();//Don't save ESP
 				reg_ebx=Pop_32();reg_edx=Pop_32();reg_ecx=Pop_32();reg_eax=Pop_32();

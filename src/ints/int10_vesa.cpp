@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -32,6 +32,7 @@ int hack_lfb_yadjust = 0;
 
 extern int vesa_mode_width_cap;
 extern int vesa_mode_height_cap;
+extern bool enable_vga_8bit_dac;
 extern bool allow_vesa_lowres_modes;
 extern bool allow_vesa_4bpp_packed;
 extern bool vesa12_modes_32bpp;
@@ -42,6 +43,7 @@ extern bool allow_vesa_15bpp;
 extern bool allow_vesa_8bpp;
 extern bool allow_vesa_4bpp;
 extern bool allow_vesa_tty;
+extern bool vga_8bit_dac;
 
 #define VESA_SUCCESS          0x00
 #define VESA_FAIL             0x01
@@ -51,7 +53,7 @@ extern bool allow_vesa_tty;
 #define VESA_UNIMPLEMENTED    0xFF
 
 static struct {
-	Bitu setwindow;
+	Bitu rmWindow;
 	Bitu pmStart;
 	Bitu pmWindow;
 	Bitu pmPalette;
@@ -107,9 +109,9 @@ struct MODE_INFO{
 #endif
 
 void VESA_OnReset_Clear_Callbacks(void) {
-    if (callback.setwindow != 0) {
-        CALLBACK_DeAllocate(callback.setwindow);
-        callback.setwindow = 0;
+    if (callback.rmWindow != 0) {
+        CALLBACK_DeAllocate(callback.rmWindow);
+        callback.rmWindow = 0;
     }
     if (callback.pmPalette != 0) {
         CALLBACK_DeAllocate(callback.pmPalette);
@@ -135,9 +137,9 @@ Bit8u VESA_GetSVGAInformation(Bit16u seg,Bit16u off) {
 	Bitu id=mem_readd(buffer);
 	if (((id==0x56424532)||(id==0x32454256)) && (!int10.vesa_oldvbe)) vbe2=true;
 	if (vbe2) {
-		for (i=0;i<0x200;i++) mem_writeb(buffer+i,0);		
+		for (i=0;i<0x200;i++) mem_writeb((PhysPt)(buffer+i),0);		
 	} else {
-		for (i=0;i<0x100;i++) mem_writeb(buffer+i,0);
+		for (i=0;i<0x100;i++) mem_writeb((PhysPt)(buffer+i),0);
 	}
 	/* Fill common data */
 	MEM_BlockWrite(buffer,(void *)"VESA",4);				//Identification
@@ -189,7 +191,7 @@ Bit8u VESA_GetSVGAInformation(Bit16u seg,Bit16u off) {
         mem_writed(buffer+0x0e,int10.rom.vesa_modes);	//VESA Mode list
     }
 
-	mem_writed(buffer+0x0a,0x0);					//Capabilities and flags
+	mem_writed(buffer+0x0a,(enable_vga_8bit_dac ? 1 : 0));		//Capabilities and flags
 	mem_writew(buffer+0x12,(Bit16u)(vga.mem.memsize/(64*1024))); // memory size in 64kb blocks
 	return VESA_SUCCESS;
 }
@@ -244,7 +246,7 @@ foundit:
 	case M_PACKED4:
 		if (!allow_vesa_4bpp_packed) return VESA_FAIL;//TODO: New option to disable
 		pageSize = mblock->sheight * mblock->swidth/2;
-		var_write(&minfo.BytesPerScanLine,(((mblock->swidth+15U)/8U)&(~1U))*4); /* NTS: 4bpp requires even value due to VGA registers, round up */
+		var_write(&minfo.BytesPerScanLine,(Bit16u)((((mblock->swidth+15U)/8U)&(~1U))*4)); /* NTS: 4bpp requires even value due to VGA registers, round up */
 		var_write(&minfo.NumberOfPlanes,0x1);
 		var_write(&minfo.BitsPerPixel,4);
 		var_write(&minfo.MemoryModel,4);	//packed pixel
@@ -254,7 +256,7 @@ foundit:
 	case M_LIN4:
 		if (!allow_vesa_4bpp) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth/2;
-		var_write(&minfo.BytesPerScanLine,((mblock->swidth+15U)/8U)&(~1U)); /* NTS: 4bpp requires even value due to VGA registers, round up */
+		var_write(&minfo.BytesPerScanLine,(Bit16u)(((mblock->swidth+15U)/8U)&(~1U))); /* NTS: 4bpp requires even value due to VGA registers, round up */
 		var_write(&minfo.NumberOfPlanes,0x4);
 		var_write(&minfo.BitsPerPixel,4);//FIXME: Shouldn't this say 4 planes, 1 bit per pixel??
 		var_write(&minfo.MemoryModel,3);	//ega planar mode
@@ -263,7 +265,7 @@ foundit:
 	case M_LIN8:
 		if (!allow_vesa_8bpp || !allow_res) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth;
-		var_write(&minfo.BytesPerScanLine,mblock->swidth);
+		var_write(&minfo.BytesPerScanLine,(Bit16u)mblock->swidth);
 		var_write(&minfo.NumberOfPlanes,0x1);
 		var_write(&minfo.BitsPerPixel,8);
 		var_write(&minfo.MemoryModel,4);		//packed pixel
@@ -273,7 +275,7 @@ foundit:
 	case M_LIN15:
 		if (!allow_vesa_15bpp || !allow_res) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth*2;
-		var_write(&minfo.BytesPerScanLine,mblock->swidth*2);
+		var_write(&minfo.BytesPerScanLine,(Bit16u)(mblock->swidth*2));
 		var_write(&minfo.NumberOfPlanes,0x1);
 		var_write(&minfo.BitsPerPixel,15);
 		var_write(&minfo.MemoryModel,6);	//HiColour
@@ -291,7 +293,7 @@ foundit:
 	case M_LIN16:
 		if (!allow_vesa_16bpp || !allow_res) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth*2;
-		var_write(&minfo.BytesPerScanLine,mblock->swidth*2);
+		var_write(&minfo.BytesPerScanLine,(Bit16u)(mblock->swidth*2));
 		var_write(&minfo.NumberOfPlanes,0x1);
 		var_write(&minfo.BitsPerPixel,16);
 		var_write(&minfo.MemoryModel,6);	//HiColour
@@ -307,7 +309,7 @@ foundit:
 	case M_LIN24:
 		if (!allow_vesa_24bpp || !allow_res) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth*3;
-		var_write(&minfo.BytesPerScanLine,mblock->swidth*3);
+		var_write(&minfo.BytesPerScanLine,(Bit16u)(mblock->swidth*3));
 		var_write(&minfo.NumberOfPlanes,0x1);
 		var_write(&minfo.BitsPerPixel,24);
 		var_write(&minfo.MemoryModel,6);	//HiColour
@@ -323,7 +325,7 @@ foundit:
 	case M_LIN32:
 		if (!allow_vesa_32bpp || !allow_res) return VESA_FAIL;
 		pageSize = mblock->sheight * mblock->swidth*4;
-		var_write(&minfo.BytesPerScanLine,mblock->swidth*4);
+		var_write(&minfo.BytesPerScanLine,(Bit16u)(mblock->swidth*4));
 		var_write(&minfo.NumberOfPlanes,0x1);
 		var_write(&minfo.BitsPerPixel,32);
 		var_write(&minfo.MemoryModel,6);	//HiColour
@@ -341,7 +343,7 @@ foundit:
 	case M_TEXT:
 		if (!allow_vesa_tty) return VESA_FAIL;
 		pageSize = 0;
-		var_write(&minfo.BytesPerScanLine, mblock->twidth * 2);
+		var_write(&minfo.BytesPerScanLine, (Bit16u)(mblock->twidth * 2));
 		var_write(&minfo.NumberOfPlanes,0x4);
 		var_write(&minfo.BitsPerPixel,4);
 		var_write(&minfo.MemoryModel,0);	// text
@@ -363,28 +365,28 @@ foundit:
 	} else if (pageSize) {
 		pages = (vga.mem.memsize / pageSize)-1;
 	}
-	var_write(&minfo.NumberOfImagePages, pages);
+	var_write(&minfo.NumberOfImagePages, (Bit8u)pages);
 	var_write(&minfo.ModeAttributes, modeAttributes);
 	var_write(&minfo.WinAAttributes, 0x7);	// Exists/readable/writable
 
 	if (mblock->type==M_TEXT) {
 		var_write(&minfo.WinGranularity,32);
 		var_write(&minfo.WinSize,32);
-		var_write(&minfo.WinASegment,0xb800);
-		var_write(&minfo.XResolution,mblock->twidth);
-		var_write(&minfo.YResolution,mblock->theight);
+		var_write(&minfo.WinASegment,(Bit16u)0xb800);
+		var_write(&minfo.XResolution,(Bit16u)mblock->twidth);
+		var_write(&minfo.YResolution,(Bit16u)mblock->theight);
 	} else {
 		var_write(&minfo.WinGranularity,64);
 		var_write(&minfo.WinSize,64);
-		var_write(&minfo.WinASegment,0xa000);
-		var_write(&minfo.XResolution,mblock->swidth);
-		var_write(&minfo.YResolution,mblock->sheight);
+		var_write(&minfo.WinASegment,(Bit16u)0xa000);
+		var_write(&minfo.XResolution,(Bit16u)mblock->swidth);
+		var_write(&minfo.YResolution,(Bit16u)mblock->sheight);
 	}
-	var_write(&minfo.WinFuncPtr,CALLBACK_RealPointer(callback.setwindow));
+	var_write(&minfo.WinFuncPtr,int10.rom.set_window);
 	var_write(&minfo.NumberOfBanks,0x1);
 	var_write(&minfo.Reserved_page,0x1);
-	var_write(&minfo.XCharSize,mblock->cwidth);
-	var_write(&minfo.YCharSize,mblock->cheight);
+	var_write(&minfo.XCharSize,(Bit8u)mblock->cwidth);
+	var_write(&minfo.YCharSize,(Bit8u)mblock->cheight);
 	if (!int10.vesa_nolfb) var_write(&minfo.PhysBasePtr,S3_LFB_BASE + (hack_lfb_yadjust*(long)host_readw((HostPt)(&minfo.BytesPerScanLine))));
 
 	MEM_BlockWrite(buf,&minfo,sizeof(MODE_INFO));
@@ -423,11 +425,15 @@ Bit8u VESA_GetCPUWindow(Bit8u window,Bit16u & address) {
 }
 
 
-Bit8u VESA_SetPalette(PhysPt data,Bitu index,Bitu count) {
+Bit8u VESA_SetPalette(PhysPt data,Bitu index,Bitu count,bool wait) {
 //Structure is (vesa 3.0 doc): blue,green,red,alignment
 	Bit8u r,g,b;
 	if (index>255) return VESA_FAIL;
 	if (index+count>256) return VESA_FAIL;
+	
+	// Wait for retrace if requested
+	if (wait) CALLBACK_RunRealFar(RealSeg(int10.rom.wait_retrace),RealOff(int10.rom.wait_retrace));
+	
 	IO_Write(0x3c8,(Bit8u)index);
 	while (count) {
 		b = mem_readb(data++);
@@ -544,13 +550,12 @@ Bit8u VESA_ScanLineLength(Bit8u subcall,Bit16u val, Bit16u & bytes,Bit16u & pixe
 	lines = (Bit16u)(vmemsize / bytes);
 	
 	if (CurMode->type==M_TEXT)
-		lines *= CurMode->cheight;
+		lines *= (Bit16u)(CurMode->cheight);
 
 	return VESA_SUCCESS;
 }
 
-Bit8u VESA_SetDisplayStart(Bit16u x,Bit16u y) {
-	// TODO wait for retrace in case bl==0x80
+Bit8u VESA_SetDisplayStart(Bit16u x,Bit16u y,bool wait) {
 	Bitu pixels_per_offset;
 	Bitu panning_factor = 1;
 
@@ -593,7 +598,10 @@ Bit8u VESA_SetDisplayStart(Bit16u x,Bit16u y) {
 
 	IO_Read(0x3da);              // reset attribute flipflop
 	IO_Write(0x3c0,0x13 | 0x20); // panning register, screen on
-	IO_Write(0x3c0,new_panning);
+	IO_Write(0x3c0,(Bit8u)new_panning);
+	
+	// Wait for retrace if requested
+	if (wait) CALLBACK_RunRealFar(RealSeg(int10.rom.wait_retrace),RealOff(int10.rom.wait_retrace));
 
 	return VESA_SUCCESS;
 }
@@ -634,8 +642,8 @@ Bit8u VESA_GetDisplayStart(Bit16u & x,Bit16u & y) {
 	Bitu start_pixel = vga.config.display_start * (pixels_per_offset/2) 
 		+ panning / panning_factor;
 	
-	y = start_pixel / virtual_screen_width;
-	x = start_pixel % virtual_screen_width;
+	y = (Bit16u)(start_pixel / virtual_screen_width);
+	x = (Bit16u)(start_pixel % virtual_screen_width);
 	return VESA_SUCCESS;
 }
 
@@ -643,25 +651,30 @@ static Bitu VESA_SetWindow(void) {
 	if (reg_bh) reg_ah=VESA_GetCPUWindow(reg_bl,reg_dx);
 	else reg_ah=VESA_SetCPUWindow(reg_bl,(Bit8u)reg_dx);
 	reg_al=0x4f;
-	return 0;
+	return CBRET_NONE;
 }
 
 static Bitu VESA_PMSetWindow(void) {
-	VESA_SetCPUWindow(0,(Bit8u)reg_dx);
-	return 0;
+	IO_Write(0x3d4,0x6a);
+	IO_Write(0x3d5,reg_dl);
+	return CBRET_NONE;
 }
 static Bitu VESA_PMSetPalette(void) {
-	VESA_SetPalette(SegPhys(es) +  reg_edi, reg_dx, reg_cx );
-	return 0;
+	PhysPt data=SegPhys(es)+reg_edi;
+	Bit32u count=reg_cx;
+	IO_Write(0x3c8,reg_dl);
+	do {
+		IO_Write(0x3c9,mem_readb(data+2));
+		IO_Write(0x3c9,mem_readb(data+1));
+		IO_Write(0x3c9,mem_readb(data));
+		data+=4;
+	} while (--count);
+	return CBRET_NONE;
 }
 static Bitu VESA_PMSetStart(void) {
-	// This function is from VBE2 and directly sets the VGA
-	// display start address.
-
-	// TODO wait for retrace in case bl==0x80
 	Bit32u start = (Bit32u)(((unsigned int)reg_dx << 16u) | (unsigned int)reg_cx);
 	vga.config.display_start = start;
-	return 0;
+	return CBRET_NONE;
 }
 
 
@@ -735,7 +748,7 @@ Bitu INT10_WriteVESAModeList(Bitu max_modes) {
 
         if (ModeList_VGA[i].mode>=0x100 && canuse_mode) {
             if ((!int10.vesa_oldvbe) || (ModeList_VGA[i].mode<0x120)) {
-                phys_writew(PhysMake(0xc000,mode_wptr),ModeList_VGA[i].mode);
+                phys_writew(PhysMake((Bit16u)0xc000,(Bit16u)mode_wptr),(Bit16u)ModeList_VGA[i].mode);
                 mode_wptr+=2;
                 modecount++;
             }
@@ -747,7 +760,7 @@ Bitu INT10_WriteVESAModeList(Bitu max_modes) {
     assert(modecount <= int10.rom.vesa_alloc_modes); /* do not overrun the buffer */
 
     /* after the buffer, is 0xFFFF */
-    phys_writew(PhysMake(0xc000,mode_wptr),0xFFFF);
+    phys_writew(PhysMake((Bit16u)0xc000,(Bit16u)mode_wptr),(Bit16u)0xFFFF);
     mode_wptr+=2;
 
     return modecount;
@@ -762,11 +775,11 @@ void INT10_SetupVESA(void) {
 	if (svgaCard == SVGA_None) return;
 
 	/* Put the mode list somewhere in memory */
-    int10.rom.vesa_alloc_modes = ~0;
+    int10.rom.vesa_alloc_modes = (Bit16u)(~0u);
     int10.rom.vesa_modes = RealMake(0xc000,int10.rom.used);
     modecount = INT10_WriteVESAModeList(0xFFFF/*max mode count*/);
     int10.rom.vesa_alloc_modes = (Bit16u)modecount;
-    int10.rom.used += modecount * 2u;
+    int10.rom.used += (Bit16u)(modecount * 2u);
 	phys_writew(PhysMake(0xc000,int10.rom.used),0xffff);
 	int10.rom.used+=2;
 	int10.rom.oemstring=RealMake(0xc000,int10.rom.used);
@@ -774,8 +787,12 @@ void INT10_SetupVESA(void) {
 	for (i=0;i<len;i++) {
 		phys_writeb(0xc0000u+(int10.rom.used++),(Bit8u)string_oem[i]);
 	}
-	callback.setwindow=CALLBACK_Allocate();
-	CALLBACK_Setup(callback.setwindow,VESA_SetWindow,CB_RETF, "VESA Real Set Window");
+	/* Prepare the real mode interface */
+	int10.rom.wait_retrace=RealMake(0xc000,int10.rom.used);
+	int10.rom.used += (Bit16u)CALLBACK_Setup(0, NULL, CB_VESA_WAIT, PhysMake(0xc000,int10.rom.used), "");
+	callback.rmWindow=CALLBACK_Allocate();
+	int10.rom.set_window=RealMake(0xc000,int10.rom.used);
+	int10.rom.used += (Bit16u)CALLBACK_Setup(callback.rmWindow, VESA_SetWindow, CB_RETF, PhysMake(0xc000,int10.rom.used), "VESA Real Set Window");
 	/* Prepare the pmode interface */
 	int10.rom.pmode_interface=RealMake(0xc000,int10.rom.used);
 	int10.rom.used += 8;		//Skip the byte later used for offsets
@@ -788,11 +805,12 @@ void INT10_SetupVESA(void) {
 	int10.rom.pmode_interface_start = int10.rom.used - RealOff( int10.rom.pmode_interface );
 	phys_writew( Real2Phys(int10.rom.pmode_interface) + 2, int10.rom.pmode_interface_start);
 	callback.pmStart=CALLBACK_Allocate();
-	int10.rom.used += (Bit16u)CALLBACK_Setup(callback.pmStart, VESA_PMSetStart, CB_VESA_START, PhysMake(0xc000,int10.rom.used), "VESA PM Set Start");
+	int10.rom.used += (Bit16u)CALLBACK_Setup(callback.pmStart, VESA_PMSetStart, CB_VESA_PM, PhysMake(0xc000,int10.rom.used), "VESA PM Set Start");
 	/* PM Set Palette call */
 	int10.rom.pmode_interface_palette = int10.rom.used - RealOff( int10.rom.pmode_interface );
 	phys_writew( Real2Phys(int10.rom.pmode_interface) + 4, int10.rom.pmode_interface_palette);
 	callback.pmPalette=CALLBACK_Allocate();
+	int10.rom.used += (Bit16u)CALLBACK_Setup(0, NULL, CB_VESA_PM, PhysMake(0xc000,int10.rom.used), "");
 	int10.rom.used += (Bit16u)CALLBACK_Setup(callback.pmPalette, VESA_PMSetPalette, CB_RETN, PhysMake(0xc000,int10.rom.used), "VESA PM Set Palette");
 	/* Finalize the size and clear the required ports pointer */
 	phys_writew( Real2Phys(int10.rom.pmode_interface) + 6, 0);

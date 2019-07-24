@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #include "dosbox.h"
@@ -22,6 +22,7 @@
 #include "vga.h"
 
 extern bool vga_enable_3C6_ramdac;
+extern bool vga_8bit_dac;
 
 /*
 3C6h (R/W):  PEL Mask
@@ -64,28 +65,54 @@ static void VGA_DAC_SendColor( Bitu index, Bitu src ) {
 
     /* FIXME: Can someone behind the GCC project explain how (unsigned int) OR (unsigned int) somehow becomes (signed int)?? */
 
-    if (GFX_bpp >= 24) /* FIXME: Assumes 8:8:8. What happens when desktops start using the 10:10:10 format? */
-        vga.dac.xlat32[index] =
-            (uint32_t)(blue << (2u + GFX_Bshift)) |
-            (uint32_t)(green << (2u + GFX_Gshift)) |
-            (uint32_t)(red<<(2u + GFX_Rshift)) |
-            (uint32_t)GFX_Amask;
-    else {
-        /* FIXME: Assumes 5:6:5. I need to test against 5:5:5 format sometime. Perhaps I could dig out some older VGA cards and XFree86 drivers that support that format? */
-        vga.dac.xlat16[index] =
-            (uint16_t)(((blue&0x3fu)>>1u)<<GFX_Bshift) |
-            (uint16_t)((green&0x3fu)<<GFX_Gshift) |
-            (uint16_t)(((red&0x3fu)>>1u)<<GFX_Rshift) |
-            (uint16_t)GFX_Amask;
+    if (vga_8bit_dac) {
+        if (GFX_bpp >= 24) /* FIXME: Assumes 8:8:8. What happens when desktops start using the 10:10:10 format? */
+            vga.dac.xlat32[index] =
+                (uint32_t)(blue << (GFX_Bshift)) |
+                (uint32_t)(green << (GFX_Gshift)) |
+                (uint32_t)(red<< (GFX_Rshift)) |
+                (uint32_t)GFX_Amask;
+        else {
+            /* FIXME: Assumes 5:6:5. I need to test against 5:5:5 format sometime. Perhaps I could dig out some older VGA cards and XFree86 drivers that support that format? */
+            vga.dac.xlat16[index] =
+                (uint16_t)(((blue&0xffu)>>3u)<<GFX_Bshift) |
+                (uint16_t)(((green&0xffu)>>2u)<<GFX_Gshift) |
+                (uint16_t)(((red&0xffu)>>3u)<<GFX_Rshift) |
+                (uint16_t)GFX_Amask;
 
-        /* PC-98 mode always renders 32bpp, therefore needs this fix */
-        if (GFX_Bshift == 0)
-            vga.dac.xlat32[index] = (uint32_t)(blue << 2U) | (uint32_t)(green << 10U) | (uint32_t)(red << 18U);
-        else
-            vga.dac.xlat32[index] = (uint32_t)(blue << 18U) | (uint32_t)(green << 10U) | (uint32_t)(red << 2U);
+            /* PC-98 mode always renders 32bpp, therefore needs this fix */
+            if (GFX_Bshift == 0)
+                vga.dac.xlat32[index] = (uint32_t)(blue << 0U) | (uint32_t)(green << 8U) | (uint32_t)(red << 16U);
+            else
+                vga.dac.xlat32[index] = (uint32_t)(blue << 16U) | (uint32_t)(green << 8U) | (uint32_t)(red << 0U);
+        }
+
+        RENDER_SetPal( (Bit8u)index, red, green, blue );
     }
+    else {
+        if (GFX_bpp >= 24) /* FIXME: Assumes 8:8:8. What happens when desktops start using the 10:10:10 format? */
+            vga.dac.xlat32[index] =
+                (uint32_t)(blue << (2u + GFX_Bshift)) |
+                (uint32_t)(green << (2u + GFX_Gshift)) |
+                (uint32_t)(red<<(2u + GFX_Rshift)) |
+                (uint32_t)GFX_Amask;
+        else {
+            /* FIXME: Assumes 5:6:5. I need to test against 5:5:5 format sometime. Perhaps I could dig out some older VGA cards and XFree86 drivers that support that format? */
+            vga.dac.xlat16[index] =
+                (uint16_t)(((blue&0x3fu)>>1u)<<GFX_Bshift) |
+                (uint16_t)((green&0x3fu)<<GFX_Gshift) |
+                (uint16_t)(((red&0x3fu)>>1u)<<GFX_Rshift) |
+                (uint16_t)GFX_Amask;
 
-    RENDER_SetPal( index, (red << 2u) | ( red >> 4u ), (green << 2u) | ( green >> 4u ), (blue << 2u) | ( blue >> 4u ) );
+            /* PC-98 mode always renders 32bpp, therefore needs this fix */
+            if (GFX_Bshift == 0)
+                vga.dac.xlat32[index] = (uint32_t)(blue << 2U) | (uint32_t)(green << 10U) | (uint32_t)(red << 18U);
+            else
+                vga.dac.xlat32[index] = (uint32_t)(blue << 18U) | (uint32_t)(green << 10U) | (uint32_t)(red << 2U);
+        }
+
+        RENDER_SetPal( (Bit8u)index, (red << 2u) | ( red >> 4u ), (green << 2u) | ( green >> 4u ), (blue << 2u) | ( blue >> 4u ) );
+    }
 }
 
 void VGA_DAC_UpdateColor( Bitu index ) {
@@ -106,12 +133,10 @@ void VGA_DAC_UpdateColor( Bitu index ) {
                     /* Tseng ET4000 behavior, according to the SVGA card I have where only the low 4 bits are translated. --J.C. */
                     maskIndex  =  vga.dac.combine[index&0xF] & 0x0F;
 
-                    /* FIXME: TEST THIS ON THE ACTUAL ET4000. This seems to make COPPER.EXE work correctly.
-                     *        Is this what actual ET4000 hardware does in 256-color mode with Color Select? */
-                    if (vga.attr.mode_control & 0x80)
-                        maskIndex += vga.attr.color_select << 4;
+                    if (vga.attr.mode_control & 0x80u)
+                        maskIndex += Bitu(vga.attr.color_select << 4u);
                     else
-                        maskIndex += index & 0xF0;
+                        maskIndex += index & 0xF0u;
 
                     maskIndex &=  vga.dac.pel_mask;
                     break;
@@ -145,14 +170,14 @@ void write_p3c6(Bitu port,Bitu val,Bitu iolen) {
     (void)iolen;//UNUSED
     (void)port;//UNUSED
     if((IS_VGA_ARCH) && (vga.dac.hidac_counter>3)) {
-        vga.dac.reg02=val;
+        vga.dac.reg02=(Bit8u)val;
         vga.dac.hidac_counter=0;
         VGA_StartResize();
         return;
     }
     if ( vga.dac.pel_mask != val ) {
         LOG(LOG_VGAMISC,LOG_NORMAL)("VGA:DCA:Pel Mask set to %X", (int)val);
-        vga.dac.pel_mask = val;
+        vga.dac.pel_mask = (Bit8u)val;
 
         // TODO: MCGA 640x480 2-color mode appears to latch the DAC at retrace
         //       for background/foreground. Does that apply to the PEL mask too?
@@ -178,8 +203,8 @@ void write_p3c7(Bitu port,Bitu val,Bitu iolen) {
     vga.dac.hidac_counter=0;
     vga.dac.pel_index=0;
     vga.dac.state=DAC_READ;
-    vga.dac.read_index=val;         /* NTS: Paradise SVGA behavior, read index = x, write index = x + 1 */
-    vga.dac.write_index=val + 1;
+    vga.dac.read_index=(Bit8u)val;         /* NTS: Paradise SVGA behavior, read index = x, write index = x + 1 */
+    vga.dac.write_index=(Bit8u)(val + 1);
 }
 
 Bitu read_p3c7(Bitu port,Bitu iolen) {
@@ -196,7 +221,9 @@ void write_p3c8(Bitu port,Bitu val,Bitu iolen) {
     vga.dac.hidac_counter=0;
     vga.dac.pel_index=0;
     vga.dac.state=DAC_WRITE;
-    vga.dac.write_index=val;        /* NTS: Paradise SVGA behavior, this affects write index, but not read index */
+    vga.dac.write_index=(Bit8u)val;        /* NTS: Paradise SVGA behavior, this affects write index, but not read index */
+    if (svgaCard != SVGA_ParadisePVGA1A)
+        vga.dac.read_index = (Bit8u)(val - 1);
 }
 
 Bitu read_p3c8(Bitu port, Bitu iolen){
@@ -206,6 +233,7 @@ Bitu read_p3c8(Bitu port, Bitu iolen){
     return vga.dac.write_index;
 }
 
+extern bool enable_vga_8bit_dac;
 extern bool vga_palette_update_on_full_load;
 
 static unsigned char tmp_dac[3] = {0,0,0};
@@ -216,10 +244,12 @@ void write_p3c9(Bitu port,Bitu val,Bitu iolen) {
     (void)iolen;//UNUSED
     (void)port;//UNUSED
     vga.dac.hidac_counter=0;
-    val&=0x3f;
+
+    if (!enable_vga_8bit_dac)
+        val&=0x3f;
 
     if (vga.dac.pel_index < 3) {
-        tmp_dac[vga.dac.pel_index]=val;
+        tmp_dac[vga.dac.pel_index]=(unsigned char)val;
 
         if (!vga_palette_update_on_full_load) {
             /* update palette right away, partial change */
@@ -308,7 +338,7 @@ void VGA_DAC_CombineColor(Bit8u attr,Bit8u pal) {
                     for (unsigned int i=(unsigned int)attr;i < 0x100;i += 0x10)
                         VGA_DAC_UpdateColor( i );
                     for (unsigned int i=0;i < 0x10;i++)
-                        VGA_DAC_UpdateColor( i + (attr<<4u) );
+                        VGA_DAC_UpdateColor( i + ((unsigned int)attr<<4u) );
                     break;
                 case AC_low4:
                     /* Tseng ET4000 behavior, according to the SVGA card I have where only the low 4 bits are translated. --J.C. */
@@ -318,7 +348,8 @@ void VGA_DAC_CombineColor(Bit8u attr,Bit8u pal) {
             }
         }
         else {
-            VGA_DAC_UpdateColor( attr );
+            for (unsigned int i=(unsigned int)attr;i < 0x100;i += 0x10)
+                VGA_DAC_UpdateColor( i );
         }
     }
     else if (machine == MCH_MCGA) {

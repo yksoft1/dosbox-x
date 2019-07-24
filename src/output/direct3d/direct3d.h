@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #ifndef __DIRECT3D_H_
@@ -190,7 +190,7 @@ public:
     bool LockTexture(Bit8u * & pixels,Bitu & pitch);
     bool UnlockTexture(const Bit16u *changed);
 
-    CDirect3D(Bitu width = 640, Bitu height = 400):dwWidth(width),dwHeight(height) {
+    CDirect3D(Bit32u width = 640, Bit32u height = 400):dwWidth(width),dwHeight(height) {
 	mhmodDX9 = NULL;
 	pD3D9 = NULL;
 	pD3DDevice9 = NULL;

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -381,11 +381,11 @@ void FinishSetMode_ET4K(Bitu crtc_base, VGA_ModeExtraData* modeData) {
 
     // Select SVGA clock to get close to 60Hz (not particularly clean implementation)
     if (modeData->modeNo > 0x13) {
-        Bitu target = modeData->vtotal*8*modeData->htotal*60;
+        Bits target = static_cast<Bits>(modeData->vtotal * 8 * modeData->htotal * 60);
         Bitu best = 1;
-        Bits dist = 100000000;
-        for (Bitu i=0; i<16; i++) {
-            Bits cdiff=abs((Bits)(target-et4k.clockFreq[i]));
+        int dist = 100000000;
+        for (Bitu i = 0; i < 16; i++) {
+            int cdiff = abs( static_cast<int>(target - static_cast<Bits>(et4k.clockFreq[i])) );
             if (cdiff < dist) {
                 best = i;
                 dist = cdiff;
@@ -884,7 +884,7 @@ void FinishSetMode_ET3K(Bitu crtc_base, VGA_ModeExtraData* modeData) {
     IO_Write(crtc_base,0x25);IO_Write(crtc_base+1,et4k_ver_overflow);
 
     // Clear remaining ext CRTC registers
-    for (Bitu i=0x16; i<=0x21; i++) {
+    for (Bit8u i=0x16; i<=0x21; i++) {
         IO_Write(crtc_base,i);
         IO_Write(crtc_base+1,0);
     }
@@ -900,11 +900,11 @@ void FinishSetMode_ET3K(Bitu crtc_base, VGA_ModeExtraData* modeData) {
 
     // Select SVGA clock to get close to 60Hz (not particularly clean implementation)
     if (modeData->modeNo > 0x13) {
-        Bitu target = modeData->vtotal*8*modeData->htotal*60;
+        Bits target = static_cast<Bits>(modeData->vtotal * 8 * modeData->htotal * 60);
         Bitu best = 1;
-        Bits dist = 100000000;
-        for (Bitu i=0; i<8; i++) {
-            Bits cdiff = abs((Bits)(target-et3k.clockFreq[i]));
+        int dist = 100000000;
+        for (Bitu i = 0; i < 8; i++) {
+            int cdiff = abs( static_cast<Bit32s>(target - static_cast<Bits>(et3k.clockFreq[i])) );
             if (cdiff < dist) {
                 best = i;
                 dist = cdiff;

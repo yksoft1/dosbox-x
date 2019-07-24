@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #include "dosbox.h"
@@ -281,8 +281,8 @@ bool CDirect3D::UnlockTexture(void)
             if(!(index & 1)) {
                 y += changedLines[index];
             } else {
-                rect.top = y;
-                rect.bottom = y + changedLines[index];
+                rect.top = (LONG)y;
+                rect.bottom = (LONG)(y + changedLines[index]);
                 lpTexture->AddDirtyRect(&rect);
                 y += changedLines[index];
             }
@@ -800,8 +800,13 @@ pass2:
     if(GCC_UNLIKELY(hr=pD3DDevice9->Present(NULL, NULL, NULL, NULL)) != D3D_OK) {
 	switch(hr) {
 	    case D3DERR_DEVICELOST:
-		// This will be handled when SDL catches alt-tab and resets GFX
-		return true;
+        LOG_MSG("D3D:Driver device lost");
+        if (!deviceLost) {
+            deviceLost = true;
+            void RENDER_CallBack(GFX_CallBackFunctions_t f);
+            RENDER_CallBack(GFX_CallBackRedraw);
+        }
+		return false;
 		break;
 	    case D3DERR_DRIVERINTERNALERROR:
 		LOG_MSG("D3D:Driver internal error");
@@ -1048,17 +1053,17 @@ HRESULT CDirect3D::Resize3DEnvironment(Bitu window_width, Bitu window_height, Bi
 	(void)fullscreen; // FIXME: This should be stored and used!
 
     // set the presentation parameters
-	d3dpp.BackBufferWidth = window_width;
-	d3dpp.BackBufferHeight = window_height;
+	d3dpp.BackBufferWidth = (UINT)window_width;
+	d3dpp.BackBufferHeight = (UINT)window_height;
 
-    dwScaledWidth = width;
-    dwScaledHeight = height;
+    dwScaledWidth = (DWORD)width;
+    dwScaledHeight = (DWORD)height;
 
-    dwX = x;
-    dwY = y;
+    dwX = (DWORD)x;
+    dwY = (DWORD)y;
 
-    dwWidth = rwidth;
-    dwHeight = rheight;
+    dwWidth = (DWORD)rwidth;
+    dwHeight = (DWORD)rheight;
 
 #if LOG_D3D
     LOG_MSG("D3D:Resolution set to %dx%d%s", d3dpp.BackBufferWidth, d3dpp.BackBufferHeight, fullscreen ? ", fullscreen" : "");

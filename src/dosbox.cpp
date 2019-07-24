@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 /* NTS: Valgrind hunting shows memory leak from C++ new operator somewhere
@@ -130,6 +130,10 @@ extern bool         VIDEO_BIOS_always_carry_16_high_font;
 extern bool         VIDEO_BIOS_enable_CGA_8x8_second_half;
 extern bool         allow_more_than_640kb;
 
+Bit32u              guest_msdos_LoL = 0;
+Bit16u              guest_msdos_mcb_chain = 0;
+int                 boothax = BOOTHAX_NONE;
+
 bool                dos_con_use_int16_to_detect_input = true;
 
 bool                dbg_zero_on_dos_allocmem = true;
@@ -173,7 +177,10 @@ Bitu                VGA_BIOS_SEG = 0xC000;
 Bitu                VGA_BIOS_SEG_END = 0xC800;
 Bitu                VGA_BIOS_Size = 0x8000;
 
+Bit32u                  emulator_speed = 100;
+
 static Bit32u           ticksRemain;
+static Bit32u           ticksRemainSpeedFrac;
 static Bit32u           ticksLast;
 static Bit32u           ticksLastFramecounter;
 static Bit32u           ticksLastRTcounter;
@@ -184,7 +191,6 @@ extern double           rtdelta;
 static LoopHandler*     loop;
 
 /* The whole load of startups for all the subfunctions */
-void                LOG_StartUp(void);
 void                MEM_Init(Section *);
 void                ISAPNP_Cfg_Init(Section *);
 void                ROMBIOS_Init(Section *);
@@ -233,7 +239,6 @@ void                DONGLE_Init(Section*);
 #if C_IPX
 void                IPX_Init(Section*);
 #endif
-void                SID_Init(Section* sec);
 void                PIC_Init(Section*);
 void                TIMER_Init(Section*);
 void                BIOS_Init(Section*);
@@ -247,9 +252,6 @@ void                XMS_Init(Section*);
 void                DOS_KeyboardLayout_Init(Section*);
 void                AUTOEXEC_Init(Section*);
 void                INT10_Init(Section*);
-#if C_NE2000
-void                NE2K_Init(Section* sec);
-#endif
 #if C_PRINTER
 void                PRINTER_Init(Section*);
 #endif
@@ -278,21 +280,6 @@ unsigned long long update_clockdom_from_now(ClockDomain &dst) {
     return dst.counter;
 }
 
-/* for ISA components that rely on dividing down from OSC */
-unsigned long long update_ISA_OSC_clock() {
-    return update_clockdom_from_now(clockdom_ISA_OSC);
-}
-
-/* for ISA components */
-unsigned long long update_ISA_BCLK_clock() {
-    return update_clockdom_from_now(clockdom_ISA_BCLK);
-}
-
-/* for PCI components */
-unsigned long long update_PCI_BCLK_clock() {
-    return update_clockdom_from_now(clockdom_PCI_BCLK);
-}
-
 #include "paging.h"
 
 extern bool rom_bios_vptable_enable;
@@ -304,7 +291,13 @@ extern bool DOSBox_Paused();
 
 //#define DEBUG_CYCLE_OVERRUN_CALLBACK
 
+//For trying other delays
+#define wrap_delay(a) SDL_Delay(a)
+
 static Bitu Normal_Loop(void) {
+    static Bit32s lastsleepDone = -1;
+    static Bitu sleep1count = 0;
+    
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;
     Bit32u ticksNew;
     Bits ret;
@@ -324,7 +317,7 @@ static Bitu Normal_Loop(void) {
             ticksLastFramecounter = Ticks;
             Ticks = ticksNew + 500;     // next update in 500ms
             frames = (frames * 1000) / interval; // compensate for interval, be more exact (FIXME: so can we adjust for fractional frame rates)
-            GFX_SetTitle(CPU_CycleMax,-1,-1,false);
+            GFX_SetTitle((Bit32s)CPU_CycleMax,-1,-1,false);
             frames = 0;
         }
     }
@@ -344,12 +337,12 @@ static Bitu Normal_Loop(void) {
                     return 1;
 
                 if (ret>0) {
-                    if (GCC_UNLIKELY(ret >= CB_MAX))
+                    if (GCC_UNLIKELY((unsigned int)ret >= CB_MAX))
                         return 0;
 
                     extern unsigned int last_callback;
                     unsigned int p_last_callback = last_callback;
-                    last_callback = ret;
+                    last_callback = (unsigned int)ret;
 
                     dosbox_allow_nonrecursive_page_fault = false;
                     Bitu blah = (*CallBack_Handlers[ret])();
@@ -388,6 +381,7 @@ static Bitu Normal_Loop(void) {
         }
 increaseticks:
         if (GCC_UNLIKELY(ticksLocked)) {
+            ticksRemainSpeedFrac=0;
             ticksRemain=5;
             /* Reset any auto cycle guessing for this frame */
             ticksLast = GetTicks();
@@ -399,6 +393,17 @@ increaseticks:
             ticksScheduled += ticksAdded;
             if (ticksNew > ticksLast) {
                 ticksRemain = ticksNew-ticksLast;
+
+                if (emulator_speed != 100u) {
+                    ticksRemain *= emulator_speed;
+                    ticksRemain += ticksRemainSpeedFrac;
+                    ticksRemainSpeedFrac = ticksRemain % 100u;
+                    ticksRemain /= 100u;
+                }
+                else {
+                    ticksRemainSpeedFrac=0;
+                }
+
                 ticksLast = ticksNew;
                 ticksDone += (Bit32s)ticksRemain;
                 if ( ticksRemain > 20 ) {
@@ -409,27 +414,40 @@ increaseticks:
                     if (ticksScheduled >= 250 || ticksDone >= 250 || (ticksAdded > 15 && ticksScheduled >= 5) ) {
                         if(ticksDone < 1) ticksDone = 1; // Protect against div by zero
                         /* ratio we are aiming for is around 90% usage*/
-                        Bit32s ratio = (ticksScheduled * (CPU_CyclePercUsed*90*1024/100/100)) / ticksDone;
-                        Bit32s new_cmax = CPU_CycleMax;
+                        Bit32s ratio = (Bit32s)(((Bitu)ticksScheduled * ((Bitu)CPU_CyclePercUsed*90*1024/100/100)) / (Bitu)ticksDone);
+                        Bit32s new_cmax = (Bit32s)CPU_CycleMax;
                         Bit64s cproc = (Bit64s)CPU_CycleMax * (Bit64s)ticksScheduled;
+                        double ratioremoved = 0.0; //increase scope for logging
                         if (cproc > 0) {
                             /* ignore the cycles added due to the IO delay code in order
                                to have smoother auto cycle adjustments */
-                            double ratioremoved = (double) CPU_IODelayRemoved / (double) cproc;
+                            ratioremoved = (double) CPU_IODelayRemoved / (double) cproc;
                             if (ratioremoved < 1.0) {
-                                ratio = (Bit32s)((double)ratio * (1 - ratioremoved));
+                                double ratio_not_removed = 1 - ratioremoved;
+                                ratio = (Bit32s)((double)ratio * ratio_not_removed);
+
                                 /* Don't allow very high ratio which can cause us to lock as we don't scale down
                                  * for very low ratios. High ratio might result because of timing resolution */
-                                if (ticksScheduled >= 250 && ticksDone < 10 && ratio > 20480) 
-                                    ratio = 20480;
-                                Bit64s cmax_scaled = (Bit64s)CPU_CycleMax * (Bit64s)ratio;
-                                /* The auto cycle code seems reliable enough to disable the fast cut back code.
-                                 * This should improve the fluency of complex games.
-                                 if (ratio <= 1024) 
-                                 new_cmax = (Bit32s)(cmax_scaled / (Bit64s)1024);
-                                 else 
-                                 */
-                                new_cmax = (Bit32s)(1 + (CPU_CycleMax >> 1) + cmax_scaled / (Bit64s)2048);
+                                if (ticksScheduled >= 250 && ticksDone < 10 && ratio > 16384)
+                                    ratio = 16384;
+
+                                // Limit the ratio even more when the cycles are already way above the realmode default.
+                                if (ticksScheduled >= 250 && ticksDone < 10 && ratio > 5120 && CPU_CycleMax > 50000)
+                                    ratio = 5120;
+
+                                // When downscaling multiple times in a row, ensure a minimum amount of downscaling
+                                if (ticksAdded > 15 && ticksScheduled >= 5 && ticksScheduled <= 20 && ratio > 800)
+                                    ratio = 800;
+
+                                if (ratio <= 1024) {
+                                    // ratio_not_removed = 1.0; //enabling this restores the old formula
+                                    double r = (1.0 + ratio_not_removed) /(ratio_not_removed + 1024.0/(static_cast<double>(ratio)));
+                                    new_cmax = 1 + static_cast<Bit32s>(CPU_CycleMax * r);
+                                } else {
+                                    Bit64s ratio_with_removed = (Bit64s) ((((double)ratio - 1024.0) * ratio_not_removed) + 1024.0);
+                                    Bit64s cmax_scaled = (Bit64s)CPU_CycleMax * ratio_with_removed;
+                                    new_cmax = (Bit32s)(1 + (CPU_CycleMax >> 1) + cmax_scaled / (Bit64s)2048);
+                                }
                             }
                         }
 
@@ -443,7 +461,7 @@ increaseticks:
                            ratio,
                            ticksDone,
                            ticksScheduled);
-                           */  
+                           */
                         /* ratios below 1% are considered to be dropouts due to
                            temporary load imbalance, the cycles adjusting is skipped */
                         if (ratio>10) {
@@ -454,12 +472,16 @@ increaseticks:
                                 CPU_CycleMax = new_cmax;
                                 if (CPU_CycleLimit > 0) {
                                     if (CPU_CycleMax>CPU_CycleLimit) CPU_CycleMax = CPU_CycleLimit;
-                                }
+                                } else if (CPU_CycleMax > 2000000) CPU_CycleMax = 2000000; //Hardcoded limit, if no limit was specified.
                             }
                         }
+
+                        //Reset cycleguessing parameters.
                         CPU_IODelayRemoved = 0;
                         ticksDone = 0;
                         ticksScheduled = 0;
+                        lastsleepDone = -1;
+                        sleep1count = 0;
                     } else if (ticksAdded > 15) {
                         /* ticksAdded > 15 but ticksScheduled < 5, lower the cycles
                            but do not reset the scheduled/done ticks to take them into
@@ -471,8 +493,28 @@ increaseticks:
                 }
             } else {
                 ticksAdded = 0;
-                SDL_Delay(1);
-                ticksDone -= (Bit32s)((Bit32u)(GetTicks() - ticksNew));
+
+                if (!CPU_CycleAutoAdjust || CPU_SkipCycleAutoAdjust || sleep1count < 3) {
+                    wrap_delay(1);
+                } else {
+                    /* Certain configurations always give an exact sleepingtime of 1, this causes problems due to the fact that
+                       dosbox keeps track of full blocks.
+                       This code introduces some randomness to the time slept, which improves stability on those configurations
+                     */
+                  static const Bit32u sleeppattern[] = { 2, 2, 3, 2, 2, 4, 2};
+                  static Bit32u sleepindex = 0;
+                  if (ticksDone != lastsleepDone) sleepindex = 0;
+                  wrap_delay(sleeppattern[sleepindex++]);
+                  sleepindex %= sizeof(sleeppattern) / sizeof(sleeppattern[0]);
+                }
+                Bit32s timeslept = (Bit32s)(GetTicks() - ticksNew);
+                // Count how many times in the current block (of 250 ms) the time slept was 1 ms
+                if (CPU_CycleAutoAdjust && !CPU_SkipCycleAutoAdjust && timeslept == 1) sleep1count++;
+                lastsleepDone = ticksDone;
+
+                // Update ticksDone with the time spent sleeping
+                ticksDone -= timeslept;
+
                 if (ticksDone < 0)
                     ticksDone = 0;
             }
@@ -575,6 +617,43 @@ void DOSBOX_UnlockSpeed2( bool pressed ) {
     }
 }
 
+void DOSBOX_NormalSpeed( bool pressed ) {
+    if (pressed) {
+        /* should also cancel turbo mode */
+        if (ticksLocked)
+            DOSBOX_UnlockSpeed2(true);
+
+        LOG_MSG("Emulation speed restored to normal (100%%)");
+
+        emulator_speed = 100;
+        ticksRemainSpeedFrac = 0;
+    }
+}
+
+void DOSBOX_SpeedUp( bool pressed ) {
+    if (pressed) {
+        ticksRemainSpeedFrac = 0;
+        if (emulator_speed >= 5)
+            emulator_speed += 5;
+        else
+            emulator_speed = 5;
+
+        LOG_MSG("Emulation speed increased to (%u%%)",(unsigned int)emulator_speed);
+    }
+}
+
+void DOSBOX_SlowDown( bool pressed ) {
+    if (pressed) {
+        ticksRemainSpeedFrac = 0;
+        if (emulator_speed  > 5)
+            emulator_speed -= 5;
+        else
+            emulator_speed = 1;
+
+        LOG_MSG("Emulation speed decreased to (%u%%)",(unsigned int)emulator_speed);
+    }
+}
+
 void notifyError(const std::string& message)
 {
 #ifdef WIN32
@@ -633,8 +712,6 @@ void parse_busclk_setting_str(ClockDomain *cd,const char *s) {
 }
 
 unsigned int dosbox_shell_env_size = 0;
-
-void clocktree_build_conversion_list();
 
 void Null_Init(Section *sec) {
 	(void)sec;
@@ -699,7 +776,7 @@ void Init_VGABIOS() {
         if (svgaCard == SVGA_S3Trio)
             VGA_BIOS_Size = 0x4000;
         else
-            VGA_BIOS_Size = 0x3000;
+            VGA_BIOS_Size = 0x4000; // FIXME: Why does 0x3800 cause Windows 3.0 386 enhanced mode to hang?
     }
     else if (machine == MCH_EGA) {
         if (VIDEO_BIOS_always_carry_16_high_font)
@@ -734,13 +811,22 @@ void DOSBOX_RealInit() {
         item->set_description("Toggle emulation speed, to allow running faster than realtime (fast forward)");
         item->set_text("Turbo (Fast Forward)");
     }
+    {
+        MAPPER_AddHandler(DOSBOX_NormalSpeed, MK_leftarrow, MMODHOST, "speednorm","SpeedNrm", &item);
+        item->set_description("Restore normal emulation speed");
+        item->set_text("Normal speed");
+    }
+    {
+        MAPPER_AddHandler(DOSBOX_SpeedUp, MK_rbracket, MMODHOST, "speedup","SpeedUp", &item);
+        item->set_text("Speed up");
+    }
+    {
+        MAPPER_AddHandler(DOSBOX_SlowDown, MK_lbracket, MMODHOST,"slowdown","SlowDn", &item);
+        item->set_text("Slow down");
+    }
 
     Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
     assert(section != NULL);
-
-    // boot-time option whether or not to report ourself as "DPI aware" to Windows so the
-    // DWM doesn't upscale our window for backwards compat.
-    dpi_aware_enable = section->Get_bool("dpi aware");
 
     // TODO: allow change at any time. in fact if it were possible for DOSBox-X configuration
     //       schema code to attach event callbacks when a setting changes, we would set one
@@ -782,7 +868,7 @@ void DOSBOX_RealInit() {
     //       base video of it's own, and then to specify an ISA or PCI card attached to the bus that
     //       provides video.
     std::string mtype(section->Get_string("machine"));
-    svgaCard = SVGA_None; 
+    svgaCard = SVGA_None;
     machine = MCH_VGA;
     int10.vesa_nolfb = false;
     int10.vesa_oldvbe = false;
@@ -814,13 +900,28 @@ void DOSBOX_RealInit() {
     else E_Exit("DOSBOX:Unknown machine type %s",mtype.c_str());
 
     // TODO: should be parsed by motherboard emulation
-    std::string isabclk = section->Get_string("isa bus clock");
-    if (isabclk == "std8.3")
+    // FIXME: This re-uses the existing ISA bus delay code for C-BUS in PC-98 mode
+    std::string isabclk;
+
+    if (IS_PC98_ARCH)
+        isabclk = section->Get_string("cbus bus clock");
+    else
+        isabclk = section->Get_string("isa bus clock");
+
+    if (isabclk == "std10")
+        clockdom_ISA_BCLK.set_frequency(PIT_TICK_RATE_PC98_10MHZ * 4ul,1);          /* 10Mhz (PC-98) */
+    else if (isabclk == "std8.3")
         clockdom_ISA_BCLK.set_frequency(25000000,3);    /* 25MHz / 3 = 8.333MHz, early 386 systems did this, became an industry standard "norm" afterwards */
-    else if (isabclk == "std8")
-        clockdom_ISA_BCLK.set_frequency(8000000,1); /* 8Mhz */
+    else if (isabclk == "std8") {
+        if (IS_PC98_ARCH)
+            clockdom_ISA_BCLK.set_frequency(PIT_TICK_RATE_PC98_8MHZ * 4ul,1);       /* 8Mhz (PC-98) */
+        else
+            clockdom_ISA_BCLK.set_frequency(8000000,1);                             /* 8Mhz (IBM PC) */
+    }
     else if (isabclk == "std6")
-        clockdom_ISA_BCLK.set_frequency(6000000,1); /* 6MHz */
+        clockdom_ISA_BCLK.set_frequency(6000000,1);     /* 6MHz */
+    else if (isabclk == "std5")
+        clockdom_ISA_BCLK.set_frequency(PIT_TICK_RATE_PC98_10MHZ * 2ul,1);          /* 5Mhz (PC-98) */
     else if (isabclk == "std4.77")
         clockdom_ISA_BCLK.set_frequency(clockdom_ISA_OSC.freq,clockdom_ISA_OSC.freq_div*3LL); /* 14.31818MHz / 3 = 4.77MHz */
     else if (isabclk == "oc10")
@@ -843,6 +944,12 @@ void DOSBOX_RealInit() {
         clockdom_PCI_BCLK.set_frequency(25000000,1);    /* 25MHz */
     else
         parse_busclk_setting_str(&clockdom_PCI_BCLK,pcibclk.c_str());
+
+    LOG_MSG("%s BCLK: %.3fHz (%llu/%llu)",
+        IS_PC98_ARCH ? "C-BUS" : "ISA",
+        (double)clockdom_ISA_BCLK.freq / clockdom_ISA_BCLK.freq_div,
+        (unsigned long long)clockdom_ISA_BCLK.freq,
+        (unsigned long long)clockdom_ISA_BCLK.freq_div);
 
     clockdom_ISA_OSC.set_name("ISA OSC");
     clockdom_ISA_BCLK.set_name("ISA BCLK");
@@ -887,7 +994,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char *mt32reverbLevels[] = {"0", "1", "2", "3", "4", "5", "6", "7",0};
     const char* gustypes[] = { "classic", "classic37", "max", "interwave", 0 };
     const char* sbtypes[] = { "sb1", "sb2", "sbpro1", "sbpro2", "sb16", "sb16vibra", "gb", "ess688", "reveal_sc400", "none", 0 };
-    const char* oplmodes[]={ "auto", "cms", "opl2", "dualopl2", "opl3", "none", "hardware", "hardwaregb", 0};
+    const char* oplmodes[]={ "auto", "cms", "opl2", "dualopl2", "opl3", "opl3gold", "none", "hardware", "hardwaregb", 0};
     const char* serials[] = { "dummy", "disabled", "modem", "nullmodem", "serialmouse", "directserial", "log", 0 };
     const char* acpi_rsd_ptr_settings[] = { "auto", "bios", "ebda", 0 };
     const char* cpm_compat_modes[] = { "auto", "off", "msdos2", "msdos5", "direct", 0 };
@@ -896,16 +1003,25 @@ void DOSBOX_SetupConfigSections(void) {
     const char* guspantables[] = { "old", "accurate", "default", 0 };
     const char *sidbaseno[] = { "240", "220", "260", "280", "2a0", "2c0", "2e0", "300", 0 };
     const char* joytypes[] = { "auto", "2axis", "4axis", "4axis_2", "fcs", "ch", "none",0};
-    const char* joydeadzone[] = { "0.26", 0 };
-    const char* joyresponse[] = { "1.0", 0 };
+//    const char* joydeadzone[] = { "0.26", 0 };
+//    const char* joyresponse[] = { "1.0", 0 };
     const char* iosgus[] = { "240", "220", "260", "280", "2a0", "2c0", "2e0", "300", "210", "230", "250", 0 };
-    const char* ios[] = { "220", "240", "260", "280", "2a0", "2c0", "2e0", "300", 0 };
+    const char* mpubases[] = {
+        "0",                                                                                    /* Auto */
+        "300", "310", "320", "330", "332", "334", "336", "340", "360",                          /* IBM PC */
+        "c0d0","c8d0","d0d0","d8d0","e0d0","e8d0","f0d0","f8d0",                                /* NEC PC-98 MPU98 */
+        "80d2","80d4","80d6","80d8","80da","80dc","80de",                                       /* NEC PC-98 SB16 */
+        0 };
+    const char* ios[] = {
+        "220", "240", "260", "280", "2a0", "2c0", "2e0",            /* IBM PC      (base+port i.e. 220h base, 22Ch is DSP) */
+        "d2",  "d4",  "d6",  "d8",  "da",  "dc",  "de",             /* NEC PC-98   (base+(port << 8) i.e. 00D2h base, 2CD2h is DSP) */
+        0 };
     const char* ems_settings[] = { "true", "emsboard", "emm386", "false", 0};
     const char* irqsgus[] = { "5", "3", "7", "9", "10", "11", "12", 0 };
     const char* irqssb[] = { "7", "5", "3", "9", "10", "11", "12", 0 };
     const char* dmasgus[] = { "3", "0", "1", "5", "6", "7", 0 };
     const char* dmassb[] = { "1", "5", "0", "3", "6", "7", 0 };
-    const char* oplemus[] = { "default", "compat", "fast", "nuked", 0 };
+    const char* oplemus[] = { "default", "compat", "fast", "nuked", "mame", 0 };
     const char *qualityno[] = { "0", "1", "2", "3", 0 };
     const char* tandys[] = { "auto", "on", "off", 0};
     const char* ps1opt[] = { "on", "off", 0};
@@ -936,7 +1052,7 @@ void DOSBOX_SetupConfigSections(void) {
         "advmame2x", "advmame3x", "advinterp2x", "advinterp3x", "hq2x", "hq3x", "2xsai", "super2xsai", "supereagle",
 #endif
 #if RENDER_USE_ADVANCED_SCALERS>0
-        "tv2x", "tv3x", "rgb2x", "rgb3x", "scan2x", "scan3x",
+        "tv2x", "tv3x", "rgb2x", "rgb3x", "scan2x", "scan3x", "gray", "gray2x",
 #endif
         "hardware_none", "hardware2x", "hardware3x", "hardware4x", "hardware5x",
 #if C_XBRZ
@@ -972,7 +1088,16 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring = secprop->Add_path("title",Property::Changeable::Always,"");
     Pstring->Set_help("Additional text to place in the title bar of the window");
 
+    Pbool = secprop->Add_bool("enable 8-bit dac",Property::Changeable::OnlyAtStart,true);
+    Pbool->Set_help("If set, allow VESA BIOS calls in IBM PC mode to set DAC width. Has no effect in PC-98 mode.");
+
+#if defined(MACOSX)
+    /* Let's make DPI aware OFF by default so Mac OS X users with Retina displays don't yell at us about eyestrain.
+       They can turn it on in combination with a nice scaler when they want it. */
+    Pbool = secprop->Add_bool("dpi aware",Property::Changeable::OnlyAtStart,false);
+#else
     Pbool = secprop->Add_bool("dpi aware",Property::Changeable::OnlyAtStart,true);
+#endif
     Pbool->Set_help("Set this option (on by default) to indicate to your OS that DOSBox is DPI aware.\n"
             "If it is not set, Windows Vista/7/8/10 and higher may upscale the DOSBox window\n"
             "on higher resolution monitors which is probably not what you want.");
@@ -1073,8 +1198,7 @@ void DOSBOX_SetupConfigSections(void) {
             "  \n"
             "  4low behavior is default for ET4000 emulation.");
 
-    // TODO: At some point, I would like to make "mask" the default instead of "fast"
-    Pstring = secprop->Add_string("a20",Property::Changeable::WhenIdle,"fast");
+    Pstring = secprop->Add_string("a20",Property::Changeable::WhenIdle,"mask");
     Pstring->Set_help("A20 gate emulation mode.\n"
               "The on/off/on_fake/off_fake options are intended for testing and debugging DOS development,\n"
               "or to emulate obscure hardware, or to work around potential extended memory problems with DOS programs.\n"
@@ -1092,6 +1216,29 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("If enabled, A20 gate is switched off when booting a guest OS.\n"
                     "Enabled by default. Recommended for MS-DOS when HIMEM.SYS is not installed in the guest OS.\n"
                     "If disabled, and MS-DOS does not load HIMEM.SYS, programs and features that rely on the 1MB wraparound will fail.");
+
+    /* Ref:
+     *
+     * "Except the first generation, which C-Bus was synchronous with its 5MHz 8086, PC-98s
+     *  before the age of SuperIO and PCI use either 10MHz (9.8304MHz) or 8MHz (7.9872MHz)
+     *  for its C-Bus.
+     * 
+     *  It's determined by the CPU clock base (2.4756Mhz or 1.9968MHz). For example, on a
+     *  16MHz 386, C-Bus runs at 8MHz and on a 25MHz 386, C-Bus runs at 10MHz.
+     *
+     *  After NEC brought SuperIO and PCI to PC-98, C-Bus clock no longer ties to the CPU
+     *  oscillator and got fixed to 10MHz." -Yksoft1
+     *
+     * Assuming this is true, the selection is given below */
+
+    Pstring = secprop->Add_string("cbus bus clock",Property::Changeable::WhenIdle,"std10");
+    Pstring->Set_help("C-BUS BCLK frequency (PC-98), used to emulate I/O delay.\n"
+              "WARNING: In future revisions, PCI/motherboard chipset emulation will allow the guest OS/program to alter this value at runtime.\n"
+              "  std10                        10MHz (CPU speed multiple of 5MHz or PCI-based)\n"
+              "  std8                         8MHz (CPU speed multiple of 4MHz)\n"
+              "  std5                         5MHz (older PC-9801)\n"
+              "  <integer or float>           Any integer or floating point value will be used as the clock frequency in Hz\n"
+              "  <integer/integer ratio>      If a ratio is given (num/den), the ratio will be used as the clock frequency");
 
     Pstring = secprop->Add_string("isa bus clock",Property::Changeable::WhenIdle,"std8.3");
     Pstring->Set_help("ISA BCLK frequency, used to emulate I/O delay.\n"
@@ -1192,23 +1339,23 @@ void DOSBOX_SetupConfigSections(void) {
 #else
     Pint = secprop->Add_int("memsize", Property::Changeable::WhenIdle,16);
 #endif
-    Pint->SetMinMax(1,511);
+    Pint->SetMinMax(1,3584); // 3.5GB
     Pint->Set_help(
         "Amount of memory DOSBox has in megabytes.\n"
-        "  This value is best left at its default to avoid problems with some games,\n"
-        "  though few games might require a higher value.\n"
-        "  There is generally no speed advantage when raising this value.\n"
-        "  Programs that use 286 protected mode like Windows 3.0 in Standard Mode may crash with more than 15MB.");
+        "This value is best left at its default to avoid problems with some games,\n"
+        "though few games might require a higher value.\n"
+        "There is generally no speed advantage when raising this value.n"
+        "Programs that use 286 protected mode like Windows 3.0 in Standard Mode may crash with more than 15MB.");
 
     Pint = secprop->Add_int("memsizekb", Property::Changeable::WhenIdle,0);
     Pint->SetMinMax(0,524288);
     Pint->Set_help(
         "Amount of memory DOSBox has in kilobytes.\n"
-        "  This value should normally be set to 0.\n"
-        "  If nonzero, it is added to the memsize parameter.\n"
-        "  Finer grained control of total memory may be useful in\n"
-        "  emulating ancient DOS machines with less than 640KB of\n"
-        "  RAM or early 386 systems with odd extended memory sizes.");
+        "This value should normally be set to 0.\n"
+        "If nonzero, it is added to the memsize parameter.\n"
+        "Finer grained control of total memory may be useful in\n"
+        "emulating ancient DOS machines with less than 640KB of\n"
+        "RAM or early 386 systems with odd extended memory sizes.");
 
     Pint = secprop->Add_int("dos mem limit", Property::Changeable::WhenIdle,0);
     Pint->SetMinMax(0,1023);
@@ -1227,14 +1374,17 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->SetMinMax(0,32);
     Pint->Set_help(
         "Memory aliasing emulation, in number of valid address bits.\n"
-        ". Many 386/486 class motherboards and processors prior to 1995\n"
-        "  suffered from memory aliasing for various technical reasons. If the software you are\n"
-        "  trying to run assumes aliasing, or otherwise plays cheap tricks with paging,\n"
-        "  enabling this option can help. Note that enabling this option can cause slight performance degredation. Set to 0 to disable.\n"
-        "  Recommended values when enabled:\n"
+        "Many 386/486 class motherboards and processors prior to 1995\n"
+        "suffered from memory aliasing for various technical reasons. If the software you are\n"
+        "trying to run assumes aliasing, or otherwise plays cheap tricks with paging,\n"
+        "enabling this option can help. Note that enabling this option can cause slight performance degredation. Set to 0 to disable.\n"
+        "Recommended values when enabled:\n"
         "    24: 16MB aliasing. Common on 386SX systems (CPU had 24 external address bits)\n"
         "        or 386DX and 486 systems where the CPU communicated directly with the ISA bus (A24-A31 tied off)\n"
         "    26: 64MB aliasing. Some 486s had only 26 external address bits, some motherboards tied off A26-A31");
+
+    Pbool = secprop->Add_bool("pc-98 BIOS copyright string",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("If set, the PC-98 BIOS copyright string is placed at E800:0000. Enable this for software that detects PC-98 vs Epson.");
 
     Pbool = secprop->Add_bool("pc-98 int 1b fdc timer wait",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, INT 1Bh floppy access will wait for the timer to count down before returning.\n"
@@ -1263,6 +1413,15 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("pc-98 buffer page flip",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, the game's request to page flip will be delayed to vertical retrace, which can eliminate tearline artifacts.\n"
                     "Note that this is NOT the behavior of actual hardware. This option is provided for the user's preference.");
+
+    Pbool = secprop->Add_bool("pc-98 enable 256-color planar",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("Allow 256-color planar graphics mode if set, disable if not set.\n"
+                    "This is a form of memory access in 256-color mode that existed for a short\n"
+                    "time before later PC-9821 models removed it. This option must be enabled\n"
+                    "to use DOSBox-X with Windows 3.1 and it's built-in 256-color driver.");
+
+    Pbool = secprop->Add_bool("pc-98 enable 256-color",Property::Changeable::WhenIdle,true);
+    Pbool->Set_help("Allow 256-color graphics mode if set, disable if not set");
 
     Pbool = secprop->Add_bool("pc-98 enable 16-color",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Allow 16-color graphics mode if set, disable if not set");
@@ -1370,8 +1529,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("unmask timer on int 10 setmode",Property::Changeable::OnlyAtStart,false);
     Pbool->Set_help("If set, INT 10h will unmask IRQ 0 (timer) when setting video modes.");
 
-    Pbool = secprop->Add_bool("unmask keyboard on int 16 read",Property::Changeable::OnlyAtStart,false);
-    Pbool->Set_help("If set, INT 16h will unmask IRQ 1 (keyboard) when asked to read keyboard input.");
+    Pbool = secprop->Add_bool("unmask keyboard on int 16 read",Property::Changeable::OnlyAtStart,true);
+    Pbool->Set_help("If set, INT 16h will unmask IRQ 1 (keyboard) when asked to read keyboard input.\n"
+                    "It is strongly recommended that you set this option if running Windows 3.11 Windows for Workgroups in DOSBox-X.");
 
     Pbool = secprop->Add_bool("int16 keyboard polling undocumented cf behavior",Property::Changeable::OnlyAtStart,false);
     Pbool->Set_help("If set, INT 16h function AH=01h will also set/clear the carry flag depending on whether input was available.\n"
@@ -1561,6 +1721,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->SetMinMax(0,10);
     Pint->Set_help("How many frames DOSBox skips before drawing one.");
 
+    Pbool = secprop->Add_bool("alt render",Property::Changeable::Always,false);
+    Pbool->Set_help("If set, use a new experimental rendering engine");
+
     Pstring = secprop->Add_string("aspect", Property::Changeable::Always, "false");
     Pstring->Set_values(aspectmodes);
     Pstring->Set_help(
@@ -1614,7 +1777,9 @@ void DOSBOX_SetupConfigSections(void) {
     Pmulti = secprop->Add_multi("scaler",Property::Changeable::Always," ");
     Pmulti->SetValue("normal2x",/*init*/true);
     Pmulti->Set_help("Scaler used to enlarge/enhance low resolution modes. If 'forced' is appended,\n"
-                     "then the scaler will be used even if the result might not be desired.");
+                     "then the scaler will be used even if the result might not be desired.\n"
+                     "To fit a scaler in the resolution used at full screen may require a border or side bars.\n"
+                     "To fill the screen entirely, depending on your hardware, a different scaler/fullresolution might work.");
     Pstring = Pmulti->GetSection()->Add_string("type",Property::Changeable::Always,"normal2x");
     Pstring->Set_values(scalers);
 
@@ -1640,6 +1805,19 @@ void DOSBOX_SetupConfigSections(void) {
         "Best fits image to window\n"
         "- Intended for output=direct3d, fullresolution=original, aspect=true");
 
+    Pmulti = secprop->Add_multi("monochrome_pal",Property::Changeable::Always," ");
+    Pmulti->SetValue("green",/*init*/true);
+    Pmulti->Set_help("Specify the color of monochrome display.\n"
+        "Possible values: green, amber, gray, white\n"
+        "Append 'bright' for a brighter look.");
+    Pstring = Pmulti->GetSection()->Add_string("color",Property::Changeable::Always,"green");
+    const char* monochrome_pal_colors[]={
+      "green","amber","gray","white",0
+    };
+    Pstring->Set_values(monochrome_pal_colors);
+    Pstring = Pmulti->GetSection()->Add_string("bright",Property::Changeable::Always,"");
+    const char* bright[] = { "", "bright", 0 };
+    Pstring->Set_values(bright);
 
     secprop=control->AddSection_prop("vsync",&Null_Init,true);//done
 
@@ -1730,7 +1908,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_values(cyclest);
 
     Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::Always,"");
-    
+
     Pint = secprop->Add_int("cycleup",Property::Changeable::Always,10);
     Pint->SetMinMax(1,1000000);
     Pint->Set_help("Amount of cycles to decrease/increase with keycombos.(CTRL-F11/CTRL-F12)");
@@ -1739,9 +1917,10 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->SetMinMax(1,1000000);
     Pint->Set_help("Setting it lower than 100 will be a percentage.");
 
-    Pbool = secprop->Add_bool("use dynamic core with paging on",Property::Changeable::Always,false);
-    Pbool->Set_help("Dynamic core is NOT compatible with the way page faults in the guest are handled in DosBox-X.\n"
-            "Windows 9x may crash with paging on if dynamic core is enabled. Enable at your own risk.\n");
+    Pbool = secprop->Add_bool("use dynamic core with paging on",Property::Changeable::Always,true);
+    Pbool->Set_help("Allow dynamic core with 386 paging enabled. This is generally OK for DOS games and Windows 3.1.\n"
+                    "If the game becomes unstable, turn off this option.\n"
+                    "WARNING: Do NOT use this option with preemptive multitasking OSes including Windows 95 and Windows NT.");
             
     Pbool = secprop->Add_bool("ignore opcode 63",Property::Changeable::Always,true);
     Pbool->Set_help("When debugging, do not report illegal opcode 0x63.\n"
@@ -1834,7 +2013,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pint->Set_values(blocksizes);
     Pint->Set_help("Mixer block size, larger blocks might help sound stuttering but sound will also be more lagged.");
 
-    Pint = secprop->Add_int("prebuffer",Property::Changeable::OnlyAtStart,20);
+    Pint = secprop->Add_int("prebuffer",Property::Changeable::OnlyAtStart,25);
     Pint->SetMinMax(0,100);
     Pint->Set_help("How many milliseconds of data to keep on top of the blocksize.");
 
@@ -1844,16 +2023,25 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_values(mputypes);
     Pstring->Set_help("Type of MPU-401 to emulate.");
 
+    Phex = secprop->Add_hex("mpubase",Property::Changeable::WhenIdle,0/*default*/);
+    Phex->Set_values(mpubases);
+    Phex->Set_help("The IO address of the MPU-401.\n"
+                   "Set to 0 to use a default I/O address.\n"
+                   "300h to 330h are for use with IBM PC mode.\n"
+                   "C0D0h to F8D0h (in steps of 800h) are for use with NEC PC-98 mode (MPU98).\n"
+                   "80D2h through 80DEh are for use with NEC PC-98 Sound Blaster 16 MPU-401 emulation.\n"
+                   "If not assigned (0), 330h is the default for IBM PC and E0D0h is the default for PC-98.");
+
     Pstring = secprop->Add_string("mididevice",Property::Changeable::WhenIdle,"default");
     Pstring->Set_values(devices);
     Pstring->Set_help("Device that will receive the MIDI data from MPU-401.");
 
     Pstring = secprop->Add_string("midiconfig",Property::Changeable::WhenIdle,"");
-    Pstring->Set_help("Special configuration options for the device driver. This is usually the id of the device you want to use.\n"
-                      "  or in the case of coreaudio or synth, you can specify a soundfont here.\n"
-                      "  When using a Roland MT-32 rev. 0 as midi output device, some games may require a delay in order to prevent 'buffer overflow' issues.\n"
-                      "  In that case, add 'delaysysex', for example: midiconfig=2 delaysysex\n"
-                      "  See the README/Manual for more details.");
+    Pstring->Set_help("Special configuration options for the device driver. This is usually the id or part of the name of the device you want to use (find the id/name with mixer/listmidi).\n"
+                      "Or in the case of coreaudio or synth, you can specify a soundfont here.\n"
+                      "When using a Roland MT-32 rev. 0 as midi output device, some games may require a delay in order to prevent 'buffer overflow' issues.\n"
+                      "In that case, add 'delaysysex', for example: midiconfig=2 delaysysex\n"
+                      "See the README/Manual for more details.");
 
     Pint = secprop->Add_int("samplerate",Property::Changeable::WhenIdle,44100);
     Pint->Set_values(rates);
@@ -1926,7 +2114,9 @@ void DOSBOX_SetupConfigSections(void) {
 
     Phex = secprop->Add_hex("sbbase",Property::Changeable::WhenIdle,0x220);
     Phex->Set_values(ios);
-    Phex->Set_help("The IO address of the soundblaster.");
+    Phex->Set_help("The IO address of the soundblaster.\n"
+                   "220h to 2E0h are for use with IBM PC Sound Blaster emulation.\n"
+                   "D2h to DEh are for use with NEC PC-98 Sound Blaster 16 emulation.");
 
     Pint = secprop->Add_int("irq",Property::Changeable::WhenIdle,7);
     Pint->Set_values(irqssb);
@@ -2136,6 +2326,11 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("Start the DOS virtual machine with the DMA channel already unmasked at the controller.\n"
             "Use this for DOS applications that expect to operate the GUS but forget to unmask the DMA channel.");
 
+    Pbool = secprop->Add_bool("ignore channel count while active",Property::Changeable::WhenIdle,false);
+    Pbool->Set_help("Ignore writes to the active channel count register when the DAC is enabled (bit 1 of GUS reset)\n"
+                    "This is a HACK for demoscene prod 'Ice Fever' without which the music sounds wrong.\n"
+                    "According to current testing real hardware does not behave this way.");
+
     Pbool = secprop->Add_bool("pic unmask irq",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("Start the DOS virtual machine with the GUS IRQ already unmasked at the PIC.");
 
@@ -2252,11 +2447,11 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring = secprop->Add_string("tandy",Property::Changeable::WhenIdle,"auto");
     Pstring->Set_values(tandys);
     Pstring->Set_help("Enable Tandy Sound System emulation. For 'auto', emulation is present only if machine is set to 'tandy'.");
-    
+
     Pint = secprop->Add_int("tandyrate",Property::Changeable::WhenIdle,44100);
     Pint->Set_values(rates);
     Pint->Set_help("Sample rate of the Tandy 3-Voice generation.");
-    
+
     Pbool = secprop->Add_bool("disney",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("Enable Disney Sound Source emulation. (Covox Voice Master and Speech Thing compatible).");
     Pstring = secprop->Add_string("ps1audio",Property::Changeable::WhenIdle,"off");
@@ -2284,7 +2479,7 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("autofire",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("continuously fires as long as you keep the button pressed.");
-    
+
     Pbool = secprop->Add_bool("swap34",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("swap the 3rd and the 4th axis. can be useful for certain joysticks.");
 
@@ -2366,7 +2561,7 @@ void DOSBOX_SetupConfigSections(void) {
 
 
     secprop=control->AddSection_prop("serial",&Null_Init,true);
-   
+
     Pmulti_remain = secprop->Add_multiremain("serial1",Property::Changeable::WhenIdle," ");
     Pstring = Pmulti_remain->GetSection()->Add_string("type",Property::Changeable::WhenIdle,"dummy");
     Pmulti_remain->SetValue("dummy",/*init*/true);
@@ -2540,14 +2735,6 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("share",Property::Changeable::WhenIdle,true);
     Pbool->Set_help("Report SHARE.EXE as resident. Does not actually emulate SHARE functions.");
-
-    // bugfix for "Digital Dream" DOS demo that displays a "peace to hackers" message if it thinks it's being debugged.
-    Pbool = secprop->Add_bool("write plain iretf for debug interrupts",Property::Changeable::WhenIdle,true);
-    Pbool->Set_help("If true (default), the DOS kernel will create an alternate interrupt handler for debug interrupts INT 1 and INT 3\n"
-            "that contain ONLY an IRETF instruction. If false, INT 1 and INT 3 will use the same default interrupt handler in\n"
-            "the DOS kernel, which contains a callback instruction followed by IRETF. Some DOS games/demos assume they are being\n"
-            "debugged if the debug interrupts point to anything other than an IRETF instruction. Set this option to false if\n"
-            "you need notification that INT 1/INT 3 was not handled.");
 
     Phex = secprop->Add_hex("minimum dos initial private segment", Property::Changeable::WhenIdle,0);
     Phex->Set_help("In non-mainline mapping mode, where DOS structures are allocated from base memory, this sets the\n"

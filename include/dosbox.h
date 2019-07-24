@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -22,6 +22,33 @@
 
 #include "config.h"
 #include "logging.h"
+
+#if defined(C_ICONV)
+/* good */
+#elif defined(C_ICONV_WIN32)
+/* good */
+#else
+/* auto-pick */
+ #if defined(_WIN32) || defined(WINDOWS)
+  #define C_ICONV_WIN32 1 /* use the Win32 API */
+ #else
+  #pragma warning "iconv backend not chosen, will become mandatory at some point"
+ #endif
+#endif
+
+/* Mac OS X: There seems to be a problem with Macbooks where the touchpad
+             is seen by SDL2 as a "touchscreen", even though the screen is
+	     not a touchscreen. The result is DOSBox-X getting mixed messages
+             from both the mouse cursor and the touch pad, which makes the
+             interface unusable. The solution is to ignore touch events on
+             Mac OS X.
+
+             Perhaps if DOSBox-X is someday ported to run on an iPad (with
+             a touchscreen) this can be made conditional to allow touch
+             events there. */
+#if defined(C_SDL2) && defined(MACOSX)
+# define IGNORE_TOUCHSCREEN
+#endif
 
 /* SANITY CHECK */
 #if defined(C_HEAVY_DEBUG) && !defined(C_DEBUG)
@@ -45,6 +72,8 @@
 // TODO: The autoconf script should test the size of long double
 #if defined(_MSC_VER)
 // Microsoft C++ sizeof(long double) == sizeof(double)
+#elif defined(__arm__)
+// ARMv7 (Raspberry Pi) does not have long double, sizeof(long double) == sizeof(double)
 #else
 // GCC, other compilers, have sizeof(long double) == 10 80-bit IEEE
 # define HAS_LONG_DOUBLE		1
@@ -111,7 +140,6 @@ const char*				MSG_Get(char const *);     //get messages from the internal langu
 void					DOSBOX_RunMachine();
 void					DOSBOX_SetLoop(LoopHandler * handler);
 void					DOSBOX_SetNormalLoop();
-void					DOSBOX_Init(void);
 
 /* machine tests for use with if() statements */
 #define IS_TANDY_ARCH			((machine==MCH_TANDY) || (machine==MCH_PCJR))
@@ -140,9 +168,6 @@ extern ClockDomain			clockdom_ISA_BCLK;
 
 signed long long time_to_clockdom(ClockDomain &src,double t);
 unsigned long long update_clockdom_from_now(ClockDomain &dst);
-unsigned long long update_ISA_OSC_clock();
-unsigned long long update_ISA_BCLK_clock();
-unsigned long long update_PCI_BCLK_clock();
 
 extern bool enable_pc98_jump;
 
@@ -165,5 +190,14 @@ typedef uint16_t utf16_t;
 
 /* for DOS filename handling we want a toupper that uses the MS-DOS code page within not the locale of the host */
 int ascii_toupper(int c);
+
+enum {
+    BOOTHAX_NONE=0,
+    BOOTHAX_MSDOS
+};
+
+extern Bit32u guest_msdos_LoL;
+extern Bit16u guest_msdos_mcb_chain;
+extern int boothax;
 
 #endif /* DOSBOX_DOSBOX_H */

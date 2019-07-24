@@ -40,6 +40,10 @@
 #include "cross.h"
 #include "keymap.h"
 
+static std::string          zip_nv_pair_empty;
+
+static char                 zip_nv_tmp[1024];
+
 bool ZIPFileEntry::rewind(void) {
     if (can_write) return false;
     return (seek_file(0) == 0);
@@ -59,16 +63,17 @@ int ZIPFileEntry::read(void *buffer,size_t count) {
     if (file == NULL || file_offset == (off_t)0) return -1;
     if (position >= file_length) return 0;
 
-    size_t mread = file_length - position;
+    size_t mread = size_t(file_length - position);
     if (mread > count) mread = count;
 
     if (mread > 0) {
         if (seek_file(position) != position) return -1;
-        mread = file->read(buffer,mread);
-        if (mread > 0) position += mread;
+        int r = file->read(buffer,mread);
+        if (r > 0) position += (off_t)r;
+        return r;
     }
 
-    return mread;
+    return (int)mread;
 }
 
 int ZIPFileEntry::write(const void *buffer,size_t count) {
@@ -77,16 +82,17 @@ int ZIPFileEntry::write(const void *buffer,size_t count) {
     /* write stream only, no seeking.
      * this code assumes the file pointer will not change anywhere else,
      * and always to the end */
-    if (count > 0) {
-        count = file->write(buffer,count);
-        if (count > 0) {
-            position += count;
-            write_crc = zipcrc_update(write_crc, buffer, count);
+    if (count > size_t(0)) {
+        int r = file->write(buffer,count);
+        if (r > 0) {
+            position += (off_t)r;
+            write_crc = zipcrc_update(write_crc, buffer, size_t(r));
             file_length = position;
         }
+        return r;
     }
 
-    return count;
+    return (int)count;
 }
 
 ZIPFile::ZIPFile() {
@@ -141,7 +147,7 @@ ZIPFileEntry *ZIPFile::new_entry(const char *name) {
     ent->name = name;
     ent->can_write = true;
     ent->file_header_offset = write_pos;
-    write_pos += sizeof(ZIPLocalFileHeader) + ent->name.length();
+    write_pos += (off_t)(sizeof(ZIPLocalFileHeader) + ent->name.length());
     ent->write_crc = zipcrc_init();
     ent->file_offset = write_pos;
     ent->file = this;
@@ -259,7 +265,7 @@ int ZIPFile::open(const char *path,int mode) {
             close();
             return -1;
         }
-        if (seek_file(ehdr.offset_of_central_directory_from_start_disk) != ehdr.offset_of_central_directory_from_start_disk) {
+        if (seek_file((off_t)ehdr.offset_of_central_directory_from_start_disk) != (off_t)ehdr.offset_of_central_directory_from_start_disk) {
             LOG_MSG("Cannot locate Central Directory #2");
             close();
             return -1;
@@ -271,7 +277,7 @@ int ZIPFile::open(const char *path,int mode) {
 
             while (remain >= (long)sizeof(struct pkzip_central_directory_header_main)) {
                 if (read(&chdr,sizeof(chdr)) != sizeof(chdr)) break;
-                remain -= sizeof(chdr);
+                remain -= (long)sizeof(chdr);
 
                 if (chdr.sig != PKZIP_CENTRAL_DIRECTORY_HEADER_SIG) break;
                 if (chdr.filename_length >= sizeof(tmp)) break;
@@ -286,9 +292,9 @@ int ZIPFile::open(const char *path,int mode) {
 
                 ZIPFileEntry *ent = &entries[(char*)tmp];
                 ent->can_write = false;
-                ent->file_length = htole32(chdr.uncompressed_size);
-                ent->file_header_offset = htole32(chdr.relative_offset_of_local_header);
-                ent->file_offset = ent->file_header_offset + sizeof(struct ZIPLocalFileHeader) + htole16(chdr.filename_length) + htole16(chdr.extra_field_length);
+                ent->file_length = (off_t)htole32(chdr.uncompressed_size);
+                ent->file_header_offset = (off_t)htole32(chdr.relative_offset_of_local_header);
+                ent->file_offset = ent->file_header_offset + (off_t)sizeof(struct ZIPLocalFileHeader) + (off_t)htole16(chdr.filename_length) + (off_t)htole16(chdr.extra_field_length);
                 ent->position = 0;
                 ent->name = (char*)tmp;
                 ent->file = this;
@@ -306,12 +312,12 @@ off_t ZIPFile::seek_file(off_t pos) {
 
 int ZIPFile::read(void *buffer,size_t count) {
     if (file_fd < 0) return -1;
-    return ::read(file_fd,buffer,count);
+    return ::read(file_fd,buffer,(unsigned int)count);
 }
 
 int ZIPFile::write(const void *buffer,size_t count) {
     if (file_fd < 0) return -1;
-    return ::write(file_fd,buffer,count);
+    return ::write(file_fd,buffer,(unsigned int)count);
 }
 
 void ZIPFile::writeZIPFooter(void) {
@@ -343,7 +349,7 @@ void ZIPFile::writeZIPFooter(void) {
         chdr.disk_number_start = htole16(1u);
         chdr.internal_file_attributes = 0;
         chdr.external_file_attributes = 0;
-        chdr.relative_offset_of_local_header = htole32(ent.file_header_offset);
+        chdr.relative_offset_of_local_header = (uint32_t)htole32(ent.file_header_offset);
         chdr.crc32 = htole32(zipcrc_finalize(ent.write_crc));
 
         if (write(&chdr,sizeof(chdr)) != sizeof(chdr)) break;
@@ -352,7 +358,7 @@ void ZIPFile::writeZIPFooter(void) {
 
         assert(ent.name.length() != 0);
         if ((size_t)write(ent.name.c_str(),ent.name.length()) != ent.name.length()) break;
-        cdirbytes += ent.name.length();
+        cdirbytes += (uint32_t)ent.name.length();
     }
 
     memset(&ehdr,0,sizeof(ehdr));
@@ -362,15 +368,12 @@ void ZIPFile::writeZIPFooter(void) {
     ehdr.total_number_of_entries_of_central_dir_on_this_disk = htole16(cdircount);
     ehdr.total_number_of_entries_of_central_dir = htole16(cdircount);
     ehdr.size_of_central_directory = htole32(cdirbytes);
-    ehdr.offset_of_central_directory_from_start_disk = htole32(cdirofs);
+    ehdr.offset_of_central_directory_from_start_disk = (uint32_t)htole32(cdirofs);
     write(&ehdr,sizeof(ehdr));
 
     wrote_trailer = true;
     current_entry.clear();
 }
-
-// MOVE
-static std::string zip_nv_pair_empty;
 
 zip_nv_pair_map::zip_nv_pair_map() {
 }
@@ -450,8 +453,6 @@ void zip_nv_pair_map::read_nv_pairs(ZIPFileEntry &ent) {
         w = line;
     }
 }
-
-static char zip_nv_tmp[1024];
 
 void zip_nv_write(ZIPFileEntry &ent,const char *name,bool val) {
     size_t l;

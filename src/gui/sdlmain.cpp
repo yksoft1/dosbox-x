@@ -9,7 +9,7 @@
 */
 
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #ifdef WIN32
@@ -37,11 +37,18 @@
 # define INCL_WIN
 #endif
 
+extern bool dpi_aware_enable;
+
 bool OpenGL_using(void);
 void GFX_OpenGLRedrawScreen(void);
 
 #ifndef _GNU_SOURCE
 # define _GNU_SOURCE
+#endif
+
+// Tell Mac OS X to shut up about deprecated OpenGL calls
+#ifndef GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION
 #endif
 
 #include <stdlib.h>
@@ -57,6 +64,10 @@ void GFX_OpenGLRedrawScreen(void);
 # include <signal.h>
 # include <sys/stat.h>
 # include <process.h>
+# if !defined(__MINGW32__) /* MinGW does not have these headers */
+#  include <shcore.h>
+#  include <shellscalingapi.h>
+# endif
 #endif
 
 #include "dosbox.h"
@@ -72,6 +83,24 @@ void GFX_OpenGLRedrawScreen(void);
 #include "mapper.h"
 #include "sdlmain.h"
 #include "zipfile.h"
+#include "shell.h"
+
+#if defined(WIN32) && !defined(HX_DOS)
+# include <shobjidl.h>
+#endif
+
+#if defined(WIN32) && defined(__MINGW32__) /* MinGW does not have IID_ITaskbarList3 */
+static const GUID __my_IID_ITaskbarList3 = { 0xEA1AFB91ul,0x9E28u,0x4B86u,0x90u,0xE9u,0x9Eu,0x9Fu,0x8Au,0x5Eu,0xEFu,0xAFu };
+# define IID_ITaskbarList3 __my_IID_ITaskbarList3
+#endif
+
+#if defined(WIN32) && defined(__MINGW32__) /* MinGW does not have this */
+typedef enum PROCESS_DPI_AWARENESS {
+    PROCESS_DPI_UNAWARE             = 0,
+    PROCESS_SYSTEM_DPI_AWARE        = 1,
+    PROCESS_PER_MONITOR_DPI_AWARE   = 2
+} PROCESS_DPI_AWARENESS;
+#endif
 
 #if C_EMSCRIPTEN
 # include <emscripten.h>
@@ -111,7 +140,7 @@ void GFX_OpenGLRedrawScreen(void);
 # define MAX(a,b) std::max(a,b)
 #endif
 
-#if !defined(C_SDL2)
+#if !defined(C_SDL2) && !defined(RISCOS)
 # include "SDL_version.h"
 # ifndef SDL_DOSBOX_X_SPECIAL
 #  error This code must be compiled using the SDL 1.x library provided in this source repository
@@ -119,6 +148,12 @@ void GFX_OpenGLRedrawScreen(void);
 #endif
 
 #include "sdlmain.h"
+
+#ifdef MACOSX
+extern bool has_touch_bar_support;
+bool osx_detect_nstouchbar(void);
+void osx_init_touchbar(void);
+#endif
 
 SDL_Block sdl;
 Bitu frames = 0;
@@ -136,6 +171,8 @@ const char *scaler_menu_opts[][2] = {
     { "hardware3x",             "Hardware 3X" },
     { "hardware4x",             "Hardware 4X" },
     { "hardware5x",             "Hardware 5X" },
+    { "gray",                   "Grayscale" },
+    { "gray2x",                 "Grayscale 2X" },
     { "tv2x",                   "TV 2X" },
     { "tv3x",                   "TV 3X" },
     { "scan2x",                 "Scan 2X" },
@@ -160,17 +197,12 @@ const char *scaler_menu_opts[][2] = {
 
 #if defined(WIN32) && !defined(C_SDL2)
 bool isVirtualBox = false; /* OpenGL never works with Windows XP inside VirtualBox */
-HMENU MainMenu = NULL;
 #endif
 
 bool OpenGL_using(void);
 
 #if defined(WIN32) && !defined(S_ISREG)
 # define S_ISREG(x) ((x & S_IFREG) == S_IFREG)
-#endif
-
-#ifndef SDL_MAIN_NOEXCEPT
-#define SDL_MAIN_NOEXCEPT
 #endif
 
 using namespace std;
@@ -201,6 +233,57 @@ const char *DKM_to_descriptive_string(const unsigned int dkm) {
     return "";
 }
 
+#if defined(WIN32) && !defined(HX_DOS)
+ITaskbarList3 *winTaskbarList = NULL;
+#endif
+
+#if defined(WIN32) && !defined(HX_DOS)
+void WindowsTaskbarUpdatePreviewRegion(void) {
+    if (winTaskbarList != NULL) {
+        /* Windows 7/8/10: Tell the taskbar which part of our window contains the DOS screen */
+        RECT r;
+
+        r.top = sdl.clip.y;
+        r.left = sdl.clip.x;
+        r.right = sdl.clip.x + sdl.clip.w;
+        r.bottom = sdl.clip.y + sdl.clip.h;
+
+        /* NTS: The MSDN documentation is misleading. Apparently, despite 30+ years of Windows SDK
+                behavior where the "client area" is the area below the menu bar and inside the frame,
+                ITaskbarList3's idea of the "client area" is the the area inside the frame INCLUDING
+                the menu bar. Why? */
+        if (GetMenu(GetHWND()) != NULL) {
+            r.top += GetSystemMetrics(SM_CYMENU);//HACK
+            r.bottom += GetSystemMetrics(SM_CYMENU);//HACK
+        }
+
+        if (winTaskbarList->SetThumbnailClip(GetHWND(), &r) != S_OK)
+            LOG_MSG("WARNING: ITaskbarList3::SetThumbnailClip() failed");
+    }
+}
+
+void WindowsTaskbarResetPreviewRegion(void) {
+    if (winTaskbarList != NULL) {
+        /* Windows 7/8/10: Tell the taskbar which part of our window contains the client area (not including the menu bar) */
+        RECT r;
+
+        GetClientRect(GetHWND(), &r);
+
+        /* NTS: The MSDN documentation is misleading. Apparently, despite 30+ years of Windows SDK
+                behavior where the "client area" is the area below the menu bar and inside the frame,
+                ITaskbarList3's idea of the "client area" is the the area inside the frame INCLUDING
+                the menu bar. Why? */
+        if (GetMenu(GetHWND()) != NULL) {
+            r.top += GetSystemMetrics(SM_CYMENU);//HACK
+            r.bottom += GetSystemMetrics(SM_CYMENU);//HACK
+        }
+
+        if (winTaskbarList->SetThumbnailClip(GetHWND(), &r) != S_OK)
+            LOG_MSG("WARNING: ITaskbarList3::SetThumbnailClip() failed");
+    }
+}
+#endif
+
 unsigned int mapper_keyboard_layout = DKM_US;
 unsigned int host_keyboard_layout = DKM_US;
 
@@ -211,7 +294,6 @@ void KeyboardLayoutDetect(void) {
     unsigned int Linux_GetKeyboardLayout(void);
     nlayout = Linux_GetKeyboardLayout();
 
-# if !defined(C_SDL2)
     /* BUGFIX: The xkbmap for 'jp' in Linux/X11 has a problem that maps both
      *         Ro and Yen to backslash, which in SDL's default state makes
      *         it impossible to map them properly in the mapper. */
@@ -221,7 +303,6 @@ void KeyboardLayoutDetect(void) {
         void Linux_JPXKBFix(void);
         Linux_JPXKBFix();
     }
-# endif
 #elif defined(WIN32)
     WORD lid = LOWORD(GetKeyboardLayout(0));
 
@@ -342,14 +423,19 @@ void PrintScreenSizeInfo(void) {
         case ScreenSizeInfo::METHOD_NONE:       method = "None";        break;
         case ScreenSizeInfo::METHOD_X11:        method = "X11";         break;
         case ScreenSizeInfo::METHOD_XRANDR:     method = "XRandR";      break;
+        case ScreenSizeInfo::METHOD_WIN98BASE:  method = "Win98base";   break;
+        case ScreenSizeInfo::METHOD_COREGRAPHICS:method = "CoreGraphics";break;
         default:                                                        break;
     };
 
-    LOG_MSG("Screen report: Method '%s' (%.3f x %.3f pixels) (%.3f x %.3f mm) (%.3f x %.3f in) (%.3f x %.3f DPI)",
+    LOG_MSG("Screen report: Method '%s' (%.3f x %.3f pixels) at (%.3f x %.3f) (%.3f x %.3f mm) (%.3f x %.3f in) (%.3f x %.3f DPI)",
             method,
 
             screen_size_info.screen_dimensions_pixels.width,
             screen_size_info.screen_dimensions_pixels.height,
+
+            screen_size_info.screen_position_pixels.x,
+            screen_size_info.screen_position_pixels.y,
 
             screen_size_info.screen_dimensions_mm.width,
             screen_size_info.screen_dimensions_mm.height,
@@ -362,6 +448,60 @@ void PrintScreenSizeInfo(void) {
 #endif
 }
 
+#if defined(WIN32)
+void Windows_GetWindowDPI(ScreenSizeInfo &info) {
+    info.clear();
+
+# if !defined(HX_DOS)
+    HMONITOR mon;
+    HWND hwnd;
+
+    info.method = ScreenSizeInfo::METHOD_WIN98BASE;
+
+    hwnd = GetHWND();
+    if (hwnd == NULL) return;
+
+    mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    if (mon == NULL) mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    if (mon == NULL) return;
+
+    MONITORINFO mi;
+    memset(&mi,0,sizeof(mi));
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfo(mon,&mi)) return;
+
+    info.screen_position_pixels.x        = mi.rcMonitor.left;
+    info.screen_position_pixels.y        = mi.rcMonitor.top;
+
+    info.screen_dimensions_pixels.width  = mi.rcMonitor.right - mi.rcMonitor.left;
+    info.screen_dimensions_pixels.height = mi.rcMonitor.bottom - mi.rcMonitor.top;
+
+    /* Windows 10 build 1607 and later offer a "Get DPI of window" function */
+    {
+        HMODULE __user32;
+
+        __user32 = GetModuleHandle("USER32.DLL");
+        if (__user32) {
+            UINT (WINAPI *__GetDpiForWindow)(HWND) = NULL;
+
+            __GetDpiForWindow = (UINT (WINAPI *)(HWND))GetProcAddress(__user32,"GetDpiForWindow");
+            if (__GetDpiForWindow) {
+                UINT dpi = __GetDpiForWindow(hwnd);
+
+                if (dpi != 0) {
+                    info.screen_dpi.width = dpi;
+                    info.screen_dpi.height = dpi;
+
+                    info.screen_dimensions_mm.width = (25.4 * screen_size_info.screen_dimensions_pixels.width) / dpi;
+                    info.screen_dimensions_mm.height = (25.4 * screen_size_info.screen_dimensions_pixels.height) / dpi;
+                }
+            }
+        }
+    }
+# endif
+}
+#endif
+
 void UpdateWindowDimensions(void)
 {
 #if defined(C_SDL2)
@@ -372,7 +512,11 @@ void UpdateWindowDimensions(void)
     Uint32 fl = SDL_GetWindowFlags(sdl.window);
     UpdateWindowMaximized((fl & SDL_WINDOW_MAXIMIZED) != 0);
 #endif
-#if defined(WIN32) && !defined(C_SDL2)
+#if defined(MACOSX)
+    void MacOSX_GetWindowDPI(ScreenSizeInfo &info);
+    MacOSX_GetWindowDPI(/*&*/screen_size_info);
+#endif
+#if defined(WIN32)
     // When maximized, SDL won't actually tell us our new dimensions, so get it ourselves.
     // FIXME: Instead of GetHWND() we need to track our own handle or add something to SDL 1.x
     //        to provide the handle!
@@ -381,8 +525,9 @@ void UpdateWindowDimensions(void)
     GetClientRect(GetHWND(), &r);
     UpdateWindowDimensions(r.right, r.bottom);
     UpdateWindowMaximized(IsZoomed(GetHWND()));
+    Windows_GetWindowDPI(/*&*/screen_size_info);
 #endif
-#if defined(LINUX) && !defined(C_SDL2)
+#if defined(LINUX)
     void UpdateWindowDimensions_Linux(void);
     UpdateWindowDimensions_Linux();
     void Linux_GetWindowDPI(ScreenSizeInfo &info);
@@ -400,7 +545,6 @@ void UpdateWindowDimensions(void)
 void                        GUI_ResetResize(bool);
 void                        GUI_LoadFonts();
 void                        GUI_Run(bool);
-void                        Restart(bool pressed);
 
 const char*                 titlebar = NULL;
 extern const char*              RunningProgram;
@@ -424,14 +568,6 @@ extern "C" void SDL1_hax_SetMenu(HMENU menu);
 
 #ifdef WIN32
 # include <windows.h>
-#endif
-
-#if (HAVE_DDRAW_H)
-# include <ddraw.h>
-struct private_hwdata {
-    LPDIRECTDRAWSURFACE3            dd_surface;
-    LPDIRECTDRAWSURFACE3            dd_writebuf;
-};
 #endif
 
 #ifdef WIN32
@@ -507,7 +643,7 @@ static unsigned char logo[32*32*4]= {
 static void DOSBox_SetOriginalIcon(void) {
     SDL_Surface *logos;
 
-#if WORDS_BIGENDIAN
+#ifdef WORDS_BIGENDIAN
         logos = SDL_CreateRGBSurfaceFrom((void*)logo,32,32,32,128,0xff000000,0x00ff0000,0x0000ff00,0);
 #else
         logos = SDL_CreateRGBSurfaceFrom((void*)logo,32,32,32,128,0x000000ff,0x0000ff00,0x00ff0000,0);
@@ -663,14 +799,14 @@ void GFX_SDL_Overscan(void) {
                 for (Bitu i=0; i<4; i++) {
                     rect = &sdl.updateRects[i];
                     Bit8u* start = pixelptr + (unsigned int)rect->y*(unsigned int)linepitch + (unsigned int)rect->x;
-                    for (Bitu j=0; j<rect->h; j++) {
+                    for (Bitu j=0; j<(unsigned int)rect->h; j++) {
                         memset(start, vga.attr.overscan_color, rect->w);
                         start += linepitch;
                     }
                 }
             } else {
                 for (Bitu i=0; i<4; i++)
-                    SDL_FillRect(sdl.surface, &sdl.updateRects[i], border_color);
+                    SDL_FillRect(sdl.surface, &sdl.updateRects[i], (Uint32)border_color);
 
 #if defined(C_SDL2)
                 SDL_UpdateWindowSurfaceRects(sdl.window, sdl.updateRects, 4);
@@ -698,11 +834,39 @@ static bool IsFullscreen() {
 }
 #endif
 
-void PauseDOSBox(bool pressed) {
-    bool paused = true;
+bool is_paused = false;
+bool unpause_now = false;
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU
+int pause_menu_item_tag = -1;
+#endif
+
+void PushDummySDL(void) {
     SDL_Event event;
 
-    if (!pressed) return;
+    memset(&event,0,sizeof(event));
+    event.type = SDL_KEYUP;
+    SDL_PushEvent(&event);
+}
+
+static void HandleMouseMotion(SDL_MouseMotionEvent * motion);
+static void HandleMouseButton(SDL_MouseButtonEvent * button);
+
+#if defined(C_SDL2)
+# if !defined(IGNORE_TOUCHSCREEN)
+static void HandleTouchscreenFinger(SDL_TouchFingerEvent * finger);
+# endif
+#endif
+
+#if defined(C_SDL2)
+static const SDL_TouchID no_touch_id = (SDL_TouchID)(~0ULL);
+static const SDL_FingerID no_finger_id = (SDL_FingerID)(~0ULL);
+static SDL_FingerID touchscreen_finger_lock = no_finger_id;
+static SDL_TouchID touchscreen_touch_lock = no_touch_id;
+#endif
+
+void PauseDOSBoxLoop(Bitu /*unused*/) {
+    bool paused = true;
+    SDL_Event event;
 
     /* reflect in the menu that we're paused now */
     mainMenu.get_item("mapper_pause").check(true).refresh_item(mainMenu);
@@ -725,7 +889,14 @@ void PauseDOSBox(bool pressed) {
     SDL_WM_GrabInput(SDL_GRAB_OFF);
 #endif
 
+    is_paused = true;
+
     while (paused) {
+        if (unpause_now) {
+            unpause_now = false;
+            break;
+        }
+
 #if C_EMSCRIPTEN
         emscripten_sleep_with_yield(0);
         SDL_PollEvent(&event);
@@ -735,9 +906,14 @@ void PauseDOSBox(bool pressed) {
 
 #ifdef __WIN32__
   #if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
-        if (event.type==SDL_SYSWMEVENT && event.syswm.msg->msg == WM_COMMAND && event.syswm.msg->wParam == (mainMenu.get_item("mapper_pause").get_master_id()+DOSBoxMenu::winMenuMinimumID)) {
+        if (event.type==SDL_SYSWMEVENT && event.syswm.msg->msg == WM_COMMAND && (LOWORD(event.syswm.msg->wParam) == ID_WIN_SYSMENU_PAUSE || LOWORD(event.syswm.msg->wParam) == (mainMenu.get_item("mapper_pause").get_master_id()+DOSBoxMenu::winMenuMinimumID))) {
             paused=false;
             GFX_SetTitle(-1,-1,-1,false);   
+            break;
+        }
+        if (event.type == SDL_SYSWMEVENT && event.syswm.msg->msg == WM_SYSCOMMAND && LOWORD(event.syswm.msg->wParam) == ID_WIN_SYSMENU_PAUSE) {
+            paused = false;
+            GFX_SetTitle(-1, -1, -1, false);
             break;
         }
   #endif
@@ -766,9 +942,40 @@ void PauseDOSBox(bool pressed) {
                 break;
             } 
 #endif
+        case SDL_MOUSEMOTION:
+#if defined(C_SDL2)
+            if (touchscreen_finger_lock == no_finger_id &&
+                touchscreen_touch_lock == no_touch_id &&
+                event.motion.which != SDL_TOUCH_MOUSEID) { /* don't handle mouse events faked by touchscreen */
+                HandleMouseMotion(&event.motion);
+            }
+#else
+            HandleMouseMotion(&event.motion);
+#endif
+            break;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP:
+#if defined(C_SDL2)
+            if (touchscreen_finger_lock == no_finger_id &&
+                touchscreen_touch_lock == no_touch_id &&
+                event.button.which != SDL_TOUCH_MOUSEID) { /* don't handle mouse events faked by touchscreen */
+                HandleMouseButton(&event.button);
+            }
+#else
+            HandleMouseButton(&event.button);
+#endif
+            break;
+#if defined(C_SDL2)
+# if !defined(IGNORE_TOUCHSCREEN)
+        case SDL_FINGERDOWN:
+        case SDL_FINGERUP:
+        case SDL_FINGERMOTION:
+            HandleTouchscreenFinger(&event.tfinger);
+            break;
+# endif
+#endif
         }
     }
-
 
     // restore mouse state
     void GFX_UpdateSDLCaptureState();
@@ -785,6 +992,20 @@ void PauseDOSBox(bool pressed) {
 
     /* reflect in the menu that we're paused now */
     mainMenu.get_item("mapper_pause").check(false).refresh_item(mainMenu);
+
+    is_paused = false;
+}
+
+void PauseDOSBox(bool pressed) {
+    if (pressed) {
+        if (is_paused) {
+            unpause_now = true;
+            PushDummySDL();
+        }
+        else {
+            PIC_AddEvent(PauseDOSBoxLoop,0.001);
+        }
+    }
 }
 
 #if defined(C_SDL2)
@@ -809,12 +1030,6 @@ SDL_Window* GFX_SetSDLWindowMode(Bit16u width, Bit16u height, SCREEN_TYPES scree
         SDL_DestroyTexture(sdl.texture.texture);
         sdl.texture.texture=0;
     }
-#if C_OPENGL
-    if (sdl_opengl.context) {
-        SDL_GL_DeleteContext(sdl_opengl.context);
-        sdl_opengl.context=0;
-    }
-#endif
     sdl.window_desired_width = width;
     sdl.window_desired_height = height;
     int currWidth, currHeight;
@@ -830,6 +1045,14 @@ SDL_Window* GFX_SetSDLWindowMode(Bit16u width, Bit16u height, SCREEN_TYPES scree
             return sdl.window;
         }
     }
+
+#if C_OPENGL
+    if (sdl_opengl.context) {
+        SDL_GL_DeleteContext(sdl_opengl.context);
+        sdl_opengl.context=0;
+    }
+#endif
+
     /* If we change screen type, recreate the window. Furthermore, if
      * it is our very first time then we simply create a new window.
      */
@@ -845,21 +1068,32 @@ SDL_Window* GFX_SetSDLWindowMode(Bit16u width, Bit16u height, SCREEN_TYPES scree
         if (sdl.window) {
             SDL_DestroyWindow(sdl.window);
         }
+
         sdl.window = SDL_CreateWindow("",
                                       SDL_WINDOWPOS_UNDEFINED_DISPLAY(sdl.displayNumber),
                                       SDL_WINDOWPOS_UNDEFINED_DISPLAY(sdl.displayNumber),
                                       width, height,
                                       (GFX_IsFullscreen() ? (sdl.desktop.full.display_res ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN) : 0)
                                       | ((screenType == SCREEN_OPENGL) ? SDL_WINDOW_OPENGL : 0) | SDL_WINDOW_SHOWN
-                                      | (SDL2_resize_enable ? SDL_WINDOW_RESIZABLE : 0));
+                                      | (SDL2_resize_enable ? SDL_WINDOW_RESIZABLE : 0)
+                                      | (dpi_aware_enable ? SDL_WINDOW_ALLOW_HIGHDPI : 0));
         if (sdl.window) {
             GFX_SetTitle(-1, -1, -1, false); //refresh title.
         }
+        sdl.surface = SDL_GetWindowSurface(sdl.window);
         SDL_GetWindowSize(sdl.window, &currWidth, &currHeight);
         sdl.update_display_contents = ((width == currWidth) && (height == currHeight));
 
         currentWindowWidth = currWidth;
         currentWindowHeight = currHeight;
+
+#if C_OPENGL
+        if (screenType == SCREEN_OPENGL) {
+            sdl_opengl.context = SDL_GL_CreateContext(sdl.window);
+            if (sdl_opengl.context == NULL) LOG_MSG("WARNING: SDL2 unable to create GL context");
+            if (SDL_GL_MakeCurrent(sdl.window, sdl_opengl.context) != 0) LOG_MSG("WARNING: SDL2 unable to make current GL context");
+        }
+#endif
 
         return sdl.window;
     }
@@ -888,9 +1122,18 @@ SDL_Window* GFX_SetSDLWindowMode(Bit16u width, Bit16u height, SCREEN_TYPES scree
     /* Maybe some requested fullscreen resolution is unsupported? */
     SDL_GetWindowSize(sdl.window, &currWidth, &currHeight);
     sdl.update_display_contents = ((width == currWidth) && (height == currHeight));
+    sdl.surface = SDL_GetWindowSurface(sdl.window);
 
     currentWindowWidth = currWidth;
     currentWindowHeight = currHeight;
+
+#if C_OPENGL
+    if (screenType == SCREEN_OPENGL) {
+        sdl_opengl.context = SDL_GL_CreateContext(sdl.window);
+        if (sdl_opengl.context == NULL) LOG_MSG("WARNING: SDL2 unable to create GL context");
+        if (SDL_GL_MakeCurrent(sdl.window, sdl_opengl.context) != 0) LOG_MSG("WARNING: SDL2 unable to make current GL context");
+    }
+#endif
 
     return sdl.window;
 }
@@ -928,7 +1171,7 @@ static SDL_Window * GFX_SetSDLOpenGLWindow(Bit16u width, Bit16u height) {
 # endif
 #endif
 
-#if C_OPENGL && !defined(C_SDL2) && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+#if C_OPENGL && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
 unsigned int SDLDrawGenFontTextureUnitPerRow = 16;
 unsigned int SDLDrawGenFontTextureRows = 16;
 unsigned int SDLDrawGenFontTextureWidth = SDLDrawGenFontTextureUnitPerRow * 8;
@@ -1283,6 +1526,13 @@ void MenuDrawTextChar(int x,int y,unsigned char c,Bitu color) {
 
         assert(sdl.surface->pixels != NULL);
 
+        if (x < 0 || y < 0)
+            return;
+        if ((x + 8) > sdl.surface->w)
+            return;
+        if ((y + (int)fontHeight) > sdl.surface->h)
+            return;
+
         scan  = (unsigned char*)sdl.surface->pixels;
         scan += (unsigned int)y * (unsigned int)sdl.surface->pitch;
         scan += (unsigned int)x * (((unsigned int)sdl.surface->format->BitsPerPixel+7u)/8u);
@@ -1342,6 +1592,13 @@ void MenuDrawTextChar2x(int x,int y,unsigned char c,Bitu color) {
         unsigned char *scan;
 
         assert(sdl.surface->pixels != NULL);
+
+        if (x < 0 || y < 0)
+            return;
+        if ((x + 16) > sdl.surface->w)
+            return;
+        if ((y + ((int)fontHeight * 2)) > sdl.surface->h)
+            return;
 
         scan  = (unsigned char*)sdl.surface->pixels;
         scan += y * sdl.surface->pitch;
@@ -1454,6 +1711,9 @@ void DOSBoxMenu::item::drawMenuItem(DOSBoxMenu &menu) {
         fgshortcolor = GFX_GetRGB(191, 191, 255);
     }
 
+    itemHoverDrawn = itemHover;
+    itemHilightDrawn = itemHilight;
+
     if (SDL_MUSTLOCK(sdl.surface))
         SDL_LockSurface(sdl.surface);
 
@@ -1491,38 +1751,45 @@ void DOSBoxMenu::displaylist::DrawDisplayList(DOSBoxMenu &menu,bool updateScreen
 
 bool DOSBox_isMenuVisible(void);
 
-void GFX_DrawSDLMenu(DOSBoxMenu &menu,DOSBoxMenu::displaylist &dl) 
-{
-    if (menu.needsRedraw() && DOSBox_isMenuVisible() && (!sdl.updating || OpenGL_using()) && !sdl.desktop.fullscreen) {
-        if (!OpenGL_using()) {
-            if (SDL_MUSTLOCK(sdl.surface))
-                SDL_LockSurface(sdl.surface);
-        }
+void GFX_DrawSDLMenu(DOSBoxMenu &menu, DOSBoxMenu::displaylist &dl) {
+    if (!menu.needsRedraw() || (sdl.updating && !OpenGL_using())) {
+        return;
+    }
+    if (!DOSBox_isMenuVisible() || sdl.desktop.fullscreen) {
+        // BUGFIX: If the menu is hidden then silently clear "needs redraw" to avoid excess redraw of nothing
+        menu.clearRedraw();
+        return;
+    }
 
-        if (&dl == &menu.display_list) { /* top level menu, draw background */
-            MenuDrawRect(menu.menuBox.x, menu.menuBox.y, menu.menuBox.w, menu.menuBox.h - 1, GFX_GetRGB(63, 63, 63));
-            MenuDrawRect(menu.menuBox.x, menu.menuBox.y + menu.menuBox.h - 1, menu.menuBox.w, 1, GFX_GetRGB(31, 31, 31));
-        }
+    bool mustLock = !OpenGL_using() && SDL_MUSTLOCK(sdl.surface);
 
-        if (!OpenGL_using()) {
-            if (SDL_MUSTLOCK(sdl.surface))
-                SDL_UnlockSurface(sdl.surface);
-        }
+    if (mustLock) {
+        SDL_LockSurface(sdl.surface);
+    }
+
+    if (&dl == &menu.display_list) { /* top level menu, draw background */
+        MenuDrawRect(menu.menuBox.x, menu.menuBox.y, menu.menuBox.w, menu.menuBox.h - 1, GFX_GetRGB(63, 63, 63));
+        MenuDrawRect(menu.menuBox.x, menu.menuBox.y + menu.menuBox.h - 1, menu.menuBox.w, 1,
+                     GFX_GetRGB(31, 31, 31));
+    }
+
+    if (mustLock) {
+        SDL_UnlockSurface(sdl.surface);
+    }
 
 #if 0
-        LOG_MSG("menudraw %u",(unsigned int)SDL_GetTicks());
+    LOG_MSG("menudraw %u",(unsigned int)SDL_GetTicks());
 #endif
 
-        menu.clearRedraw();
-        menu.display_list.DrawDisplayList(menu,/*updateScreen*/false);
+    menu.clearRedraw();
+    menu.display_list.DrawDisplayList(menu,/*updateScreen*/false);
 
-        if (!OpenGL_using()) {
+    if (!OpenGL_using()) {
 #if defined(C_SDL2)
-            SDL_UpdateWindowSurfaceRects( sdl.window, &menu.menuBox, 1 );
+        SDL_UpdateWindowSurfaceRects( sdl.window, &menu.menuBox, 1 );
 #else
-            SDL_UpdateRects( sdl.surface, 1, &menu.menuBox );
+        SDL_UpdateRects(sdl.surface, 1, &menu.menuBox);
 #endif
-        }
     }
 }
 #endif
@@ -1541,8 +1808,8 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags, double scalex, double scal
 
     sdl.must_redraw_all = true;
 
-    sdl.draw.width = width;
-    sdl.draw.height = height;
+    sdl.draw.width = (Bit32u)width;
+    sdl.draw.height = (Bit32u)height;
     sdl.draw.flags = flags;
     sdl.draw.callback = callback;
     sdl.draw.scalex = scalex;
@@ -1553,7 +1820,7 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags, double scalex, double scal
         (unsigned int)flags,
         scalex,scaley);
 
-    Bitu bpp = 0;
+//    Bitu bpp = 0;
     Bitu retFlags = 0;
 
     if (sdl.blit.surface) {
@@ -1604,10 +1871,14 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags, double scalex, double scal
     if (retFlags) 
         GFX_Start();
 
-    if (!sdl.mouse.autoenable)
+    if (!sdl.mouse.autoenable && !sdl.mouse.locked)
         SDL_ShowCursor(sdl.mouse.autolock?SDL_DISABLE:SDL_ENABLE);
 
     UpdateWindowDimensions();
+
+#if defined(WIN32) && !defined(HX_DOS)
+    WindowsTaskbarUpdatePreviewRegion();
+#endif
 
     return retFlags;
 }
@@ -1992,6 +2263,7 @@ void CaptureMouseNotify(bool capture)
 #if WIN32
     CaptureMouseNotifyWin32(capture);
 #else
+    (void)capture;
     // TODO
 #endif
 }
@@ -2148,18 +2420,14 @@ void change_output(int output) {
 #if C_OPENGL
         change_output(2);
         OUTPUT_OPENGL_Select();
-#if !defined(C_SDL2)
         sdl_opengl.bilinear = true;
-#endif
 #endif
         break;
     case 4:
 #if C_OPENGL
         change_output(2);
         OUTPUT_OPENGL_Select();
-#if !defined(C_SDL2)
         sdl_opengl.bilinear = false; //NB
-#endif
 #endif
         break;
 #if C_DIRECT3D
@@ -2205,17 +2473,102 @@ void change_output(int output) {
     if (sdl.draw.callback)
         (sdl.draw.callback)( GFX_CallBackReset );
 
-    GFX_SetTitle(CPU_CycleMax,-1,-1,false);
+    GFX_SetTitle((Bit32s)CPU_CycleMax,-1,-1,false);
     GFX_LogSDLState();
 
     UpdateWindowDimensions();
 }
+
+#if !defined(HX_DOS) && defined(SDL_DOSBOX_X_SPECIAL)
+extern "C" void SDL_hax_SetFSWindowPosition(int x,int y,int w,int h);
+#endif
 
 void GFX_SwitchFullScreen(void)
 {
 #if !defined(HX_DOS)
     if (sdl.desktop.prevent_fullscreen)
         return;
+
+    if (!sdl.desktop.fullscreen) {/*is GOING fullscreen*/
+        UpdateWindowDimensions();
+
+        if (screen_size_info.screen_dimensions_pixels.width != 0 && screen_size_info.screen_dimensions_pixels.height != 0) {
+            if (sdl.desktop.full.width_auto)
+                sdl.desktop.full.width = (unsigned int)screen_size_info.screen_dimensions_pixels.width;
+            if (sdl.desktop.full.height_auto)
+                sdl.desktop.full.height = (unsigned int)screen_size_info.screen_dimensions_pixels.height;
+
+#if !defined(C_SDL2) && defined(MACOSX)
+            /* Mac OS X has this annoying problem with their API where the System Preferences app, display settings panel
+               allows setting 720p and 1080i/1080p modes on monitors who's native resolution is less than 1920x1080 but
+               supports 1920x1080.
+
+               This is a problem with HDTV sets made in the late 2000s early 2010s when "HD" apparently meant LCD displays
+               with 1368x768 resolution that will nonetheless accept 1080i (and later, 1080p) and downscale on display.
+
+               The problem is that with these monitors, Mac OS X's display API will NOT list 1920x1080 as one of the
+               display modes even when the freaking desktop is obviously set to 1920x1080 on that monitor!
+
+               If the screen reporting code says 1920x1080 and we try to go fullscreen, SDL1 will intervene and say
+               "hey wait there's no 1920x1080 in the mode list" and then fail the call.
+
+               So to work around this, we have to go check SDL's mode list before using the screen size returned by the
+               API.
+
+               Oh and for extra fun, Mac OS X is one of those modern systems where "setting the video mode" apparently
+               means NOT setting the video hardware mode but just changing how the GPU scales the display... EXCEPT when
+               talking to these older displays where if the user set it to 1080i/1080p, our request to set 1368x768
+               actually DOES change the video mode. This is just wonderful considering the old HDTV set I bought back in
+               2008 takes 1-2 seconds to adjust to the mode change on it's HDMI input.
+
+               Frankly I wish I knew how to fix the SDL1 Quartz code to use whatever abracadabra magic code is required
+               to enumerate these extra HDTV modes so this hack isn't necessary, except that experience says this hack is
+               always necesary because it might not always work.
+
+               This magic hidden super secret API bullshit is annoying. You're worse than Microsoft with this stuff, Apple --J.C. */
+            {
+                SDL_Rect **ls = SDLCALL SDL_ListModes(NULL, SDL_FULLSCREEN);
+                if (ls != NULL) {
+                    unsigned int maxwidth = 0,maxheight = 0;
+
+                    for (size_t i=0;ls[i] != NULL;i++) {
+                        unsigned int w = ls[i]->w;
+                        unsigned int h = ls[i]->h;
+
+                        if (maxwidth < w || maxheight < h) {
+                            maxwidth = w;
+                            maxheight = h;
+                        }
+                    }
+
+                    if (maxwidth != 0 && maxheight != 0) {
+                        LOG_MSG("OS X: Actual maximum screen resolution is %d x %d\n",maxwidth,maxheight);
+
+                        if (sdl.desktop.full.width_auto) {
+                            if (sdl.desktop.full.width > maxwidth)
+                                sdl.desktop.full.width = maxwidth;
+                        }
+                        if (sdl.desktop.full.height_auto) {
+                            if (sdl.desktop.full.height > maxheight)
+                                sdl.desktop.full.height = maxheight;
+                        }
+                    }
+                }
+            }
+#endif
+
+#if !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
+            SDL_hax_SetFSWindowPosition(
+                (int)screen_size_info.screen_position_pixels.x, (int)screen_size_info.screen_position_pixels.y,
+                (int)screen_size_info.screen_dimensions_pixels.width, (int)screen_size_info.screen_dimensions_pixels.height);
+#endif
+        }
+        else {
+#if !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
+            SDL_hax_SetFSWindowPosition(0,0,0,0);
+#endif
+        }
+    }
 
     menu.resizeusing = true;
 
@@ -2460,7 +2813,7 @@ void GFX_EndUpdate(const Bit16u *changedLines) {
     {
         sdl.must_redraw_all = false;
 
-#if !defined(C_SDL2)
+#if !defined(C_SDL2) && defined(SDL_DOSBOX_X_SPECIAL)
         sdl.surface->flags &= ~((unsigned int)SDL_HAX_NOREFRESH);
 #endif
 
@@ -2488,11 +2841,11 @@ void GFX_SetPalette(Bitu start,Bitu count,GFX_PalEntry * entries) {
 #if !defined(C_SDL2)
     /* I should probably not change the GFX_PalEntry :) */
     if (sdl.surface->flags & SDL_HWPALETTE) {
-        if (!SDL_SetPalette(sdl.surface,SDL_PHYSPAL,(SDL_Color *)entries,start,count)) {
+        if (!SDL_SetPalette(sdl.surface,SDL_PHYSPAL,(SDL_Color *)entries,(int)start,(int)count)) {
             E_Exit("SDL:Can't set palette");
         }
     } else {
-        if (!SDL_SetPalette(sdl.surface,SDL_LOGPAL,(SDL_Color *)entries,start,count)) {
+        if (!SDL_SetPalette(sdl.surface,SDL_LOGPAL,(SDL_Color *)entries,(int)start,(int)count)) {
             E_Exit("SDL:Can't set palette");
         }
     }
@@ -2506,7 +2859,13 @@ Bitu GFX_GetRGB(Bit8u red, Bit8u green, Bit8u blue) {
 
 #if C_OPENGL
         case SCREEN_OPENGL:
-            return (((unsigned int)blue << 0u) | ((unsigned int)green << 8u) | ((unsigned int)red << 16u)) | (255u << 24u);
+# if SDL_BYTEORDER == SDL_LIL_ENDIAN && defined(MACOSX) /* Mac OS X Intel builds use a weird RGBA order (alpha in the low 8 bits) */
+            //USE BGRA
+            return (((unsigned long)blue << 24ul) | ((unsigned long)green << 16ul) | ((unsigned long)red <<  8ul)) | (255ul <<  0ul);
+# else
+            //USE ARGB
+            return (((unsigned long)blue <<  0ul) | ((unsigned long)green <<  8ul) | ((unsigned long)red << 16ul)) | (255ul << 24ul);
+# endif
 #endif
 
 #if C_DIRECT3D
@@ -2789,8 +3148,14 @@ static void GUI_StartUp() {
     {
         SDL_DisplayMode dm;
         if (SDL_GetDesktopDisplayMode(0/*FIXME display index*/,&dm) == 0) {
-            sdl.desktop.full.width = dm.w;
-            sdl.desktop.full.height = dm.h;
+            if (sdl.desktop.full.width == 0) {
+                sdl.desktop.full.width_auto = true;
+                sdl.desktop.full.width = dm.w;
+            }
+            if (sdl.desktop.full.height == 0) {
+                sdl.desktop.full.height_auto = true;
+                sdl.desktop.full.height = dm.h;
+            }
             LOG_MSG("SDL2 reports desktop display mode %u x %u",dm.w,dm.h);
         }
         else {
@@ -2800,23 +3165,56 @@ static void GUI_StartUp() {
 #endif
 #if !defined(C_SDL2)
   #if SDL_VERSION_ATLEAST(1, 2, 10)
+  #ifdef WIN32
+    /* NTS: This should not print any warning whatsoever because Windows builds by default will use
+     *      the Windows API to disable DPI scaling of the main window, unless the user modifies the
+     *      setting through dosbox.conf or the command line. */
+    /* NTS: Mac OS X has high DPI scaling too, though Apple is wise to enable it by default only for
+     *      Macbooks with "Retina" displays. On Mac OS X, unless otherwise wanted by the user, it is
+     *      wise to let Mac OS X scale up the DOSBox-X window by 2x so that the DOS prompt is not
+     *      a teeny tiny window on the screen. */
+    const SDL_VideoInfo* vidinfo = SDL_GetVideoInfo();
+    if (vidinfo) {
+        int sdl_w = vidinfo->current_w;
+        int sdl_h = vidinfo->current_h;
+        int win_w = GetSystemMetrics(SM_CXSCREEN);
+        int win_h = GetSystemMetrics(SM_CYSCREEN);
+        if (sdl_w != win_w && sdl_h != win_h) 
+            LOG_MSG("Windows dpi/blurry apps scaling detected! The screen might be too large or not show properly,\n"
+                "please see the DOSBox Manual/README for details.\n");
+        }
+  #else
     if (!sdl.desktop.full.width || !sdl.desktop.full.height){
         //Can only be done on the very first call! Not restartable.
+        //On windows don't use it as SDL returns the values without taking in account the dpi scaling
         const SDL_VideoInfo* vidinfo = SDL_GetVideoInfo();
         if (vidinfo) {
-            sdl.desktop.full.width = vidinfo->current_w;
-            sdl.desktop.full.height = vidinfo->current_h;
+            if (sdl.desktop.full.width == 0) {
+                sdl.desktop.full.width_auto = true;
+                sdl.desktop.full.width = vidinfo->current_w;
+            }
+            if (sdl.desktop.full.height == 0) {
+                sdl.desktop.full.height_auto = true;
+                sdl.desktop.full.height = vidinfo->current_h;
+            }
+
+            LOG_MSG("SDL1 auto-detected desktop as %u x %u",
+                (unsigned int)sdl.desktop.full.width,
+                (unsigned int)sdl.desktop.full.height);
         }
     }
+  #endif
   #endif
 #endif
 
     int width=1024;
     int height=768;
     if (!sdl.desktop.full.width) {
+        sdl.desktop.full.width_auto = true;
         sdl.desktop.full.width=width;
     }
     if (!sdl.desktop.full.height) {
+        sdl.desktop.full.height_auto = true;
         sdl.desktop.full.height=height;
     }
     sdl.mouse.autoenable=section->Get_bool("autolock");
@@ -2831,7 +3229,9 @@ static void GUI_StartUp() {
     else if (feedback == "flash")
         sdl.mouse.autolock_feedback = AUTOLOCK_FEEDBACK_FLASH;
 
-    sdl.mouse.sensitivity=(unsigned int)section->Get_int("sensitivity");
+    Prop_multival* p3 = section->Get_multival("sensitivity");
+    sdl.mouse.xsensitivity = p3->GetSection()->Get_int("xsens");
+    sdl.mouse.ysensitivity = p3->GetSection()->Get_int("ysens");
     std::string output=section->Get_string("output");
 
     const std::string emulation = section->Get_string("mouse_emulation");
@@ -2962,11 +3362,6 @@ static void GUI_StartUp() {
     MAPPER_AddHandler(SwitchFullScreen,MK_f,MMODHOST,"fullscr","Fullscreen", &item);
     item->set_text("Toggle fullscreen");
 
-#if !defined(C_EMSCRIPTEN)//FIXME: Shutdown causes problems with Emscripten
-    MAPPER_AddHandler(Restart,MK_nothing,0,"restart","Restart", &item); /* This is less useful, and now has no default binding */
-    item->set_text("Restart DOSBox-X");
-#endif
-
     void PasteClipboard(bool bPressed); // emendelson from dbDOS adds MMOD2 to this for Ctrl-Alt-F5 for PasteClipboard
     MAPPER_AddHandler(PasteClipboard, MK_nothing, 0, "paste", "Paste Clipboard"); //end emendelson
 #if C_DEBUG
@@ -2975,6 +3370,11 @@ static void GUI_StartUp() {
 #else
     MAPPER_AddHandler(&PauseDOSBox, MK_pause, MMOD2, "pause", "Pause");
 #endif
+
+#if DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU
+    pause_menu_item_tag = mainMenu.get_item("mapper_pause").get_master_id() + DOSBoxMenu::nsMenuMinimumID;
+#endif
+
     MAPPER_AddHandler(&GUI_Run, MK_nothing, 0, "gui", "ShowGUI", &item);
     item->set_text("Configuration GUI");
 
@@ -3006,7 +3406,7 @@ void Mouse_AutoLock(bool enable) {
 
 bool Mouse_IsLocked()
 {
-	return sdl.mouse.locked;
+    return sdl.mouse.locked;
 }
 
 static void RedrawScreen(Bit32u nWidth, Bit32u nHeight) {
@@ -3107,18 +3507,6 @@ void GFX_HandleVideoResize(int width, int height) {
         sdl.desktop.full.width = width;
         sdl.desktop.full.height = height;
     }
-    /* TODO: Only if FULLSCREEN_DESKTOP */
-    {
-        SDL_DisplayMode dm;
-        if (SDL_GetDesktopDisplayMode(0/*FIXME display index*/,&dm) == 0) {
-            sdl.desktop.full.width = dm.w;
-            sdl.desktop.full.height = dm.h;
-            LOG_MSG("SDL2 reports desktop display mode %u x %u",dm.w,dm.h);
-        }
-        else {
-            LOG_MSG("SDL2 unable to determine desktop display mode, error %s",SDL_GetError());
-        }
-    }
 
     /* assume the resize comes from user preference UNLESS the window
      * is fullscreen or maximized */
@@ -3137,6 +3525,23 @@ void GFX_HandleVideoResize(int width, int height) {
     }
     else {
         UpdateWindowDimensions();
+    }
+
+    /* TODO: Only if FULLSCREEN_DESKTOP */
+    if (screen_size_info.screen_dimensions_pixels.width != 0 && screen_size_info.screen_dimensions_pixels.height != 0) {
+        sdl.desktop.full.width = (Bit16u)screen_size_info.screen_dimensions_pixels.width;
+        sdl.desktop.full.height = (Bit16u)screen_size_info.screen_dimensions_pixels.height;
+    }
+    else {
+        SDL_DisplayMode dm;
+        if (SDL_GetDesktopDisplayMode(0/*FIXME display index*/,&dm) == 0) {
+            sdl.desktop.full.width = dm.w;
+            sdl.desktop.full.height = dm.h;
+            LOG_MSG("SDL2 reports desktop display mode %u x %u",dm.w,dm.h);
+        }
+        else {
+            LOG_MSG("SDL2 unable to determine desktop display mode, error %s",SDL_GetError());
+        }
     }
 
     window_was_maximized = menu.maxwindow;
@@ -3295,17 +3700,23 @@ void GFX_SDLMenuTrackHover(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id) {
     (void)menu;//UNUSED
     if (mainMenu.menuUserHoverAt != item_id) {
         if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle) {
-            mainMenu.get_item(mainMenu.menuUserHoverAt).setHover(mainMenu,false);
-            mainMenu.get_item(mainMenu.menuUserHoverAt).drawMenuItem(mainMenu);
-            mainMenu.get_item(mainMenu.menuUserHoverAt).updateScreenFromItem(mainMenu);
+            auto &item = mainMenu.get_item(mainMenu.menuUserHoverAt);
+            item.setHover(mainMenu,false);
+            if (item.checkResetRedraw()) {
+                item.drawMenuItem(mainMenu);
+                item.updateScreenFromItem(mainMenu);
+            }
         }
 
         mainMenu.menuUserHoverAt = item_id;
 
         if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle) {
-            mainMenu.get_item(mainMenu.menuUserHoverAt).setHover(mainMenu,true);
-            mainMenu.get_item(mainMenu.menuUserHoverAt).drawMenuItem(mainMenu);
-            mainMenu.get_item(mainMenu.menuUserHoverAt).updateScreenFromItem(mainMenu);
+            auto &item = mainMenu.get_item(mainMenu.menuUserHoverAt);
+            item.setHover(mainMenu,true);
+            if (item.checkResetRedraw()) {
+                item.drawMenuItem(mainMenu);
+                item.updateScreenFromItem(mainMenu);
+            }
         }
 
         if (OpenGL_using())
@@ -3317,17 +3728,23 @@ void GFX_SDLMenuTrackHilight(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id)
     (void)menu;//UNUSED
     if (mainMenu.menuUserAttentionAt != item_id) {
         if (mainMenu.menuUserAttentionAt != DOSBoxMenu::unassigned_item_handle) {
-            mainMenu.get_item(mainMenu.menuUserAttentionAt).setHilight(mainMenu,false);
-            mainMenu.get_item(mainMenu.menuUserAttentionAt).drawMenuItem(mainMenu);
-            mainMenu.get_item(mainMenu.menuUserAttentionAt).updateScreenFromItem(mainMenu);
+            auto &item = mainMenu.get_item(mainMenu.menuUserAttentionAt);
+            item.setHilight(mainMenu,false);
+            if (item.checkResetRedraw()) {
+                item.drawMenuItem(mainMenu);
+                item.updateScreenFromItem(mainMenu);
+            }
         }
 
         mainMenu.menuUserAttentionAt = item_id;
 
         if (mainMenu.menuUserAttentionAt != DOSBoxMenu::unassigned_item_handle) {
-            mainMenu.get_item(mainMenu.menuUserAttentionAt).setHilight(mainMenu,true);
-            mainMenu.get_item(mainMenu.menuUserAttentionAt).drawMenuItem(mainMenu);
-            mainMenu.get_item(mainMenu.menuUserAttentionAt).updateScreenFromItem(mainMenu);
+            auto &item = mainMenu.get_item(mainMenu.menuUserAttentionAt);
+            item.setHilight(mainMenu,true);
+            if (item.checkResetRedraw()) {
+                item.drawMenuItem(mainMenu);
+                item.updateScreenFromItem(mainMenu);
+            }
         }
 
         if (OpenGL_using())
@@ -3351,13 +3768,18 @@ static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
     bool inputToScreen = false;
 
     /* limit mouse input to whenever the cursor is on the screen, or near the edge of the screen. */
-    if (sdl.mouse.locked || Mouse_GetButtonState() != 0)
+    if (is_paused)
+        inputToScreen = false;
+    else if (sdl.mouse.locked || Mouse_GetButtonState() != 0)
         inputToScreen = true;
     else
         inputToScreen = GFX_CursorInOrNearScreen(motion->x,motion->y);
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW /* SDL drawn menus */
-    if (!sdl.mouse.locked && !sdl.desktop.fullscreen && mainMenu.isVisible() && motion->y < mainMenu.menuBox.h && Mouse_GetButtonState() == 0) {
+    if (GFX_GetPreventFullscreen()) {
+        /* do NOT draw SDL menu in OpenGL mode when 3Dfx emulation is using OpenGL */
+    }
+    else if (!sdl.mouse.locked && !sdl.desktop.fullscreen && mainMenu.isVisible() && motion->y < mainMenu.menuBox.h && Mouse_GetButtonState() == 0) {
         GFX_SDLMenuTrackHover(mainMenu,mainMenu.display_list.itemFromPoint(mainMenu,motion->x,motion->y));
         SDL_ShowCursor(SDL_ENABLE);
 
@@ -3366,7 +3788,11 @@ static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
             sdl_opengl.menudraw_countdown = 2; // two GL buffers
             GFX_OpenGLRedrawScreen();
             GFX_DrawSDLMenu(mainMenu,mainMenu.display_list);
+# if defined(C_SDL2)
+            SDL_GL_SwapWindow(sdl.window);
+# else
             SDL_GL_SwapBuffers();
+# endif
 #endif
         }
  
@@ -3380,7 +3806,11 @@ static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
             sdl_opengl.menudraw_countdown = 2; // two GL buffers
             GFX_OpenGLRedrawScreen();
             GFX_DrawSDLMenu(mainMenu,mainMenu.display_list);
+# if defined(C_SDL2)
+            SDL_GL_SwapWindow(sdl.window);
+# else
             SDL_GL_SwapBuffers();
+# endif
 #endif
         }
     }
@@ -3405,10 +3835,10 @@ static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
     user_cursor_sw     = sdl.clip.w;
     user_cursor_sh     = sdl.clip.h;
 
-    auto xrel = static_cast<float>(motion->xrel) * sdl.mouse.sensitivity / 100.0f;
-    auto yrel = static_cast<float>(motion->yrel) * sdl.mouse.sensitivity / 100.0f;
-    auto x    = static_cast<float>(motion->x - sdl.clip.x) / (sdl.clip.w - 1) * sdl.mouse.sensitivity / 100.0f;
-    auto y    = static_cast<float>(motion->y - sdl.clip.y) / (sdl.clip.h - 1) * sdl.mouse.sensitivity / 100.0f;
+    auto xrel = static_cast<float>(motion->xrel) * sdl.mouse.xsensitivity / 100.0f;
+    auto yrel = static_cast<float>(motion->yrel) * sdl.mouse.ysensitivity / 100.0f;
+    auto x    = static_cast<float>(motion->x - sdl.clip.x) / (sdl.clip.w - 1) * sdl.mouse.xsensitivity / 100.0f;
+    auto y    = static_cast<float>(motion->y - sdl.clip.y) / (sdl.clip.h - 1) * sdl.mouse.ysensitivity / 100.0f;
     auto emu  = sdl.mouse.locked;
 
     const auto inside =
@@ -3434,9 +3864,9 @@ static void HandleMouseMotion(SDL_MouseMotionEvent * motion) {
     }
     else if (!user_cursor_locked)
     {
-        bool MOUSE_HasInterruptSub();
-        bool MOUSE_IsBeingPolled();
-        bool MOUSE_IsHidden();
+        extern bool MOUSE_HasInterruptSub();
+        extern bool MOUSE_IsBeingPolled();
+        extern bool MOUSE_IsHidden();
         /* Show only when DOS app is not using mouse */
 
 #if defined(C_SDL2)
@@ -3458,13 +3888,6 @@ void MenuFullScreenRedraw(void) {
     SDL_Flip(sdl.surface);
 #endif
 }
-
-#if defined(C_SDL2)
-static const SDL_TouchID no_touch_id = (SDL_TouchID)(~0ULL);
-static const SDL_FingerID no_finger_id = (SDL_FingerID)(~0ULL);
-static SDL_FingerID touchscreen_finger_lock = no_finger_id;
-static SDL_TouchID touchscreen_touch_lock = no_touch_id;
-#endif
 
 static struct {
     unsigned char*      bmp = NULL;
@@ -3518,7 +3941,11 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
     bool inMenu = false;
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW /* SDL drawn menus */
-    if (!sdl.mouse.locked && !sdl.desktop.fullscreen && mainMenu.isVisible() && button->y < mainMenu.menuBox.h) {
+    if (GFX_GetPreventFullscreen()) {
+        /* do NOT draw SDL menu in OpenGL mode when 3Dfx emulation is using OpenGL */
+        mainMenu.menuUserHoverAt = DOSBoxMenu::unassigned_item_handle;
+    }
+    else if (!sdl.mouse.locked && !sdl.desktop.fullscreen && mainMenu.isVisible() && button->y < mainMenu.menuBox.h) {
         GFX_SDLMenuTrackHover(mainMenu,mainMenu.display_list.itemFromPoint(mainMenu,button->x,button->y));
         inMenu = true;
     }
@@ -3597,7 +4024,11 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                         }
                     }
 
+# if defined(C_SDL2)
+                    SDL_GL_SwapWindow(sdl.window);
+# else
                     SDL_GL_SwapBuffers();
+# endif
 #endif
                 }
                 else {
@@ -3643,7 +4074,7 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                     if (!SDL_WaitEvent(&event)) break;
 #endif
 
-#if defined(C_SDL2)
+#if defined(C_SDL2) && !defined(IGNORE_TOUCHSCREEN)
                     switch (event.type) {
                         case SDL_FINGERDOWN:
                             if (touchscreen_finger_lock == no_finger_id &&
@@ -3714,6 +4145,18 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                                 runloop = false;
                             }
                             break;
+#if defined(C_SDL2)
+                        case SDL_WINDOWEVENT:
+                            switch (event.window.event) {
+                                case SDL_WINDOWEVENT_RESIZED:
+                                    GFX_HandleVideoResize(event.window.data1, event.window.data2);
+                                    runloop = false;
+                                    resized = true;
+                                    break;
+                                default:
+                                    break;
+                            }
+#endif
 #if !defined(C_SDL2)
                         case SDL_VIDEORESIZE:
                             UpdateWindowDimensions(); // FIXME: Use SDL window dimensions, except that on Windows, SDL won't tell us our actual dimensions
@@ -3762,6 +4205,8 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                             break;
                         case SDL_MOUSEMOTION:
                             {
+                                bool noRedrawNew = false,noRedrawOld = false;
+
                                 sel_item = DOSBoxMenu::unassigned_item_handle;
 
                                 auto search = popup_stack.end();
@@ -3790,6 +4235,11 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                                         mainMenu.get_item(mainMenu.menuUserHoverAt).setHover(mainMenu,false);
                                         if (mainMenu.get_item(mainMenu.menuUserHoverAt).get_type() == DOSBoxMenu::item_type_id)
                                             mainMenu.get_item(mainMenu.menuUserHoverAt).setHilight(mainMenu,false);
+                                        else if (mainMenu.get_item(mainMenu.menuUserHoverAt).get_type() == DOSBoxMenu::submenu_type_id) {
+                                            if (mainMenu.get_item(mainMenu.menuUserHoverAt).isHilight()) {
+                                                noRedrawOld = true;
+                                            }
+                                        }
                                     }
 
                                     if (sel_item != DOSBoxMenu::unassigned_item_handle) {
@@ -3808,6 +4258,10 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                                                 mainMenu.get_item(sel_item).setHilight(mainMenu,true).setHover(mainMenu,true);
                                                 popup_stack.push_back(sel_item);
                                                 redrawAll = true;
+                                            }
+                                            else {
+                                                /* no change in item state, don't bother redrawing */
+                                                noRedrawNew = true;
                                             }
                                         }
                                         else {
@@ -3836,16 +4290,20 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                                             redrawAll = true;
                                     }
 
-                                    if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle && !OpenGL_using() && !redrawAll) {
-                                        mainMenu.get_item(mainMenu.menuUserHoverAt).drawMenuItem(mainMenu);
-                                        mainMenu.get_item(mainMenu.menuUserHoverAt).updateScreenFromItem(mainMenu);
+                                    if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle && !OpenGL_using() && !redrawAll && !noRedrawOld) {
+                                        if (mainMenu.get_item(mainMenu.menuUserHoverAt).checkResetRedraw()) {
+                                            mainMenu.get_item(mainMenu.menuUserHoverAt).drawMenuItem(mainMenu);
+                                            mainMenu.get_item(mainMenu.menuUserHoverAt).updateScreenFromItem(mainMenu);
+                                        }
                                     }
 
                                     mainMenu.menuUserHoverAt = sel_item;
 
-                                    if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle && !OpenGL_using() && !redrawAll) {
-                                        mainMenu.get_item(mainMenu.menuUserHoverAt).drawMenuItem(mainMenu);
-                                        mainMenu.get_item(mainMenu.menuUserHoverAt).updateScreenFromItem(mainMenu);
+                                    if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle && !OpenGL_using() && !redrawAll && !noRedrawNew) {
+                                        if (mainMenu.get_item(mainMenu.menuUserHoverAt).checkResetRedraw()) {
+                                            mainMenu.get_item(mainMenu.menuUserHoverAt).drawMenuItem(mainMenu);
+                                            mainMenu.get_item(mainMenu.menuUserHoverAt).updateScreenFromItem(mainMenu);
+                                        }
                                     }
                                 }
                             }
@@ -3890,8 +4348,13 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                         }
 
 #if C_OPENGL
-                        if (OpenGL_using())
+                        if (OpenGL_using()) {
+# if defined(C_SDL2)
+                            SDL_GL_SwapWindow(sdl.window);
+# else
                             SDL_GL_SwapBuffers();
+# endif
+                        }
                         else
 #endif
                             MenuFullScreenRedraw();
@@ -3937,7 +4400,11 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                     mainMenu.setRedraw();
                     GFX_DrawSDLMenu(mainMenu,mainMenu.display_list);
 
+# if defined(C_SDL2)
+                    SDL_GL_SwapWindow(sdl.window);
+# else
                     SDL_GL_SwapBuffers();
+# endif
 
                     sdl_opengl.clear_countdown = 2;
                     sdl_opengl.menudraw_countdown = 2; // two GL buffers
@@ -3962,7 +4429,9 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
 #endif
 
     /* limit mouse input to whenever the cursor is on the screen, or near the edge of the screen. */
-    if (sdl.mouse.locked)
+    if (is_paused)
+        inputToScreen = false;
+    else if (sdl.mouse.locked)
         inputToScreen = true;
     else if (!inMenu)
         inputToScreen = GFX_CursorInOrNearScreen(button->x, button->y);
@@ -3973,7 +4442,7 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
         if (sdl.mouse.requestlock && !sdl.mouse.locked && mouse_notify_mode == 0) {
             CaptureMouseNotify();
             GFX_CaptureMouse();
-            // Dont pass klick to mouse handler
+            // Don't pass click to mouse handler
             break;
         }
         if (!sdl.mouse.autoenable && sdl.mouse.autolock && mouse_notify_mode == 0 && button->button == SDL_BUTTON_MIDDLE) {
@@ -4038,377 +4507,6 @@ static bool PasteClipboardNext(); // added emendelson from dbDOS
 bool GFX_IsFullscreen(void) {
     return sdl.desktop.fullscreen;
 }
-
-#if defined(__WIN32__) && !defined(C_SDL2) && !defined(HX_DOS)
-void OpenFileDialog( char * path_arg ) {
-    if(control->SecureMode()) {
-        LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
-        return;
-    }
-    DOS_MCB mcb(dos.psp()-1);
-    static char pcname[9];
-    mcb.GetFileName(pcname);
-    if(strlen(pcname)) return;
-
-    OPENFILENAME OpenFileName;
-    char szFile[MAX_PATH];
-    char CurrentDir[MAX_PATH];
-    const char * Temp_CurrentDir = CurrentDir;
-
-    if (Drives['C'-'A']) {
-        if (MessageBox(GetHWND(),
-            "Quick launch automatically mounts drive C in DOSBox.\nDrive C has already been mounted. Do you want to continue?",
-            "Warning",MB_YESNO)==IDNO) return;
-    }
-
-    if(path_arg) goto search;
-    szFile[0] = 0;
-
-    GetCurrentDirectory( MAX_PATH, CurrentDir );
-
-    OpenFileName.lStructSize = sizeof( OPENFILENAME );
-    OpenFileName.hwndOwner = NULL;
-    if(DOSBox_Kor())
-        OpenFileName.lpstrFilter = "실행 파일(*.com, *.exe, *.bat)\0*.com;*.exe;*.bat\0모든 파일(*.*)\0*.*\0";
-    else
-        OpenFileName.lpstrFilter = "Executable files(*.com, *.exe, *.bat)\0*.com;*.exe;*.bat\0All files(*.*)\0*.*\0";
-    OpenFileName.lpstrCustomFilter = NULL;
-    OpenFileName.nMaxCustFilter = 0;
-    OpenFileName.nFilterIndex = 0;
-    OpenFileName.lpstrFile = szFile;
-    OpenFileName.nMaxFile = sizeof( szFile );
-    OpenFileName.lpstrFileTitle = NULL;
-    OpenFileName.nMaxFileTitle = 0;
-    OpenFileName.lpstrInitialDir = CurrentDir;
-    OpenFileName.lpstrTitle = "Select an executable";
-    OpenFileName.nFileOffset = 0;
-    OpenFileName.nFileExtension = 0;
-    OpenFileName.lpstrDefExt = NULL;
-    OpenFileName.lCustData = 0;
-    OpenFileName.lpfnHook = NULL;
-    OpenFileName.lpTemplateName = NULL;
-    OpenFileName.Flags = OFN_EXPLORER;
-
-search:
-    if(GetOpenFileName( &OpenFileName ) || path_arg) {
-        WIN32_FIND_DATA FindFileData;
-        HANDLE hFind;
-        char drive  [_MAX_DRIVE]; 
-        char dir    [_MAX_DIR]; 
-        char fname  [_MAX_FNAME]; 
-        char ext    [_MAX_EXT]; 
-        char * path = 0;
-        if(path_arg) {
-            szFile[0] = 0;
-            sprintf(szFile,path_arg);
-        }
-        path = szFile;
-        _splitpath (path, drive, dir, fname, ext);
-        char ext_temp [_MAX_EXT]; ext_temp[0] = 0; sprintf(ext_temp,ext);
-
-        hFind = FindFirstFile(szFile, &FindFileData);
-        if (hFind == INVALID_HANDLE_VALUE) {
-            if(strcasecmp(ext,"")) goto search;
-            szFile[0] = 0;
-            ext[0] = 0; sprintf(ext,".com");
-            sprintf(szFile,"%s%s%s%s",drive,dir,fname,".com");
-            hFind = FindFirstFile(szFile, &FindFileData);
-            if (hFind == INVALID_HANDLE_VALUE) {
-                szFile[0] = 0;
-                ext[0] = 0; sprintf(ext,".exe");
-                sprintf(szFile,"%s%s%s%s",drive,dir,fname,".exe");
-                hFind = FindFirstFile(szFile, &FindFileData);
-                if (hFind == INVALID_HANDLE_VALUE) {
-                    szFile[0] = 0;
-                    ext[0] = 0; sprintf(ext,".bat");
-                    sprintf(szFile,"%s%s%s%s",drive,dir,fname,".bat");
-                    hFind = FindFirstFile(szFile, &FindFileData);
-                    if (hFind == INVALID_HANDLE_VALUE) {
-                        szFile[0] = 0;
-                        ext[0]=0;
-                        goto search;
-                    }
-                }
-            }
-        }
-
-        if((!strcmp(ext,".com")) || (!strcmp(ext,".exe")) || (!strcmp(ext,".bat"))) {
-            char pathname[DOS_PATHLENGTH];
-            sprintf(pathname,"%s%s",drive,dir);
-            MountDrive_2('C',pathname,"LOCAL");
-            DOS_SetDrive(toupper('C') - 'A');
-        } else {
-            LOG_MSG("GUI: Unsupported filename extension.");
-            goto godefault;
-        }
-
-        #define DOSNAMEBUF 256
-        char name1[DOSNAMEBUF+1];
-        sprintf(name1,"%s%s",fname,ext);
-        Bit16u n=1; Bit8u c='\n';
-        DOS_WriteFile(STDOUT,&c,&n);
-
-        DOS_Shell shell;
-        DOS_MCB mcb(dos.psp()-1);
-        static char name[9];
-        mcb.GetFileName(name);
-
-        SetCurrentDirectory( Temp_CurrentDir );
-        do {
-            shell.Execute(name1,(char*)(" "));
-            if(!strcmp(ext,".bat")) shell.RunInternal();
-            if (!strlen(name)) break;
-        } while (1);
-
-        if(strcmp(ext,".bat")) DOS_WriteFile(STDOUT,&c,&n);
-        shell.ShowPrompt();
-    }
-
-godefault:
-    SetCurrentDirectory( Temp_CurrentDir );
-    return;
-}
-
-void Go_Boot(const char boot_drive[_MAX_DRIVE]) {
-    if(control->SecureMode()) {
-        LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
-        return;
-    }
-
-    OPENFILENAME OpenFileName;
-    char szFile[MAX_PATH];
-    char CurrentDir[MAX_PATH];
-    const char * Temp_CurrentDir = CurrentDir;
-    szFile[0] = 0;
-    GetCurrentDirectory( MAX_PATH, CurrentDir );
-
-    OpenFileName.lStructSize = sizeof( OPENFILENAME );
-    OpenFileName.hwndOwner = NULL;
-
-    if(DOSBox_Kor())
-        OpenFileName.lpstrFilter = "이미지 파일(*.img, *.ima, *.pcjr, *.jrc)\0*.pcjr;*.img;*.ima;*.jrc\0모든 파일(*.*)\0*.*\0";
-    else
-        OpenFileName.lpstrFilter = "Image files(*.img, *.ima, *.pcjr, *.jrc)\0*.pcjr;*.img;*.ima;*.jrc\0All files(*.*)\0*.*\0";
-
-    OpenFileName.lpstrCustomFilter = NULL;
-    OpenFileName.nMaxCustFilter = 0;
-    OpenFileName.nFilterIndex = 0;
-    OpenFileName.lpstrFile = szFile;
-    OpenFileName.nMaxFile = sizeof( szFile );
-    OpenFileName.lpstrFileTitle = NULL;
-    OpenFileName.nMaxFileTitle = 0;
-    OpenFileName.lpstrInitialDir = CurrentDir;
-    OpenFileName.lpstrTitle = "Select an image file";
-    OpenFileName.nFileOffset = 0;
-    OpenFileName.nFileExtension = 0;
-    OpenFileName.lpstrDefExt = NULL;
-    OpenFileName.lCustData = 0;
-    OpenFileName.lpfnHook = NULL;
-    OpenFileName.lpTemplateName = NULL;
-    OpenFileName.Flags = OFN_EXPLORER;
-search:
-    if(GetOpenFileName( &OpenFileName )) {
-        WIN32_FIND_DATA FindFileData;
-        HANDLE hFind;
-        char drive  [_MAX_DRIVE]; 
-        char dir    [_MAX_DIR]; 
-        char fname  [_MAX_FNAME]; 
-        char ext    [_MAX_EXT]; 
-        char * path = 0;
-        path = szFile;
-        _splitpath (path, drive, dir, fname, ext);
-        char ext_temp [_MAX_EXT]; ext_temp[0] = 0; sprintf(ext_temp,ext);
-
-        hFind = FindFirstFile(szFile, &FindFileData);
-        if (hFind == INVALID_HANDLE_VALUE) goto search;
-
-        if((!strcmp(ext,".img")) || (!strcmp(ext,".pcjr")) || (!strcmp(ext,".jrc")) || (!strcmp(ext,".ima"))) {
-            extern Bitu ZDRIVE_NUM;
-            char root[4] = {(char)('A'+ZDRIVE_NUM),':','\\',0};
-            char cmd[20];
-            DOS_Shell shell;
-            Bit16u n=1; Bit8u c='\n';
-            if(strcmp(boot_drive,"a")) {
-                char szFile_pre[MAX_PATH];
-                szFile_pre[0] = 0;
-                strcpy(szFile_pre,boot_drive);
-                strcat(szFile_pre," -t hdd "); 
-                strcat(szFile_pre,szFile);
-                DOS_WriteFile(STDOUT,&c,&n);
-                cmd[0] = 0;
-                strcpy(cmd,root);
-                strcat(cmd,"imgmount.com");
-                shell.Execute(cmd,szFile_pre);
-                shell.RunInternal();
-            }
-            DOS_WriteFile(STDOUT,&c,&n);
-            strcat(szFile," -l ");
-            strcat(szFile,boot_drive);
-            cmd[0] = 0;
-            strcpy(cmd,root);
-            strcat(cmd,"boot.com");
-            shell.Execute(cmd,szFile);
-            shell.RunInternal();
-            DOS_WriteFile(STDOUT,&c,&n);
-            shell.ShowPrompt(); // if failed
-        } else {
-            LOG_MSG("GUI: Unsupported filename extension.");
-            goto godefault;
-        }
-    }
-
-godefault:
-    SetCurrentDirectory( Temp_CurrentDir );
-    return;
-}
-
-void Go_Boot2(const char boot_drive[_MAX_DRIVE]) {
-    Bit16u n=1; Bit8u c='\n';
-    DOS_WriteFile(STDOUT,&c,&n);
-    char temp[7];
-    extern Bitu ZDRIVE_NUM;
-    char root[4] = {(char)('A'+ZDRIVE_NUM),':','\\',0};
-    char cmd[20];
-    temp[0] = 0;
-    cmd[0] = 0;
-    strcpy(cmd,root);
-    strcat(cmd,"boot.com");
-    strcpy(temp,"-l ");
-    strcat(temp,boot_drive);
-    DOS_Shell shell;
-    shell.Execute(cmd,temp);
-    shell.RunInternal();
-    DOS_WriteFile(STDOUT,&c,&n);
-    shell.ShowPrompt(); // if failed
-}
-
-/* FIXME: Unused */
-void Drag_Drop( char * path_arg ) {
-    if(control->SecureMode()) {
-        LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
-        return;
-    }
-    DOS_MCB mcb(dos.psp()-1);
-    static char name[9];
-    mcb.GetFileName(name);
-    if((!path_arg) || (strlen(name)))  return;
-    WIN32_FIND_DATA FindFileData;
-    HANDLE hFind;
-    char drive  [_MAX_DRIVE]; 
-    char dir    [_MAX_DIR]; 
-    char fname  [_MAX_FNAME]; 
-    char ext    [_MAX_EXT]; 
-    char szFile[MAX_PATH];
-
-    szFile[0] = 0;
-    sprintf(szFile,path_arg);
-    char * path = szFile;
-    _splitpath (path, drive, dir, fname, ext);
-    char ext_temp [_MAX_EXT];
-    ext_temp[0] = 0;
-    sprintf(ext_temp,ext);
-
-    hFind = FindFirstFile(szFile, &FindFileData);
-    if (hFind == INVALID_HANDLE_VALUE) return;
-
-    if((!strcmp(ext,".com")) || (!strcmp(ext,".exe")) || (!strcmp(ext,".bat")))
-        OpenFileDialog(path_arg);
-    else
-        LOG_MSG("GUI: Unsupported filename extension.");
-}
-
-HHOOK hhk;
-LRESULT CALLBACK CBTProc(INT nCode, WPARAM wParam, LPARAM lParam) {
-    (void)lParam;
-    if( HCBT_ACTIVATE == nCode ) {
-        HWND hChildWnd;
-        hChildWnd = (HWND)wParam;
-        SetDlgItemText(hChildWnd,IDYES,"CD-ROM");
-        SetDlgItemText(hChildWnd,IDNO,"Floppy");
-        SetDlgItemText(hChildWnd,IDCANCEL,"Harddisk");
-        UnhookWindowsHookEx(hhk);
-    }
-    CallNextHookEx(hhk, nCode, wParam, lParam);
-    return 0;
-}
-
-int MountMessageBox( HWND hWnd, LPCTSTR lpText, LPCTSTR lpCaption, UINT uType ) {
-    hhk = SetWindowsHookEx( WH_CBT, &CBTProc, 0, GetCurrentThreadId() );
-    const int iRes = MessageBox( hWnd, lpText, lpCaption, uType | MB_SETFOREGROUND );
-        return iRes;
-}
-
-void OpenFileDialog_Img( char drive ) {
-    if(control->SecureMode()) {
-        LOG_MSG(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
-        return;
-    }
-    if (Drives[drive-'A']) {
-        LOG_MSG("GUI: Unmount drive %c first, and then try again.",drive);
-        return;
-    }
-    OPENFILENAME OpenFileName;
-    char szFile[MAX_PATH];
-    char CurrentDir[MAX_PATH];
-    const char * Temp_CurrentDir = CurrentDir;
-
-    szFile[0] = 0;
-    GetCurrentDirectory( MAX_PATH, CurrentDir );
-    OpenFileName.lStructSize = sizeof( OPENFILENAME );
-    OpenFileName.hwndOwner = NULL;
-
-    if(DOSBox_Kor())
-        OpenFileName.lpstrFilter = "이미지/ZIP 파일(*.ima, *.img, *.iso, *.cue, *.bin, *.mdf, *.zip, *.7z)\0*.ima;*.img;*.iso;*.mdf;*.zip;*.cue;*.bin;*.7z\0모든 파일(*.*)\0*.*\0";
-    else
-        OpenFileName.lpstrFilter = "Image/Zip files(*.ima, *.img, *.iso, *.cue, *.bin, *.mdf, *.zip, *.7z)\0*.ima;*.img;*.iso;*.mdf;*.zip;*.cue;*.bin;*.7z\0All files(*.*)\0*.*\0";
-
-    OpenFileName.lpstrCustomFilter = NULL;
-    OpenFileName.nMaxCustFilter = 0;
-    OpenFileName.nFilterIndex = 0;
-    OpenFileName.lpstrFile = szFile;
-    OpenFileName.nMaxFile = sizeof( szFile );
-    OpenFileName.lpstrFileTitle = NULL;
-    OpenFileName.nMaxFileTitle = 0;
-    OpenFileName.lpstrInitialDir = CurrentDir;
-    OpenFileName.lpstrTitle = "Select an image file";
-    OpenFileName.nFileOffset = 0;
-    OpenFileName.nFileExtension = 0;
-    OpenFileName.lpstrDefExt = NULL;
-    OpenFileName.lCustData = 0;
-    OpenFileName.lpfnHook = NULL;
-    OpenFileName.lpTemplateName = NULL;
-    OpenFileName.Flags = OFN_EXPLORER;
-
-search:
-    if(GetOpenFileName( &OpenFileName )) {
-        WIN32_FIND_DATA FindFileData;
-        HANDLE hFind;
-        hFind = FindFirstFile(szFile, &FindFileData);
-        if (hFind == INVALID_HANDLE_VALUE) goto search;
-        char drive2 [_MAX_DRIVE]; 
-        char dir    [_MAX_DIR]; 
-        char fname  [_MAX_FNAME]; 
-        char ext    [_MAX_EXT]; 
-        char * path = szFile;
-
-        _splitpath (path, drive2, dir, fname, ext);
-
-        if((!strcmp(ext,".img")) || (!strcmp(ext,".iso")) || (!strcmp(ext,".cue")) || (!strcmp(ext,".bin")) || (!strcmp(ext,".mdf"))) {
-            if(!strcmp(ext,".img")) {
-                int whichval=MountMessageBox(GetHWND(),"Drive type:","Mount as Image",MB_YESNOCANCEL);
-                if(whichval == IDYES) Mount_Img(drive,path);// CD-ROM
-                else if(whichval == IDNO) Mount_Img_Floppy(drive,path); // Floppy
-                else if(whichval == IDCANCEL)  Mount_Img_HDD(drive,path);// Harddisk
-            } else
-                Mount_Img(drive,path);
-        } else if(!strcmp(ext,".ima")) {
-            Mount_Img_Floppy(drive,path);
-        } else
-            LOG_MSG("GUI: Unsupported filename extension.");
-    }
-    SetCurrentDirectory( Temp_CurrentDir );
-}
-#endif
 
 void* GetSetSDLValue(int isget, std::string target, void* setval) {
     if (target == "wait_on_error") {
@@ -4482,7 +4580,7 @@ void* GetSetSDLValue(int isget, std::string target, void* setval) {
     return NULL;
 }
 
-#if defined(C_SDL2)
+#if defined(C_SDL2) && !defined(IGNORE_TOUCHSCREEN)
 static void FingerToFakeMouseMotion(SDL_TouchFingerEvent * finger) {
     SDL_MouseMotionEvent fake;
 
@@ -4626,16 +4724,47 @@ void GFX_EventsMouse()
 #endif
 }
 
+/* DOSBox SVN revision 4176:4177: For Linux/X11, Xorg 1.20.1
+ * will make spurious focus gain and loss events when locking the mouse in windowed mode.
+ *
+ * This has not been tested with DOSBox-X yet becaus I do not run Xorg 1.20.1, yet */
+#if defined(LINUX)
+#define SDL_XORG_FIX 1
+#else
+#define SDL_XORG_FIX 0
+#endif
+/* end patch fragment */
+
+bool gfx_in_mapper = false;
+
+#if defined(MACOSX)
+#define DB_POLLSKIP 3
+#else
+//Not used yet, see comment below
+#define DB_POLLSKIP 1
+#endif
+
 void GFX_Events() {
     CheckMapperKeyboardLayout();
 #if defined(C_SDL2) /* SDL 2.x---------------------------------- */
+    //Don't poll too often. This can be heavy on the OS, especially Macs.
+    //In idle mode 3000-4000 polls are done per second without this check.
+    //Macs, with this code,  max 250 polls per second. (non-macs unused default max 500)
+    //Currently not implemented for all platforms, given the ALT-TAB stuff for WIN32.
+#if defined (MACOSX)
+    static int last_check = 0;
+    int current_check = GetTicks();
+    if (current_check - last_check <=  DB_POLLSKIP) return;
+    last_check = current_check;
+#endif
+
     SDL_Event event;
 #if defined (REDUCE_JOYSTICK_POLLING)
-    static int poll_delay=0;
-    int time=GetTicks();
-    if (time-poll_delay>20) {
-        poll_delay=time;
-        if (sdl.num_joysticks>0)
+    static int poll_delay = 0;
+    int time = GetTicks();
+    if (time - poll_delay > 20) {
+        poll_delay = time;
+        if (sdl.num_joysticks > 0)
         {
             SDL_JoystickUpdate();
             MAPPER_UpdateJoysticks();
@@ -4662,6 +4791,17 @@ void GFX_Events() {
             case SDL_WINDOWEVENT_EXPOSED:
                 if (sdl.draw.callback) sdl.draw.callback( GFX_CallBackRedraw );
                 continue;
+            case SDL_WINDOWEVENT_LEAVE:
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+                void GFX_SDLMenuTrackHover(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+                void GFX_SDLMenuTrackHilight(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+
+                GFX_SDLMenuTrackHover(mainMenu,DOSBoxMenu::unassigned_item_handle);
+                GFX_SDLMenuTrackHilight(mainMenu,DOSBoxMenu::unassigned_item_handle);
+
+                GFX_DrawSDLMenu(mainMenu,mainMenu.display_list);
+#endif
+                break;
             case SDL_WINDOWEVENT_FOCUS_GAINED:
                 if (IsFullscreen() && !sdl.mouse.locked)
                     GFX_CaptureMouse();
@@ -4673,6 +4813,15 @@ void GFX_Events() {
                     CaptureMouseNotify();
                     GFX_CaptureMouse();
                 }
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+                void GFX_SDLMenuTrackHover(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+                void GFX_SDLMenuTrackHilight(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+
+                GFX_SDLMenuTrackHover(mainMenu,DOSBoxMenu::unassigned_item_handle);
+                GFX_SDLMenuTrackHilight(mainMenu,DOSBoxMenu::unassigned_item_handle);
+
+                GFX_DrawSDLMenu(mainMenu,mainMenu.display_list);
+#endif
                 SetPriority(sdl.priority.nofocus);
                 GFX_LosingFocus();
                 CPU_Enable_SkipAutoAdjust();
@@ -4762,11 +4911,13 @@ void GFX_Events() {
             HandleMouseButton(&event.button);
 #endif
             break;
+#if !defined(IGNORE_TOUCHSCREEN)
         case SDL_FINGERDOWN:
         case SDL_FINGERUP:
         case SDL_FINGERMOTION:
             HandleTouchscreenFinger(&event.tfinger);
             break;
+#endif
         case SDL_QUIT:
             throw(0);
             break;
@@ -4783,8 +4934,10 @@ void GFX_Events() {
             }
 #endif
         default:
+            gfx_in_mapper = true;
             void MAPPER_CheckEvent(SDL_Event * event);
             MAPPER_CheckEvent(&event);
+            gfx_in_mapper = false;
         }
     }
 #else /* SDL 1.x---------------------------------- */
@@ -4809,6 +4962,24 @@ void GFX_Events() {
 #endif
 
     while (SDL_PollEvent(&event)) {
+        /* DOSBox SVN revision 4176:4177: For Linux/X11, Xorg 1.20.1
+         * will make spurious focus gain and loss events when locking the mouse in windowed mode.
+         *
+         * This has not been tested with DOSBox-X yet becaus I do not run Xorg 1.20.1, yet */
+#if SDL_XORG_FIX
+        // Special code for broken SDL with Xorg 1.20.1, where pairs of inputfocus gain and loss events are generated
+        // when locking the mouse in windowed mode.
+        if (event.type == SDL_ACTIVEEVENT && event.active.state == SDL_APPINPUTFOCUS && event.active.gain == 0) {
+            SDL_Event test; //Check if the next event would undo this one.
+            if (SDL_PeepEvents(&test,1,SDL_PEEKEVENT,SDL_ACTIVEEVENTMASK) == 1 && test.active.state == SDL_APPINPUTFOCUS && test.active.gain == 1) {
+                // Skip both events.
+                SDL_PeepEvents(&test,1,SDL_GETEVENT,SDL_ACTIVEEVENTMASK);
+                continue;
+            }
+        }
+#endif
+        /* end patch fragment */
+
         switch (event.type) {
 #ifdef __WIN32__
         case SDL_SYSWMEVENT : {
@@ -4853,6 +5024,20 @@ void GFX_Events() {
                                 mainMenu.get_item("mapper_togmenu").check(!menu.toggle).refresh_item(mainMenu);
                             }
                             break;
+#if !defined(HX_DOS)
+                        case ID_WIN_SYSMENU_MAPPER:
+                            extern void MAPPER_Run(bool pressed);
+                            MAPPER_Run(false);
+                            break;
+                        case ID_WIN_SYSMENU_CFG_GUI:
+                            extern void GUI_Run(bool pressed);
+                            GUI_Run(false);
+                            break;
+                        case ID_WIN_SYSMENU_PAUSE:
+                            extern void PauseDOSBox(bool pressed);
+                            PauseDOSBox(true);
+                            break;
+#endif
                     }
                 default:
                     break;
@@ -4861,37 +5046,64 @@ void GFX_Events() {
 #endif
         case SDL_ACTIVEEVENT:
                 if (event.active.state & (SDL_APPINPUTFOCUS | SDL_APPACTIVE)) {
-                if (event.active.gain) {
-                    if (sdl.desktop.fullscreen && !sdl.mouse.locked)
-                        GFX_CaptureMouse();
-                    SetPriority(sdl.priority.focus);
-                    CPU_Disable_SkipAutoAdjust();
-					BIOS_SynchronizeNumLock();
-					BIOS_SynchronizeCapsLock();
-					BIOS_SynchronizeScrollLock();
-				} else {
-                    if (sdl.mouse.locked)
-                    {
-                        CaptureMouseNotify();
-                        GFX_CaptureMouse();
-                    }
+                    if (event.active.gain) {
+#ifdef WIN32
+                        if (!sdl.desktop.fullscreen) sdl.focus_ticks = GetTicks();
+#endif
+                        if (sdl.desktop.fullscreen && !sdl.mouse.locked)
+                            GFX_CaptureMouse();
+                        SetPriority(sdl.priority.focus);
+                        CPU_Disable_SkipAutoAdjust();
+                        BIOS_SynchronizeNumLock();
+                        BIOS_SynchronizeCapsLock();
+                        BIOS_SynchronizeScrollLock();
+                    } else {
+                        if (sdl.mouse.locked)
+                        {
+                            CaptureMouseNotify();
+                            GFX_CaptureMouse();
+                        }
 
 #if defined(WIN32)
-                    if (sdl.desktop.fullscreen)
-                        GFX_ForceFullscreenExit();
+                        if (sdl.desktop.fullscreen)
+                            GFX_ForceFullscreenExit();
 #endif
 
-                    SetPriority(sdl.priority.nofocus);
-                    GFX_LosingFocus();
-                    CPU_Enable_SkipAutoAdjust();
-                }
-            }
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+                        void GFX_SDLMenuTrackHover(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+                        void GFX_SDLMenuTrackHilight(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
 
-            /* Non-focus priority is set to pause; check to see if we've lost window or input focus
-             * i.e. has the window been minimised or made inactive?
-             */
-            if (sdl.priority.nofocus == PRIORITY_LEVEL_PAUSE) {
-                if ((event.active.state & (SDL_APPINPUTFOCUS | SDL_APPACTIVE)) && (!event.active.gain)) {
+                        GFX_SDLMenuTrackHover(mainMenu,DOSBoxMenu::unassigned_item_handle);
+                        GFX_SDLMenuTrackHilight(mainMenu,DOSBoxMenu::unassigned_item_handle);
+#endif
+
+                        SetPriority(sdl.priority.nofocus);
+                        GFX_LosingFocus();
+                        CPU_Enable_SkipAutoAdjust();
+                    }
+                }
+
+#if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+                if (event.active.state & SDL_APPMOUSEFOCUS) {
+                    if (!(event.active.gain & SDL_APPMOUSEFOCUS)) {
+                        /* losing focus or moving the mouse outside the window should un-hilight the currently selected menu item */
+                        void GFX_SDLMenuTrackHover(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+                        void GFX_SDLMenuTrackHilight(DOSBoxMenu &menu,DOSBoxMenu::item_handle_t item_id);
+
+                        GFX_SDLMenuTrackHover(mainMenu,DOSBoxMenu::unassigned_item_handle);
+                        GFX_SDLMenuTrackHilight(mainMenu,DOSBoxMenu::unassigned_item_handle);
+
+                    }
+                }
+
+                GFX_DrawSDLMenu(mainMenu,mainMenu.display_list);
+#endif
+
+                /* Non-focus priority is set to pause; check to see if we've lost window or input focus
+                 * i.e. has the window been minimised or made inactive?
+                 */
+                if (sdl.priority.nofocus == PRIORITY_LEVEL_PAUSE) {
+                    if ((event.active.state & (SDL_APPINPUTFOCUS | SDL_APPACTIVE)) && (!event.active.gain)) {
                     /* Window has lost focus, pause the emulator.
                      * This is similar to what PauseDOSBox() does, but the exit criteria is different.
                      * Instead of waiting for the user to hit Alt-Break, we wait for the window to
@@ -4964,6 +5176,10 @@ void GFX_Events() {
             if (event.key.keysym.sym==SDLK_RALT) sdl.raltstate = event.key.type;
             if (((event.key.keysym.sym==SDLK_TAB)) &&
                 ((sdl.laltstate==SDL_KEYDOWN) || (sdl.raltstate==SDL_KEYDOWN))) { MAPPER_LosingFocus(); break; }
+            // This can happen as well.
+            if (((event.key.keysym.sym == SDLK_TAB )) && (event.key.keysym.mod & KMOD_ALT)) break;
+            // ignore tab events that arrive just after regaining focus. (likely the result of alt-tab)
+            if ((event.key.keysym.sym == SDLK_TAB) && (GetTicks() - sdl.focus_ticks < 2)) break;
 #endif
 #if defined (MACOSX)            
         case SDL_KEYDOWN:
@@ -5335,7 +5551,20 @@ void SDL_SetupConfigSection() {
         Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, isVirtualBox ? "surface" : "opengl"); /* MinGW builds do not yet have Direct3D */
 # else
         Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "direct3d");
-#endif
+# endif
+#elif defined(MACOSX) && defined(C_OPENGL) && !defined(C_SDL2)
+        /* NTS: Lately, especially on Macbooks with Retina displays, OpenGL gives better performance
+                than the CG bitmap-based "surface" output.
+
+                On my dev system, "top" shows a 20% CPU load doing 1:1 CG Bitmap output to the screen
+                on a High DPI setup, while ignoring High DPI and rendering through Cocoa at 2x size
+                pegs the CPU core DOSBox-X is running on at 100% and emulation stutters.
+
+                So for the best experience, default to OpenGL.
+
+                Note that "surface" yields good performance with SDL2 and OS X because SDL2 doesn't
+                use the CGBitmap system, it uses OpenGL or Metal underneath automatically. */
+        Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "opengl");
 #else
         Pstring = sdl_sec->Add_string("output", Property::Changeable::Always, "surface");
 #endif
@@ -5350,9 +5579,13 @@ void SDL_SetupConfigSection() {
     Pstring->Set_help("Autolock status feedback type, i.e. visual, auditive, none.");
     Pstring->Set_values(feeds);
 
-    Pint = sdl_sec->Add_int("sensitivity",Property::Changeable::Always,100);
-    Pint->SetMinMax(1,1000);
-    Pint->Set_help("Mouse sensitivity.");
+    Pmulti = sdl_sec->Add_multi("sensitivity",Property::Changeable::Always, ",");
+    Pmulti->Set_help("Mouse sensitivity. The optional second parameter specifies vertical sensitivity (e.g. 100,-50).");
+    Pmulti->SetValue("100");
+    Pint = Pmulti->GetSection()->Add_int("xsens",Property::Changeable::Always,100);
+    Pint->SetMinMax(-1000,1000);
+    Pint = Pmulti->GetSection()->Add_int("ysens",Property::Changeable::Always,100);
+    Pint->SetMinMax(-1000,1000);
 
     const char * emulation[] = {"integration", "locked", "always", "never", nullptr};
     Pstring  = sdl_sec->Add_string("mouse_emulation", Property::Changeable::Always, emulation[1]);
@@ -5490,78 +5723,6 @@ static void launcheditor(std::string edit) {
 extern void DEBUG_ShutDown(Section * /*sec*/);
 #endif
 
-void restart_program(std::vector<std::string> & parameters) {
-    char** newargs = new char* [parameters.size()+1];
-    // parameter 0 is the executable path
-    // contents of the vector follow
-    // last one is NULL
-    for(Bitu i = 0; i < parameters.size(); i++) newargs[i]=(char*)parameters[i].c_str();
-    newargs[parameters.size()] = NULL;
-    if(sdl.desktop.fullscreen) SwitchFullScreen(1);
-    putenv((char*)("SDL_VIDEODRIVER="));
-#ifndef WIN32
-    SDL_CloseAudio();
-    SDL_Delay(50);
-    SDL_Quit();
-#if C_DEBUG
-    // shutdown curses
-    DEBUG_ShutDown(NULL);
-#endif
-#endif
-
-#ifndef WIN32
-    execvp(newargs[0], newargs);
-#endif
-#ifdef __MINGW32__
-#ifdef WIN32 // if failed under win32
-    PROCESS_INFORMATION pi;
-    STARTUPINFO si; 
-    ZeroMemory(&si,sizeof(si));
-    si.cb=sizeof(si);
-    ZeroMemory(&pi,sizeof(pi));
-
-    if(CreateProcess(NULL, newargs[0], NULL, NULL, false, 0, NULL, NULL, &si, &pi)) {
-        CloseHandle( pi.hProcess );
-        CloseHandle( pi.hThread );
-        SDL_CloseAudio();
-        SDL_Delay(50);
-        throw(0);
-        SDL_Quit();
-#if C_DEBUG
-    // shutdown curses
-        DEBUG_ShutDown(NULL);
-#endif
-    }
-#endif
-#else // if not MINGW
-#ifdef WIN32
-    char newargs_temp[32767];
-    strcpy(newargs_temp, "");
-    for(Bitu i = 1; i < parameters.size(); i++) {
-        strcat(newargs_temp, " ");
-        strcat(newargs_temp, newargs[i]);
-    }
-
-    if(ShellExecute(NULL, "open", newargs[0], newargs_temp, NULL, SW_SHOW)) {
-        SDL_CloseAudio();
-        SDL_Delay(50);
-        throw(0);
-        SDL_Quit();
-#if C_DEBUG
-    // shutdown curses
-        DEBUG_ShutDown(NULL);
-#endif
-    }
-#endif
-#endif
-    free(newargs);
-}
-
-void Restart(bool pressed) { // mapper handler
-    (void)pressed;//UNUSED
-    restart_program(control->startup_params);
-}
-
 static void launchcaptures(std::string const& edit) {
     std::string path,file;
     struct stat cstat;
@@ -5697,9 +5858,9 @@ void CheckNumLockState(void) {
     BYTE keyState[256];
 
     GetKeyboardState((LPBYTE)(&keyState));
-	if (keyState[VK_NUMLOCK] & 1) {
-		startup_state_numlock = true;
-	}
+    if (keyState[VK_NUMLOCK] & 1) {
+        startup_state_numlock = true;
+    }
 #endif
 }
 
@@ -5708,9 +5869,9 @@ void CheckCapsLockState(void) {
     BYTE keyState[256];
 
     GetKeyboardState((LPBYTE)(&keyState));
-	if (keyState[VK_CAPITAL] & 1) {
-		startup_state_capslock = true;
-	}
+    if (keyState[VK_CAPITAL] & 1) {
+        startup_state_capslock = true;
+    }
 #endif
 }
 
@@ -5719,9 +5880,9 @@ void CheckScrollLockState(void) {
     BYTE keyState[256];
 
     GetKeyboardState((LPBYTE)(&keyState));
-	if (keyState[VK_SCROLL] & 1) {
-		startup_state_scrlock = true;
-	}
+    if (keyState[VK_SCROLL] & 1) {
+        startup_state_scrlock = true;
+    }
 #endif
 }
 
@@ -5792,7 +5953,7 @@ bool DOSBOX_parse_argv() {
         if (optname == "version") {
             DOSBox_ShowConsole();
 
-            fprintf(stderr,"\nDOSBox version %s, copyright 2002-2015 DOSBox Team.\n\n",VERSION);
+            fprintf(stderr,"\nDOSBox version %s %s, copyright 2002-2019 DOSBox Team.\n\n",VERSION,SDL_STRING);
             fprintf(stderr,"DOSBox is written by the DOSBox Team (See AUTHORS file))\n");
             fprintf(stderr,"DOSBox comes with ABSOLUTELY NO WARRANTY.  This is free software,\n");
             fprintf(stderr,"and you are welcome to redistribute it under certain conditions;\n");
@@ -5808,7 +5969,7 @@ bool DOSBOX_parse_argv() {
             DOSBox_ShowConsole();
 
             fprintf(stderr,"\ndosbox [options]\n");
-            fprintf(stderr,"\nDOSBox version %s, copyright 2002-2015 DOSBox Team.\n\n",VERSION);
+            fprintf(stderr,"\nDOSBox version %s %s, copyright 2002-2019 DOSBox Team.\n\n",VERSION,SDL_STRING);
             fprintf(stderr,"  -h     -help                            Show this help\n");
             fprintf(stderr,"  -editconf                               Launch editor\n");
             fprintf(stderr,"  -opencaptures <param>                   Launch captures\n");
@@ -5856,6 +6017,9 @@ bool DOSBOX_parse_argv() {
         else if (optname == "c") {
             if (!control->cmdline->NextOptArgv(tmp)) return false;
             control->opt_c.push_back(tmp);
+        }
+        else if (optname == "alt-vga") {
+            control->opt_alt_vga_render = true;
         }
         else if (optname == "log-con") {
             control->opt_log_con = true;
@@ -6069,8 +6233,6 @@ void FDC_Primary_Init();
 void AUTOEXEC_Init();
 
 #if defined(WIN32)
-extern bool dpi_aware_enable;
-
 // NTS: I intend to add code that not only indicates High DPI awareness but also queries the monitor DPI
 //      and then factor the DPI into DOSBox's scaler and UI decisions.
 void Windows_DPI_Awareness_Init() {
@@ -6084,17 +6246,24 @@ void Windows_DPI_Awareness_Init() {
     // turn off DPI scaling so DOSBox-X doesn't look so blurry on Windows 8 & Windows 10.
     // use GetProcAddress and LoadLibrary so that these functions are not hard dependencies that prevent us from
     // running under Windows 7 or XP.
-    // 
-    // I'm also told that Windows 8.1 has SetProcessDPIAwareness but nobody seems to know where it is.
-    // Perhaps the tooth fairy can find it for me. Come on, Microsoft get your act together! [https://msdn.microsoft.com/en-us/library/windows/desktop/dn302122(v=vs.85).aspx]
+    HRESULT (WINAPI *__SetProcessDpiAwareness)(PROCESS_DPI_AWARENESS) = NULL; // windows 8.1
     BOOL (WINAPI *__SetProcessDPIAware)(void) = NULL; // vista/7/8/10
     HMODULE __user32;
+    HMODULE __shcore;
 
     __user32 = GetModuleHandle("USER32.DLL");
+    __shcore = GetModuleHandle("SHCORE.DLL");
 
     if (__user32)
         __SetProcessDPIAware = (BOOL(WINAPI *)(void))GetProcAddress(__user32, "SetProcessDPIAware");
+    if (__shcore)
+        __SetProcessDpiAwareness = (HRESULT (WINAPI *)(PROCESS_DPI_AWARENESS))GetProcAddress(__shcore, "SetProcessDpiAwareness");
 
+    if (__SetProcessDpiAwareness) {
+        LOG(LOG_MISC,LOG_DEBUG)("SHCORE.DLL exports SetProcessDpiAwareness function, calling it to signal we are DPI aware.");
+        if (__SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE) != S_OK)
+            LOG(LOG_MISC,LOG_DEBUG)("SetProcessDpiAwareness failed");
+    }
     if (__SetProcessDPIAware) {
         LOG(LOG_MISC,LOG_DEBUG)("USER32.DLL exports SetProcessDPIAware function, calling it to signal we are DPI aware.");
         __SetProcessDPIAware();
@@ -6140,13 +6309,13 @@ bool VM_Boot_DOSBox_Kernel() {
         Reflect_Menu();
 #endif
 
-        void update_pc98_function_row(bool enable);
+        void update_pc98_function_row(unsigned char setting,bool force_redraw=false);
 
         void DRIVES_Startup(Section *s);
         DRIVES_Startup(NULL);
 
         /* NEC's function key row seems to be deeply embedded in the CON driver. Am I wrong? */
-        if (IS_PC98_ARCH) update_pc98_function_row(true);
+        if (IS_PC98_ARCH) update_pc98_function_row(1);
 
         DispatchVMEvent(VM_EVENT_DOS_INIT_KERNEL_READY); // <- kernel is ready
 
@@ -6306,15 +6475,26 @@ bool dos_mouse_sensitivity_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::ite
     return true;
 }
 
+extern bool                         gdc_5mhz_mode_initial;
+
 bool vid_pc98_5mhz_gdc_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     if (IS_PC98_ARCH) {
         void gdc_5mhz_mode_update_vars(void);
         extern bool gdc_5mhz_mode;
+        extern bool gdc_clock_1;
+        extern bool gdc_clock_2;
 
         gdc_5mhz_mode = !gdc_5mhz_mode;
         gdc_5mhz_mode_update_vars();
+
+        // this is the user's command to change GDC setting, so it should appear
+        // as if the initial setting in the dip switches
+        gdc_5mhz_mode_initial = gdc_5mhz_mode;
+
+        gdc_clock_1 = gdc_5mhz_mode;
+        gdc_clock_2 = gdc_5mhz_mode;
 
         Section_prop * dosbox_section = static_cast<Section_prop *>(control->GetSection("dosbox"));
         if (gdc_5mhz_mode)
@@ -6373,9 +6553,9 @@ bool vid_pc98_enable_188user_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::i
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
     void gdc_egc_enable_update_vars(void);
-    extern bool enable_pc98_egc;
-    extern bool enable_pc98_grcg;
-    extern bool enable_pc98_16color;
+//    extern bool enable_pc98_egc;
+//    extern bool enable_pc98_grcg;
+//    extern bool enable_pc98_16color;
     extern bool enable_pc98_188usermod;
 
     if(IS_PC98_ARCH) {
@@ -6401,7 +6581,7 @@ bool vid_pc98_enable_egc_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item 
     extern bool enable_pc98_egc;
     extern bool enable_pc98_grcg;
     extern bool enable_pc98_16color;
-    extern bool enable_pc98_188usermod;
+//    extern bool enable_pc98_188usermod;
 
     if(IS_PC98_ARCH) {
         enable_pc98_egc = !enable_pc98_egc;
@@ -6476,6 +6656,29 @@ bool vid_pc98_enable_analog_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::it
             dosbox_section->HandleInputline("pc-98 enable 16-color=0");
 
         mainMenu.get_item("pc98_enable_analog").check(enable_pc98_16color).refresh_item(mainMenu);
+    }
+
+    return true;
+}
+
+bool vid_pc98_enable_analog256_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+    //NOTE: I thought that even later PC-9801s and some PC-9821s could use EGC features in digital 8-colors mode? 
+    extern bool enable_pc98_256color;
+    void gdc_16color_enable_update_vars(void);
+
+    if(IS_PC98_ARCH) {
+        enable_pc98_256color = !enable_pc98_256color;
+        gdc_16color_enable_update_vars();
+
+        Section_prop * dosbox_section = static_cast<Section_prop *>(control->GetSection("dosbox"));
+        if (enable_pc98_256color)
+            dosbox_section->HandleInputline("pc-98 enable 256-color=1");
+        else
+            dosbox_section->HandleInputline("pc-98 enable 256-color=0");
+
+        mainMenu.get_item("pc98_enable_analog256").check(enable_pc98_256color).refresh_item(mainMenu);
     }
 
     return true;
@@ -6633,7 +6836,7 @@ void PauseWithInterruptsEnabled(Bitu /*val*/) {
     /* we can ONLY do this when the CPU is either in real mode or v86 mode.
      * doing this from protected mode will only crash the game.
      * also require that interrupts are enabled before pausing. */
-	if (cpu.pmode) {
+    if (cpu.pmode) {
         if (!(reg_flags & FLAG_VM)) {
             PIC_AddEvent(PauseWithInterruptsEnabled,0.001);
             return;
@@ -6709,7 +6912,7 @@ bool doublebuf_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const m
     return true;
 }
 
-#if defined(LINUX) && !defined(C_SDL2)
+#if defined(LINUX)
 bool x11_on_top = false;
 #endif
 
@@ -6723,7 +6926,7 @@ bool is_always_on_top(void) {
     return !!(dwExStyle & WS_EX_TOPMOST);
 #elif defined(MACOSX) && !defined(C_SDL2)
     return macosx_on_top;
-#elif defined(LINUX) && !defined(C_SDL2)
+#elif defined(LINUX)
     return x11_on_top;
 #else
     return false;
@@ -6736,6 +6939,9 @@ extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
 #if defined(MACOSX) && !defined(C_SDL2)
 extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
 #endif
+#if defined(MACOSX) && !defined(C_SDL2)
+extern "C" void sdl1_hax_macosx_highdpi_set_enable(const bool enable);
+#endif
 
 void toggle_always_on_top(void) {
     bool cur = is_always_on_top();
@@ -6743,7 +6949,7 @@ void toggle_always_on_top(void) {
     sdl1_hax_set_topmost(!cur);
 #elif defined(MACOSX) && !defined(C_SDL2)
     sdl1_hax_set_topmost(macosx_on_top = (!cur));
-#elif defined(LINUX) && !defined(C_SDL2)
+#elif defined(LINUX)
     void LinuxX11_OnTop(bool f);
     LinuxX11_OnTop(x11_on_top = (!cur));
 #else
@@ -6754,6 +6960,9 @@ void toggle_always_on_top(void) {
 void BlankDisplay(void);
 
 bool refreshtest_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const menuitem) {
+    (void)menuitem;
+    (void)xmenu;
+
     BlankDisplay();
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
@@ -6767,8 +6976,8 @@ bool refreshtest_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * cons
 bool showdetails_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const menuitem) {
     (void)xmenu;//UNUSED
     (void)menuitem;//UNUSED
-    menu.hidecycles = !menu.hidecycles;
-    GFX_SetTitle(CPU_CycleMax, -1, -1, false);
+    menu.showrt = !(menu.hidecycles = !menu.hidecycles);
+    GFX_SetTitle((Bit32s)CPU_CycleMax, -1, -1, false);
     mainMenu.get_item("showdetails").check(!menu.hidecycles).refresh_item(mainMenu);
     return true;
 }
@@ -6778,6 +6987,24 @@ bool alwaysontop_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const
     (void)menuitem;//UNUSED
     toggle_always_on_top();
     mainMenu.get_item("alwaysontop").check(is_always_on_top()).refresh_item(mainMenu);
+    return true;
+}
+
+bool highdpienable_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
+    void RENDER_CallBack( GFX_CallBackFunctions_t function );
+
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+
+#if defined(MACOSX) && !defined(C_SDL2)
+    dpi_aware_enable = !dpi_aware_enable;
+    if (!control->opt_disable_dpi_awareness) {
+        sdl1_hax_macosx_highdpi_set_enable(dpi_aware_enable);
+        RENDER_CallBack(GFX_CallBackReset);
+    }
+#endif
+
+    mainMenu.get_item("highdpienable").check(dpi_aware_enable).refresh_item(mainMenu);
     return true;
 }
 
@@ -6870,10 +7097,93 @@ void OutputSettingMenuUpdate(void) {
 
 bool custom_bios = false;
 
+// OK why isn't this being set for Linux??
+#ifndef SDL_MAIN_NOEXCEPT
+#define SDL_MAIN_NOEXCEPT
+#endif
+
 //extern void UI_Init(void);
 int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     CommandLine com_line(argc,argv);
     Config myconf(&com_line);
+
+#if defined(WIN32) && !defined(HX_DOS)
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+#endif
+
+#if 0 /* VGA_Draw_2 self test: dot clock */
+    {
+        const double start_time = 0;
+        signed long long count = 0;
+        VGA_Draw_2 t;
+
+        fprintf(stderr,"VGA_Draw_2: 1000Hz\n");
+
+        t.dotclock.set_rate(1000,start_time);/*hz*/
+        for (int i=0;i < 10000;i++) {
+            t.dotclock.update(start_time + i);
+
+            if (labs(t.dotclock.ticks - (signed long long)i) > 1ll) { /* NTS: Expect possible +/- 1 error due to floating point */
+                fprintf(stderr,"* TEST FAILURE:\n");
+                fprintf(stderr,"   ticks=%lld ticks_prev=%lld\n",(signed long long)i,(signed long long)t.dotclock.ticks);
+                return 1;
+            }
+        }
+
+        t.dotclock.reset(start_time);
+        assert(t.dotclock.base == start_time);
+        assert(t.dotclock.ticks_prev == 0);
+        assert(t.dotclock.ticks == 0);
+
+        fprintf(stderr,"VGA_Draw_2: 1000Hz incremental\n");
+
+        count = 0;
+        t.dotclock.set_rate(1000,start_time);/*hz*/
+        for (int i=0;i < 10000;i++) {
+            t.dotclock.update(start_time + i);
+            count += t.dotclock.delta_get();
+            assert(t.dotclock.ticks == t.dotclock.ticks_prev);
+
+            if (labs(count - (signed long long)i) > 1ll) { /* NTS: Expect possible +/- 1 error due to floating point */
+                fprintf(stderr,"* TEST FAILURE:\n");
+                fprintf(stderr,"   count=%lld ticks=%lld ticks_prev=%lld\n",count,(signed long long)i,(signed long long)t.dotclock.ticks);
+                return 1;
+            }
+
+            signed long long rc = t.dotclock.ticks2pic(count);
+            if (labs(rc - (signed long long)i) > 1ll) { /* NTS: Expect possible +/- 1 error due to floating point */
+                fprintf(stderr,"* TEST FAILURE:\n");
+                fprintf(stderr,"   count=%lld ticks=%lld ticks_prev=%lld rc=%lld\n",count,(signed long long)i,(signed long long)t.dotclock.ticks,rc);
+                return 1;
+            }
+        }
+
+        fprintf(stderr,"VGA_Draw_2: 1000Hz inc then 100Hz inc\n");
+
+        count = 0;
+        t.dotclock.set_rate(100,start_time + 1000);/*hz, rate change*/
+        for (int i=0;i < 10000;i++) {
+            t.dotclock.update(start_time + 1000 + (i * 10));/*1ms * 10 = 10ms = 100Hz */
+            count += t.dotclock.delta_get();
+            assert(t.dotclock.ticks == t.dotclock.ticks_prev);
+
+            if (labs(count - (signed long long)i) > 1ll) { /* NTS: Expect possible +/- 1 error due to floating point */
+                fprintf(stderr,"* TEST FAILURE:\n");
+                fprintf(stderr,"   count=%lld ticks=%lld ticks_prev=%lld\n",count,(signed long long)i,(signed long long)t.dotclock.ticks);
+                return 1;
+            }
+
+            signed long long rc = t.dotclock.ticks2pic(count);
+            if (labs(rc - ((signed long long)(i * 10) + 1000 + start_time)) > 1ll) { /* NTS: Expect possible +/- 1 error due to floating point */
+                fprintf(stderr,"* TEST FAILURE:\n");
+                fprintf(stderr,"   count=%lld ticks=%lld ticks_prev=%lld rc=%lld\n",count,(signed long long)i,(signed long long)t.dotclock.ticks,rc);
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+#endif
 
 #if C_EMSCRIPTEN
     control->opt_debug = true;
@@ -6919,15 +7229,15 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     /* If that's true, then we can move one level up the tree and look for */
     /* /blah/blah/dosbox-x.app/Contents/Resources */
     {
-    const char *ref = argv[0];
-    const char *s = strrchr(ref,'/');
-    if (s != NULL) {
-        if (s > ref) s--;
-        while (s > ref && *s != '/') s--;
-        if (!strncasecmp(s,"/MacOS/",7)) {
-            MacOSXResPath = std::string(ref,(size_t)(s-ref)) + "/Resources";
+        const char *ref = argv[0];
+        const char *s = strrchr(ref,'/');
+        if (s != NULL) {
+            if (s > ref) s--;
+            while (s > ref && *s != '/') s--;
+            if (!strncasecmp(s,"/MacOS/",7)) {
+                MacOSXResPath = std::string(ref,(size_t)(s-ref)) + "/Resources";
+            }
         }
-    }
     }
 
     /* If we were launched by the Finder, the current working directory will usually be
@@ -6952,7 +7262,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 #endif
 
     {
-        std::string tmp,config_path;
+        std::string tmp,config_path,config_combined;
 
         /* -- parse command line arguments */
         if (!DOSBOX_parse_argv()) return 1;
@@ -7011,22 +7321,22 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
             tmp.clear();
             Cross::GetPlatformConfigDir(config_path);
             Cross::GetPlatformConfigName(tmp);
-            config_path += tmp;
+            config_combined = config_path + tmp;
 
-            LOG(LOG_MISC,LOG_DEBUG)("Loading config file according to -userconf from %s",config_path.c_str());
-            control->ParseConfigFile(config_path.c_str());
+            LOG(LOG_MISC,LOG_DEBUG)("Loading config file according to -userconf from %s",config_combined.c_str());
+            control->ParseConfigFile(config_combined.c_str());
             if (!control->configfiles.size()) {
                 //Try to create the userlevel configfile.
                 tmp.clear();
                 Cross::CreatePlatformConfigDir(config_path);
                 Cross::GetPlatformConfigName(tmp);
-                config_path += tmp;
+                config_combined = config_path + tmp;
 
-                LOG(LOG_MISC,LOG_DEBUG)("Attempting to write config file according to -userconf, to %s",config_path.c_str());
-                if (control->PrintConfig(config_path.c_str())) {
-                    LOG(LOG_MISC,LOG_NORMAL)("Generating default configuration. Writing it to %s",config_path.c_str());
+                LOG(LOG_MISC,LOG_DEBUG)("Attempting to write config file according to -userconf, to %s",config_combined.c_str());
+                if (control->PrintConfig(config_combined.c_str())) {
+                    LOG(LOG_MISC,LOG_NORMAL)("Generating default configuration. Writing it to %s",config_combined.c_str());
                     //Load them as well. Makes relative paths much easier
-                    control->ParseConfigFile(config_path.c_str());
+                    control->ParseConfigFile(config_combined.c_str());
                 }
             }
         }
@@ -7037,6 +7347,9 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
             if (!control->ParseConfigFile(cfg.c_str())) {
                 // try to load it from the user directory
                 control->ParseConfigFile((config_path + cfg).c_str());
+                if (!control->ParseConfigFile((config_path + cfg).c_str())) {
+                LOG_MSG("CONFIG: Can't open specified config file: %s",cfg.c_str());
+                }
             }
         }
 
@@ -7077,7 +7390,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 
         /* -- Welcome to DOSBox-X! */
         LOG_MSG("DOSBox-X version %s",VERSION);
-        LOG(LOG_MISC,LOG_NORMAL)("Copyright 2002-2015 enhanced branch by The Great Codeholio, forked from the main project by the DOSBox Team, published under GNU GPL.");
+        LOG(LOG_MISC,LOG_NORMAL)("Copyright 2002-2019 enhanced branch by The Great Codeholio, forked from the main project by the DOSBox Team, published under GNU GPL.");
 
 #if defined(MACOSX)
         LOG_MSG("Mac OS X EXE path: %s",MacOSXEXEPath.c_str());
@@ -7145,19 +7458,43 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 
         sdl.init_ignore = true;
 
+    {
+        Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
+        assert(section != NULL);
+
+        // boot-time option whether or not to report ourself as "DPI aware" to Windows so the
+        // DWM doesn't upscale our window for backwards compat.
+        dpi_aware_enable = section->Get_bool("dpi aware");
+    }
+
 #ifdef WIN32
         /* Windows Vista/7/8/10 DPI awareness. If we don't tell Windows we're high DPI aware, the DWM will
          * upscale our window to emulate a 96 DPI display which on high res screen will make our UI look blurry.
          * But we obey the user if they don't want us to do that. */
         Windows_DPI_Awareness_Init();
 #endif
+#if defined(MACOSX) && !defined(C_SDL2)
+    /* Our SDL1 in-tree library has a High DPI awareness function for Mac OS X now */
+        if (!control->opt_disable_dpi_awareness)
+            sdl1_hax_macosx_highdpi_set_enable(dpi_aware_enable);
+#endif
+
+#ifdef MACOSX
+        osx_detect_nstouchbar();/*assigns to has_touch_bar_support*/
+        if (has_touch_bar_support) {
+            LOG_MSG("Mac OS X: NSTouchBar support detected in system");
+            osx_init_touchbar();
+        }
+
+        extern void osx_init_dock_menu(void);
+        osx_init_dock_menu();
+
+        void qz_set_match_monitor_cb(void);
+        qz_set_match_monitor_cb();
+#endif
 
         /* -- SDL init */
-#if defined(C_SDL2)
-        if (SDL_Init(SDL_INIT_AUDIO|SDL_INIT_VIDEO|SDL_INIT_TIMER|/*SDL_INIT_CDROM|*/SDL_INIT_NOPARACHUTE) >= 0)
-#else
-        if (SDL_Init(SDL_INIT_AUDIO|SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_CDROM|SDL_INIT_NOPARACHUTE) >= 0)
-#endif
+        if (SDL_Init(SDL_INIT_AUDIO|SDL_INIT_VIDEO|SDL_INIT_TIMER|SDL_INIT_NOPARACHUTE) >= 0)
             sdl.inited = true;
         else
             E_Exit("Can't init SDL %s",SDL_GetError());
@@ -7182,7 +7519,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         KeyboardLayoutDetect();
         SetMapperKeyboardLayout(host_keyboard_layout);
 
-        /* -- -- Initialise Joystick seperately. This way we can warn when it fails instead of exiting the application */
+        /* -- -- Initialise Joystick and CD-ROM seperately. This way we can warn when it fails instead of exiting the application */
         LOG(LOG_MISC,LOG_DEBUG)("Initializing SDL joystick subsystem...");
         if (SDL_InitSubSystem(SDL_INIT_JOYSTICK) >= 0) {
             sdl.num_joysticks = (Bitu)SDL_NumJoysticks();
@@ -7192,6 +7529,12 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
             LOG(LOG_GUI,LOG_WARN)("Failed to init joystick support");
             sdl.num_joysticks = 0;
         }
+
+#if !defined(C_SDL2)
+        if (SDL_InitSubSystem(SDL_INIT_CDROM) < 0) {
+            LOG(LOG_GUI,LOG_WARN)("Failed to init CD-ROM support");
+        }
+#endif
 
         /* must redraw after modeset */
         sdl.must_redraw_all = true;
@@ -7402,6 +7745,8 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
                     set_callback_function(vid_pc98_enable_grcg_menu_callback);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"pc98_enable_analog").set_text("Enable analog display").
                     set_callback_function(vid_pc98_enable_analog_menu_callback);
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id,"pc98_enable_analog256").set_text("Enable analog 256-color display").
+                    set_callback_function(vid_pc98_enable_analog256_menu_callback);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"pc98_enable_188user").set_text("Enable 188+ user CG cells").
                     set_callback_function(vid_pc98_enable_188user_menu_callback);
                 mainMenu.alloc_item(DOSBoxMenu::item_type_id,"pc98_clear_text").set_text("Clear text layer").
@@ -7630,7 +7975,8 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_cad").set_text("Ctrl+Alt+Del").set_callback_function(sendkey_preset_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, "desktop.doublebuf", 0));
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"showdetails").set_text("Show details").set_callback_function(showdetails_menu_callback).check(!menu.hidecycles);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"showdetails").set_text("Show details").set_callback_function(showdetails_menu_callback).check(!menu.hidecycles && !menu.showrt);
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"highdpienable").set_text("High DPI enable").set_callback_function(highdpienable_menu_callback).check(dpi_aware_enable);
 
         mainMenu.get_item("mapper_blankrefreshtest").set_text("Refresh test (blank display)").set_callback_function(refreshtest_menu_callback).refresh_item(mainMenu);
 
@@ -7651,6 +7997,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         mainMenu.get_item("pc98_enable_egc").enable(IS_PC98_ARCH);
         mainMenu.get_item("pc98_enable_grcg").enable(IS_PC98_ARCH);
         mainMenu.get_item("pc98_enable_analog").enable(IS_PC98_ARCH);
+        mainMenu.get_item("pc98_enable_analog256").enable(IS_PC98_ARCH);
         mainMenu.get_item("pc98_enable_188user").enable(IS_PC98_ARCH);
         mainMenu.get_item("pc98_clear_text").enable(IS_PC98_ARCH);
         mainMenu.get_item("pc98_clear_graphics").enable(IS_PC98_ARCH);
@@ -7694,15 +8041,67 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
 #endif
         mainMenu.rebuild();
 
-#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU
-        /* -- menu */
-        MainMenu = mainMenu.getWinMenu();
-#endif
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
         mainMenu.screenWidth = (unsigned int)sdl.surface->w;
+        mainMenu.screenHeight = (unsigned int)sdl.surface->h;
         mainMenu.updateRect();
 #endif
+#if defined(WIN32) && !defined(HX_DOS)
+        /* Windows 7 taskbar extension support */
+        {
+            HRESULT hr;
 
+            hr = CoCreateInstance(CLSID_TaskbarList, NULL, CLSCTX_SERVER, IID_ITaskbarList3, (LPVOID*)(&winTaskbarList));
+            if (hr == S_OK) {
+                LOG_MSG("Windows: IID_ITaskbarList3 is available");
+
+#if !defined(C_SDL2)
+                THUMBBUTTON buttons[8];
+                int buttoni = 0;
+
+                {
+                    THUMBBUTTON &b = buttons[buttoni++];
+                    memset(&b, 0, sizeof(b));
+                    b.iId = ID_WIN_SYSMENU_MAPPER;
+                    b.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_MAPPER));
+                    b.dwMask = THB_TOOLTIP | THB_FLAGS | THB_ICON;
+                    b.dwFlags = THBF_ENABLED | THBF_DISMISSONCLICK;
+                    wcscpy(b.szTip, L"Mapper");
+                }
+
+                {
+                    THUMBBUTTON &b = buttons[buttoni++];
+                    memset(&b, 0, sizeof(b));
+                    b.iId = ID_WIN_SYSMENU_CFG_GUI;
+                    b.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_CFG_GUI));
+                    b.dwMask = THB_TOOLTIP | THB_FLAGS | THB_ICON;
+                    b.dwFlags = THBF_ENABLED | THBF_DISMISSONCLICK;
+                    wcscpy(b.szTip, L"Configuration GUI");
+                }
+
+                {
+                    THUMBBUTTON &b = buttons[buttoni++];
+                    memset(&b, 0, sizeof(b));
+                    b.iId = 1;
+                    b.dwMask = THB_FLAGS;
+                    b.dwFlags = THBF_DISABLED | THBF_NONINTERACTIVE | THBF_NOBACKGROUND;
+                }
+
+                {
+                    THUMBBUTTON &b = buttons[buttoni++];
+                    memset(&b, 0, sizeof(b));
+                    b.iId = ID_WIN_SYSMENU_PAUSE;
+                    b.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_PAUSE));
+                    b.dwMask = THB_TOOLTIP | THB_FLAGS | THB_ICON;
+                    b.dwFlags = THBF_ENABLED;
+                    wcscpy(b.szTip, L"Pause");
+                }
+
+                winTaskbarList->ThumbBarAddButtons(GetHWND(), buttoni, buttons);
+#endif
+            }
+        }
+#endif
         {
             Section_prop *section = static_cast<Section_prop *>(control->GetSection("SDL"));
             assert(section != NULL);
@@ -7733,6 +8132,7 @@ fresh_boot:
         wait_debugger = false;
         reboot_machine = false;
         dos_kernel_shutdown = false;
+        guest_msdos_mcb_chain = (Bit16u)(~0u);
 
         /* NTS: CPU reset handler, and BIOS init, has the instruction pointer poised to run through BIOS initialization,
          *      which will then "boot" into the DOSBox kernel, and then the shell, by calling VM_Boot_DOSBox_Kernel() */
@@ -7834,8 +8234,8 @@ fresh_boot:
 
             /* revector some dos-allocated interrupts */
             if (!reboot_machine) {
-                real_writed(0,0x01*4,BIOS_DEFAULT_HANDLER_LOCATION);
-                real_writed(0,0x03*4,BIOS_DEFAULT_HANDLER_LOCATION);
+                real_writed(0,0x01*4,(Bit32u)BIOS_DEFAULT_HANDLER_LOCATION);
+                real_writed(0,0x03*4,(Bit32u)BIOS_DEFAULT_HANDLER_LOCATION);
             }
 
             /* shutdown DOSBox's virtual drive Z */
@@ -7918,6 +8318,10 @@ fresh_boot:
 
         if (reboot_machine) {
             LOG_MSG("Rebooting the system\n");
+
+            boothax = BOOTHAX_NONE;
+            guest_msdos_LoL = 0;
+            guest_msdos_mcb_chain = 0;
 
             void CPU_Snap_Back_Forget();
             /* Shutdown everything. For shutdown to work properly we must force CPU to real mode */
@@ -8055,6 +8459,13 @@ fresh_boot:
 
     SDL_Quit();//Let's hope sdl will quit as well when it catches an exception
 
+#if defined(WIN32) && !defined(HX_DOS)
+    if (winTaskbarList != NULL) {
+        winTaskbarList->Release();
+        winTaskbarList = NULL;
+    }
+#endif
+
     mainMenu.unbuild();
     mainMenu.clear_all_menu_items();
 
@@ -8121,5 +8532,12 @@ void GUI_ResetResize(bool pressed) {
 
 bool MOUSE_IsLocked()
 {
-	return sdl.mouse.locked;
+    return sdl.mouse.locked;
 }
+
+#if defined(C_SDL2) && defined(C_OPENGL)/*HACK*/
+void SDL_GL_SwapBuffers(void) {
+    SDL_GL_SwapWindow(sdl.window);
+}
+#endif
+

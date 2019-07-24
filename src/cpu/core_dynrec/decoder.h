@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -266,12 +266,12 @@ restart_prefix:
 			break;
 
 		case 0x60:
-			if (decode.big_op) gen_call_function_raw((void *)&dynrec_pusha_dword);
-			else gen_call_function_raw((void *)&dynrec_pusha_word);
+			if (decode.big_op) gen_call_function_raw(dynrec_pusha_dword);
+			else gen_call_function_raw(dynrec_pusha_word);
 			break;
 		case 0x61:
-			if (decode.big_op) gen_call_function_raw((void *)&dynrec_popa_dword);
-			else gen_call_function_raw((void *)&dynrec_popa_word);
+			if (decode.big_op) gen_call_function_raw(dynrec_popa_dword);
+			else gen_call_function_raw(dynrec_popa_word);
 			break;
 
 //		case 0x62: BOUND missing
@@ -353,11 +353,11 @@ restart_prefix:
 
 		case 0x9c:	// pushf
 			AcquireFlags(FMASK_TEST);
-			gen_call_function_I((void *)&CPU_PUSHF,decode.big_op);
+			gen_call_function_I(CPU_PUSHF,decode.big_op);
 			dyn_check_exception(FC_RETOP);
 			break;
 		case 0x9d:	// popf
-			gen_call_function_I((void *)&CPU_POPF,decode.big_op);
+			gen_call_function_I(CPU_POPF,decode.big_op);
 			dyn_check_exception(FC_RETOP);
 			InvalidateFlags();
 			break;
@@ -446,7 +446,9 @@ restart_prefix:
 		case 0xcb:dyn_ret_far(0);goto finish_block;
 
 		// int/iret
+#if !(C_DEBUG)
 		case 0xcd:dyn_interrupt(decode_fetchb());goto finish_block;
+#endif
 		case 0xcf:dyn_iret();goto finish_block;
 
 //		case 0xd4: AAM missing
@@ -534,33 +536,33 @@ restart_prefix:
 			goto restart_prefix;
 
 		case 0xf5:		//CMC
-			gen_call_function_raw((void*)dynrec_cmc);
+			gen_call_function_raw(dynrec_cmc);
 			break;
 		case 0xf8:		//CLC
-			gen_call_function_raw((void*)dynrec_clc);
+			gen_call_function_raw(dynrec_clc);
 			break;
 		case 0xf9:		//STC
-			gen_call_function_raw((void*)dynrec_stc);
+			gen_call_function_raw(dynrec_stc);
 			break;
 
 		case 0xf6:dyn_grp3_eb();break;
 		case 0xf7:dyn_grp3_ev();break;
 
 		case 0xfa:		//CLI
-			gen_call_function_raw((void *)&CPU_CLI);
+			gen_call_function_raw(CPU_CLI);
 			dyn_check_exception(FC_RETOP);
 			break;
 		case 0xfb:		//STI
-			gen_call_function_raw((void *)&CPU_STI);
+			gen_call_function_raw(CPU_STI);
 			dyn_check_exception(FC_RETOP);
 			if (max_opcodes<=0) max_opcodes=1;		//Allow 1 extra opcode
 			break;
 
 		case 0xfc:		//CLD
-			gen_call_function_raw((void*)dynrec_cld);
+			gen_call_function_raw(dynrec_cld);
 			break;
 		case 0xfd:		//STD
-			gen_call_function_raw((void*)dynrec_std);
+			gen_call_function_raw(dynrec_std);
 			break;
 
 		case 0xfe:

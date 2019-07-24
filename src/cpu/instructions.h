@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 /* Jumps */
@@ -802,6 +802,8 @@ extern bool enable_fpu;
 {															\
 	reg_ax=((Bit8s)reg_al) * ((Bit8s)(load(op1)));			\
 	FillFlagsNoCFOF();										\
+	SETFLAGBIT(ZF,reg_al == 0);								\
+	SETFLAGBIT(SF,reg_al & 0x80);							\
 	if ((reg_ax & 0xff80)==0xff80 ||						\
 		(reg_ax & 0xff80)==0x0000) {						\
 		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
@@ -817,8 +819,10 @@ extern bool enable_fpu;
 	reg_ax=(Bit16u)(temps);									\
 	reg_dx=(Bit16u)(temps >> 16);							\
 	FillFlagsNoCFOF();										\
-	if (((temps & 0xffff8000)==0xffff8000 ||				\
-		(temps & 0xffff8000)==0x0000)) {					\
+	SETFLAGBIT(ZF,reg_ax == 0);								\
+	SETFLAGBIT(SF,reg_ax & 0x8000);							\
+	if ((((unsigned int)temps & 0xffff8000)==0xffff8000 ||				\
+		((unsigned int)temps & 0xffff8000)==0x0000)) {					\
 		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\
 	} else {												\
 		SETFLAGBIT(CF,true);SETFLAGBIT(OF,true);			\
@@ -832,6 +836,8 @@ extern bool enable_fpu;
 	reg_eax=(Bit32u)(temps);								\
 	reg_edx=(Bit32u)(temps >> 32);							\
 	FillFlagsNoCFOF();										\
+	SETFLAGBIT(ZF,reg_eax == 0);							\
+	SETFLAGBIT(SF,reg_eax & 0x80000000);					\
 	if ((reg_edx==0xffffffff) &&							\
 		(reg_eax & 0x80000000) ) {							\
 		SETFLAGBIT(CF,false);SETFLAGBIT(OF,false);			\

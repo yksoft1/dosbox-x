@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 /* NTS: Hardware notes
@@ -152,14 +152,40 @@ extern ZIPFile savestate_zip;
 
 using namespace std;
 
+Bitu pc98_read_9a8(Bitu /*port*/,Bitu /*iolen*/);
+void pc98_write_9a8(Bitu port,Bitu val,Bitu iolen);
+
+bool VGA_IsCaptureEnabled(void);
+void VGA_UpdateCapturePending(void);
+bool VGA_CaptureHasNextFrame(void);
+void VGA_CaptureStartNextFrame(void);
+void VGA_CaptureMarkError(void);
+bool VGA_CaptureValidateCurrentFrame(void);
+
+/* current dosplay page (controlled by A4h) */
+unsigned char*                      pc98_pgraph_current_display_page;
+/* current CPU page (controlled by A6h) */
+unsigned char*                      pc98_pgraph_current_cpu_page;
+
+bool                                vga_8bit_dac = false;
+bool                                vga_alt_new_mode = false;
+bool                                enable_vga_8bit_dac = true;
+
+bool                                pc98_crt_mode = false;      // see port 6Ah command 40h/41h.
+                                                                // this boolean is the INVERSE of the bit.
+
 extern int                          vga_memio_delay_ns;
 extern bool                         gdc_5mhz_mode;
+extern bool                         gdc_5mhz_mode_initial;
 extern bool                         enable_pc98_egc;
 extern bool                         enable_pc98_grcg;
 extern bool                         enable_pc98_16color;
+extern bool                         enable_pc98_256color;
+extern bool                         enable_pc98_256color_planar;
 extern bool                         enable_pc98_188usermod;
 extern bool                         GDC_vsync_interrupt;
 extern uint8_t                      GDC_display_plane;
+extern bool                         pc98_256kb_boundary;
 
 extern uint8_t                      pc98_gdc_tile_counter;
 extern uint8_t                      pc98_gdc_modereg;
@@ -173,6 +199,22 @@ extern uint8_t                      pc98_egc_mask[2]; /* host given (Neko: egc.m
 uint32_t S3_LFB_BASE =              S3_LFB_BASE_DEFAULT;
 
 bool                                enable_pci_vga = true;
+
+SDL_Rect                            vga_capture_rect = {0,0,0,0};
+SDL_Rect                            vga_capture_current_rect = {0,0,0,0};
+uint32_t                            vga_capture_current_address = 0;
+uint32_t                            vga_capture_write_address = 0; // literally the address written
+uint32_t                            vga_capture_address = 0;
+uint32_t                            vga_capture_stride = 0;
+uint32_t                            vga_capture_state = 0;
+
+SDL_Rect &VGA_CaptureRectCurrent(void) {
+    return vga_capture_current_rect;
+}
+
+SDL_Rect &VGA_CaptureRectFromGuest(void) {
+    return vga_capture_rect;
+}
 
 VGA_Type vga;
 SVGA_Driver svga;
@@ -225,6 +267,8 @@ void pc98_port6A_command_write(unsigned char b);
 void pc98_wait_write(Bitu port,Bitu val,Bitu iolen);
 void pc98_crtc_write(Bitu port,Bitu val,Bitu iolen);
 void pc98_port68_command_write(unsigned char b);
+Bitu pc98_read_9a0(Bitu /*port*/,Bitu /*iolen*/);
+void pc98_write_9a0(Bitu port,Bitu val,Bitu iolen);
 Bitu pc98_crtc_read(Bitu port,Bitu iolen);
 Bitu pc98_a1_read(Bitu port,Bitu iolen);
 void pc98_a1_write(Bitu port,Bitu val,Bitu iolen);
@@ -363,11 +407,11 @@ void VGA_SetClock(Bitu which,Bitu target) {
     Bits m;
 
     for (r = 0; r <= 3; r++) {
-        Bitu f_vco = target * (1u << r);
+        Bitu f_vco = target * ((Bitu)1u << (Bitu)r);
         if (MIN_VCO <= f_vco && f_vco < MAX_VCO) break;
     }
     for (n=1;n<=31;n++) {
-        m=(Bits)((target * (n + 2u) * (1u << r) + (S3_CLOCK_REF / 2u)) / S3_CLOCK_REF) - 2u;
+        m=(Bits)((target * (n + 2u) * ((Bitu)1u << (Bitu)r) + (S3_CLOCK_REF / 2u)) / S3_CLOCK_REF) - 2;
         if (0 <= m && m <= 127) {
             Bitu temp_target = (Bitu)S3_CLOCK(m,n,r);
             Bits err = (Bits)(target - temp_target);
@@ -560,7 +604,7 @@ void VGA_Reset(Section*) {
     int i;
 
     Bit32u cpu_addr_bits = MEM_get_address_bits();
-    Bit64u cpu_max_addr = (Bit64u)1 << (Bit64u)cpu_addr_bits;
+//    Bit64u cpu_max_addr = (Bit64u)1 << (Bit64u)cpu_addr_bits;
 
     LOG(LOG_MISC,LOG_DEBUG)("VGA_Reset() reinitializing VGA emulation");
 
@@ -568,7 +612,7 @@ void VGA_Reset(Section*) {
 
     enable_pci_vga = section->Get_bool("pci vga");
 
-    S3_LFB_BASE = section->Get_hex("svga lfb base");
+    S3_LFB_BASE = (uint32_t)section->Get_hex("svga lfb base");
     if (S3_LFB_BASE == 0) {
         if (cpu_addr_bits >= 32)
             S3_LFB_BASE = S3_LFB_BASE_DEFAULT;
@@ -666,10 +710,25 @@ void VGA_Reset(Section*) {
     gdc_5mhz_mode = section->Get_bool("pc-98 start gdc at 5mhz");
     mainMenu.get_item("pc98_5mhz_gdc").check(gdc_5mhz_mode).refresh_item(mainMenu);
 
+    // record the initial setting.
+    // the guest can change it later.
+    // however the 8255 used to hold dip switch settings needs to reflect the
+    // initial setting.
+    gdc_5mhz_mode_initial = gdc_5mhz_mode;
+
     enable_pc98_egc = section->Get_bool("pc-98 enable egc");
     enable_pc98_grcg = section->Get_bool("pc-98 enable grcg");
     enable_pc98_16color = section->Get_bool("pc-98 enable 16-color");
+    enable_pc98_256color = section->Get_bool("pc-98 enable 256-color");
     enable_pc98_188usermod = section->Get_bool("pc-98 enable 188 user cg");
+    enable_pc98_256color_planar = section->Get_bool("pc-98 enable 256-color planar");
+
+#if 0//TODO: Do not enforce until 256-color mode is fully implemented.
+     //      Some users out there may expect the EGC, GRCG, 16-color options to disable the emulation.
+     //      Having 256-color mode on by default, auto-enable them, will cause surprises and complaints.
+    // 256-color mode implies EGC, 16-color, GRCG
+    if (enable_pc98_256color) enable_pc98_grcg = enable_pc98_16color = true;
+#endif
 
     // EGC implies GRCG
     if (enable_pc98_egc) enable_pc98_grcg = true;
@@ -712,6 +771,7 @@ void VGA_Reset(Section*) {
     mainMenu.get_item("pc98_enable_egc").check(enable_pc98_egc).refresh_item(mainMenu);
     mainMenu.get_item("pc98_enable_grcg").check(enable_pc98_grcg).refresh_item(mainMenu);
     mainMenu.get_item("pc98_enable_analog").check(enable_pc98_16color).refresh_item(mainMenu);
+    mainMenu.get_item("pc98_enable_analog256").check(enable_pc98_256color).refresh_item(mainMenu);
     mainMenu.get_item("pc98_enable_188user").check(enable_pc98_188usermod).refresh_item(mainMenu);
 
     vga_force_refresh_rate = -1;
@@ -780,6 +840,8 @@ void VGA_Reset(Section*) {
 
     vga.draw.resizing=false;
     vga.mode=M_ERROR;           //For first init
+
+    enable_vga_8bit_dac = section->Get_bool("enable 8-bit dac");
 
     vga_memio_delay_ns = section->Get_int("vmemdelay");
     if (vga_memio_delay_ns < 0) {
@@ -879,7 +941,7 @@ void VGA_Reset(Section*) {
             if (vga.mem.memsize < _KB_bytes(64)) vga.mem.memsize = _KB_bytes(64); /* FIXME: Right? */
             break;
         case MCH_PC98:
-            if (vga.mem.memsize < _KB_bytes(512)) vga.mem.memsize = _KB_bytes(512);
+            if (vga.mem.memsize < _KB_bytes(544)) vga.mem.memsize = _KB_bytes(544); /* 544 = 512KB graphics + 32KB text */
             break;
         case MCH_MCGA:
             if (vga.mem.memsize < _KB_bytes(64)) vga.mem.memsize = _KB_bytes(64);
@@ -898,6 +960,7 @@ void VGA_Reset(Section*) {
     if (!IS_PC98_ARCH)
         SVGA_Setup_Driver();        // svga video memory size is set here, possibly over-riding the user's selection
 
+    // NTS: This is WHY the memory size must be a power of 2
     vga.mem.memmask = vga.mem.memsize - 1u;
 
     LOG(LOG_VGA,LOG_NORMAL)("Video RAM: %uKB",vga.mem.memsize>>10);
@@ -905,6 +968,9 @@ void VGA_Reset(Section*) {
     // TODO: If S3 emulation, and linear framebuffer bumps up against the CPU memalias limits,
     //       trim Video RAM to fit (within reasonable limits) or else E_Exit() to let the user
     //       know of impossible constraints.
+
+    mainMenu.get_item("debug_pageflip").check(enable_page_flip_debugging_marker).refresh_item(mainMenu);
+    mainMenu.get_item("debug_retracepoll").check(enable_vretrace_poll_debugging_marker).refresh_item(mainMenu);
 
     VGA_SetupMemory();      // memory is allocated here
     if (!IS_PC98_ARCH) {
@@ -1016,6 +1082,12 @@ void VGA_OnEnterPC98(Section *sec) {
         }
     }
 
+    for (unsigned int i=0;i < 256;i++) {
+        pc98_pal_vga[(i*3)+0] = i;
+        pc98_pal_vga[(i*3)+1] = i;
+        pc98_pal_vga[(i*3)+2] = i;
+    }
+
     pc98_update_palette();
 
     {
@@ -1049,6 +1121,7 @@ void VGA_OnEnterPC98(Section *sec) {
 
     /* 200-line tradition on PC-98 seems to be to render only every other scanline */
     pc98_graphics_hide_odd_raster_200line = true;
+    pc98_256kb_boundary = false;         /* port 6Ah command 68h/69h */
 
     // as a transition to PC-98 GDC emulation, move VGA alphanumeric buffer
     // down to A0000-AFFFFh.
@@ -1111,6 +1184,58 @@ void updateGDCpartitions4(bool enable) {
     pc98_gdc[GDC_SLAVE].display_partition_mask = pc98_allow_4_display_partitions ? 3 : 1;
 }
 
+/* source: Neko Project II  GDC SYNC parameters for each mode */
+
+#if 0 // NOT YET USED
+static const UINT8 gdc_defsyncm15[8] = {0x10,0x4e,0x07,0x25,0x0d,0x0f,0xc8,0x94};
+static const UINT8 gdc_defsyncs15[8] = {0x06,0x26,0x03,0x11,0x86,0x0f,0xc8,0x94};
+#endif
+
+static const UINT8 gdc_defsyncm24[8] = {0x10,0x4e,0x07,0x25,0x07,0x07,0x90,0x65};
+static const UINT8 gdc_defsyncs24[8] = {0x06,0x26,0x03,0x11,0x83,0x07,0x90,0x65};
+
+static const UINT8 gdc_defsyncm31[8] = {0x10,0x4e,0x47,0x0c,0x07,0x0d,0x90,0x89};
+static const UINT8 gdc_defsyncs31[8] = {0x06,0x26,0x41,0x0c,0x83,0x0d,0x90,0x89};
+
+static const UINT8 gdc_defsyncm31_480[8] = {0x10,0x4e,0x4b,0x0c,0x03,0x06,0xe0,0x95};
+static const UINT8 gdc_defsyncs31_480[8] = {0x06,0x4e,0x4b,0x0c,0x83,0x06,0xe0,0x95};
+
+void PC98_Set24KHz(void) {
+    pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_MASTER].write_fifo_param(gdc_defsyncm24[i]);
+    pc98_gdc[GDC_MASTER].force_fifo_complete();
+
+    pc98_gdc[GDC_SLAVE].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_SLAVE].write_fifo_param(gdc_defsyncs24[i]);
+    pc98_gdc[GDC_SLAVE].force_fifo_complete();
+}
+
+void PC98_Set31KHz(void) {
+    pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_MASTER].write_fifo_param(gdc_defsyncm31[i]);
+    pc98_gdc[GDC_MASTER].force_fifo_complete();
+
+    pc98_gdc[GDC_SLAVE].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_SLAVE].write_fifo_param(gdc_defsyncs31[i]);
+    pc98_gdc[GDC_SLAVE].force_fifo_complete();
+}
+
+void PC98_Set31KHz_480line(void) {
+    pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_MASTER].write_fifo_param(gdc_defsyncm31_480[i]);
+    pc98_gdc[GDC_MASTER].force_fifo_complete();
+
+    pc98_gdc[GDC_SLAVE].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_SLAVE].write_fifo_param(gdc_defsyncs31_480[i]);
+    pc98_gdc[GDC_SLAVE].force_fifo_complete();
+}
+
 void VGA_OnEnterPC98_phase2(Section *sec) {
     (void)sec;//UNUSED
     VGA_SetupHandlers();
@@ -1129,6 +1254,14 @@ void VGA_OnEnterPC98_phase2(Section *sec) {
             IO_RegisterReadHandler(i+j,pc98_gdc_read,IO_MB);
         }
     }
+
+    /* initial implementation of I/O ports 9A0h-9AEh even */
+    IO_RegisterReadHandler(0x9A0,pc98_read_9a0,IO_MB);
+    IO_RegisterWriteHandler(0x9A0,pc98_write_9a0,IO_MB);
+
+    /* 9A8h which controls 24khz/31khz mode */
+    IO_RegisterReadHandler(0x9A8,pc98_read_9a8,IO_MB);
+    IO_RegisterWriteHandler(0x9A8,pc98_write_9a8,IO_MB);
 
     /* There are some font character RAM controls at 0xA1-0xA5 (odd)
      * combined with A4000-A4FFF. Found by unknown I/O tracing in DOSBox-X
@@ -1173,68 +1306,33 @@ void VGA_OnEnterPC98_phase2(Section *sec) {
     pc98_gdc[GDC_MASTER].active_display_words_per_line = 80;
     pc98_gdc[GDC_MASTER].display_partition_mask = 3;
 
-    //TODO: Find the correct GDC SYNC parameters in 31-KHz mode by inspecting a real PC-9821.
-    if(!pc98_31khz_mode) { 
-        pc98_gdc[GDC_MASTER].force_fifo_complete();
-        pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x10);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x4E);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x07);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x25);
-        pc98_gdc[GDC_MASTER].force_fifo_complete();
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x07);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x07);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x90);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x65);
-        pc98_gdc[GDC_MASTER].force_fifo_complete();
-    } else { //Use 31KHz HS, VS, VFP, VBP
-        pc98_gdc[GDC_MASTER].force_fifo_complete();
-        pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x10);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x4E);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x41);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x24);
-        pc98_gdc[GDC_MASTER].force_fifo_complete();
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x07); 
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x0C); 
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x90);
-        pc98_gdc[GDC_MASTER].write_fifo_param(0x8D);
-        pc98_gdc[GDC_MASTER].force_fifo_complete();     
-    }
-
     pc98_gdc[GDC_SLAVE].master_sync = false;
     pc98_gdc[GDC_SLAVE].display_enable = false;//FIXME
     pc98_gdc[GDC_SLAVE].row_height = 1;
-    pc98_gdc[GDC_SLAVE].display_pitch = 40;
-    pc98_gdc[GDC_SLAVE].active_display_words_per_line = 40; /* 40 16-bit WORDs per line */
+    pc98_gdc[GDC_SLAVE].display_pitch = gdc_5mhz_mode ? 80u : 40u;
     pc98_gdc[GDC_SLAVE].display_partition_mask = pc98_allow_4_display_partitions ? 3 : 1;
 
-    if(!pc98_31khz_mode) {
-        pc98_gdc[GDC_SLAVE].force_fifo_complete();
-        pc98_gdc[GDC_SLAVE].write_fifo_command(0x0F/*sync DE=1*/);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x02);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x26);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x03);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x11);
-        pc98_gdc[GDC_SLAVE].force_fifo_complete();
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x83);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x07);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x90);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x65);
-        pc98_gdc[GDC_SLAVE].force_fifo_complete();
-    } else { //Use 31KHz HS, VS, VFP, VBP
-        pc98_gdc[GDC_SLAVE].write_fifo_command(0x0F/*sync DE=1*/);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x02);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x26);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x40);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x10);
-        pc98_gdc[GDC_SLAVE].force_fifo_complete();
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x83);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x0C);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x90);
-        pc98_gdc[GDC_SLAVE].write_fifo_param(0x8D);
-        pc98_gdc[GDC_SLAVE].force_fifo_complete();
+    const unsigned char *gdcsync_m;
+    const unsigned char *gdcsync_s;
+
+    if (!pc98_31khz_mode) {
+        gdcsync_m = gdc_defsyncm24;
+        gdcsync_s = gdc_defsyncs24;
     }
+    else {
+        gdcsync_m = gdc_defsyncm31;
+        gdcsync_s = gdc_defsyncs31;
+    }
+
+    pc98_gdc[GDC_MASTER].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_MASTER].write_fifo_param(gdcsync_m[i]);
+    pc98_gdc[GDC_MASTER].force_fifo_complete();
+
+    pc98_gdc[GDC_SLAVE].write_fifo_command(0x0F/*sync DE=1*/);
+    for (unsigned int i=0;i < 8;i++)
+        pc98_gdc[GDC_SLAVE].write_fifo_param(gdcsync_s[i]);
+    pc98_gdc[GDC_SLAVE].force_fifo_complete();
 
     VGA_StartResize();
 }
@@ -1344,6 +1442,26 @@ void VGA_SaveState(Section *sec) {
     }
 }
 
+bool debugpollvga_pf_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const menuitem) {
+    (void)xmenu;//UNUSED
+    (void)menuitem;//UNUSED
+
+    enable_page_flip_debugging_marker = !enable_page_flip_debugging_marker;
+    mainMenu.get_item("debug_pageflip").check(enable_page_flip_debugging_marker).refresh_item(mainMenu);
+
+    return true;
+}
+
+bool debugpollvga_rtp_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * const menuitem) {
+    (void)xmenu;//UNUSED
+    (void)menuitem;//UNUSED
+
+    enable_vretrace_poll_debugging_marker = !enable_vretrace_poll_debugging_marker;
+    mainMenu.get_item("debug_retracepoll").check(enable_vretrace_poll_debugging_marker).refresh_item(mainMenu);
+
+    return true;
+}
+
 void VGA_Init() {
     string str;
     Bitu i,j;
@@ -1409,6 +1527,9 @@ void VGA_Init() {
         }
     }
 
+    mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debug_pageflip").set_text("Page flip debug line").set_callback_function(debugpollvga_pf_menu_callback);
+    mainMenu.alloc_item(DOSBoxMenu::item_type_id,"debug_retracepoll").set_text("Retrace poll debug line").set_callback_function(debugpollvga_rtp_menu_callback);
+
     AddExitFunction(AddExitFunctionFuncPair(VGA_Destroy));
     AddVMEventFunction(VM_EVENT_RESET,AddVMEventFunctionFuncPair(VGA_Reset));
 
@@ -1436,3 +1557,131 @@ void SVGA_Setup_Driver(void) {
         break;
     }
 }
+
+void VGA_CaptureStartNextFrame(void) {
+    vga_capture_current_rect = vga_capture_rect;
+    vga_capture_current_address = vga_capture_address;
+    vga_capture_write_address = vga_capture_address;
+
+    vga_capture_address = 0;
+
+    VGA_UpdateCapturePending();
+}
+
+bool VGA_CaptureValidateCurrentFrame(void) {
+    if (VGA_IsCaptureEnabled()) {
+        if (vga_capture_current_rect.x >= 0 && vga_capture_current_rect.y >= 0 &&       // crop rect is within frame
+            (unsigned int)vga_capture_current_rect.y < vga.draw.height &&
+            (unsigned int)vga_capture_current_rect.x < vga.draw.width &&
+            vga_capture_current_rect.w > 0 && vga_capture_current_rect.h > 0 &&         // crop rect size is within frame
+            (unsigned int)vga_capture_current_rect.h <= vga.draw.height &&
+            (unsigned int)vga_capture_current_rect.w <= vga.draw.width &&
+            ((unsigned int)vga_capture_current_rect.x+vga_capture_current_rect.w) <= vga.draw.width && // crop rect pos+size within frame
+            ((unsigned int)vga_capture_current_rect.y+vga_capture_current_rect.h) <= vga.draw.height) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool VGA_CaptureHasNextFrame(void) {
+    return !!(vga_capture_address != (uint32_t)0);
+}
+
+void VGA_MarkCaptureAcquired(void) {
+    if (vga_capture_state & ((uint32_t)(1ul << 1ul))) // if already acquired and guest has not cleared the bit
+        vga_capture_state |= (uint32_t)(1ul << 6ul); // mark overrun
+
+    vga_capture_state |= (uint32_t)(1ul << 1ul); // mark acquired
+}
+
+void VGA_MarkCaptureRetrace(void) {
+    vga_capture_state |=   (uint32_t)(1ul << 5ul); // mark retrace
+}
+
+void VGA_MarkCaptureInProgress(bool en) {
+    const uint32_t f = (uint32_t)(1ul << 3ul);
+
+    if (en)
+        vga_capture_state |= f;
+    else
+        vga_capture_state &= ~f;
+}
+
+bool VGA_IsCapturePending(void) {
+    return !!(vga_capture_state & ((uint32_t)(1ul << 0ul)));
+}
+
+bool VGA_IsCaptureEnabled(void) {
+    return !!(vga_capture_state & ((uint32_t)(1ul << 4ul)));
+}
+
+bool VGA_IsCaptureInProgress(void) {
+    return !!(vga_capture_state & ((uint32_t)(1ul << 3ul)));
+}
+
+void VGA_CaptureMarkError(void) {
+    vga_capture_state |=   (uint32_t)(1ul << 2ul);  // set error
+    vga_capture_state &= ~((uint32_t)(1ul << 4ul)); // clear enable
+}
+
+void VGA_UpdateCapturePending(void) {
+    bool en = false;
+
+    if (VGA_IsCaptureEnabled()) {
+        if (vga_capture_address != (uint32_t)0)
+            en = true;
+    }
+
+    if (en)
+        vga_capture_state |=   (uint32_t)(1ul << 0ul); // set bit 0 capture pending
+    else
+        vga_capture_state &= ~((uint32_t)(1ul << 0ul)); // clear bit 0 capture pending
+}
+
+uint32_t VGA_QueryCaptureState(void) {
+    /* bits[0:0] = if set, capture pending
+     * bits[1:1] = if set, capture acquired
+     * bits[2:2] = if set, capture state error (such as crop rectangle out of bounds)
+     * bits[3:3] = if set, capture in progress
+     * bits[4:4] = if set, capture enabled
+     * bits[5:5] = if set, vertical retrace occurred. capture must be enabled for this to occur
+     * bits[6:6] = if set, capture was acquired and acquired bit was already set (overrun)
+     *
+     * both bits 0 and 1 can be set if one capture has finished and the "next" capture address has been loaded.
+     */
+    return vga_capture_state;
+}
+
+void VGA_SetCaptureState(uint32_t v) {
+    /* bits[1:1] = if set, clear capture acquired bit
+     * bits[2:2] = if set, clear capture state error
+       bits[4:4] = if set, enable capture
+       bits[5:5] = if set, clear vertical retrace occurrence flag
+       bits[6:6] = if set, clear overrun (acquired) bit */
+    vga_capture_state ^= (vga_capture_state & v & 0x66/*x110 0110*/);
+
+    vga_capture_state &=    ~0x10u;
+    vga_capture_state |= v & 0x10u;
+
+    if (!VGA_IsCaptureEnabled())
+        vga_capture_state = 0;
+
+    VGA_UpdateCapturePending();
+}
+
+uint32_t VGA_QueryCaptureAddress(void) {
+    return vga_capture_current_address;
+}
+
+void VGA_SetCaptureAddress(uint32_t v) {
+    vga_capture_address = v;
+    VGA_UpdateCapturePending();
+}
+
+void VGA_SetCaptureStride(uint32_t v) {
+    vga_capture_stride = v;
+    VGA_UpdateCapturePending();
+}
+

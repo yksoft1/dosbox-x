@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -297,16 +297,16 @@ static INLINE void gen_lea(HostReg dest_reg,Bitu scale,Bits imm) {
 
 
 // generate a call to a parameterless function
-static void INLINE gen_call_function_raw(void * func) {
-	cache_addb(0xe8);
+template <typename T> static void INLINE gen_call_function_raw(const T func) {
+    cache_addb(0xe8);
 	cache_addd((Bit32u)func - (Bit32u)cache.pos-4);
 }
 
 // generate a call to a function with paramcount parameters
 // note: the parameters are loaded in the architecture specific way
 // using the gen_load_param_ functions below
-static Bit32u INLINE gen_call_function_setup(void * func,Bitu paramcount,bool fastcall=false) {
-	Bit32u proc_addr=(Bit32u)cache.pos;
+template <typename T> static Bit32u INLINE gen_call_function_setup(const T func,Bitu paramcount,bool fastcall=false) {
+    Bit32u proc_addr=(Bit32u)cache.pos;
 	// Do the actual call to the procedure
 	cache_addb(0xe8);
 	cache_addd((Bit32u)func - (Bit32u)cache.pos-4);
@@ -322,23 +322,27 @@ static Bit32u INLINE gen_call_function_setup(void * func,Bitu paramcount,bool fa
 
 // load an immediate value as param'th function parameter
 static void INLINE gen_load_param_imm(Bitu imm,Bitu param) {
+    (void)param;
 	cache_addb(0x68);			// push immediate
 	cache_addd(imm);
 }
 
 // load an address as param'th function parameter
 static void INLINE gen_load_param_addr(Bitu addr,Bitu param) {
+    (void)param;
 	cache_addb(0x68);			// push immediate (address)
 	cache_addd(addr);
 }
 
 // load a host-register as param'th function parameter
 static void INLINE gen_load_param_reg(Bitu reg,Bitu param) {
+    (void)param;
 	cache_addb(0x50+(reg&7));	// push reg
 }
 
 // load a value from memory as param'th function parameter
 static void INLINE gen_load_param_mem(Bitu mem,Bitu param) {
+    (void)param;
 	cache_addw(0x35ff);			// push []
 	cache_addd(mem);
 }
@@ -511,6 +515,6 @@ static void gen_fill_function_ptr(Bit8u * pos,void* fct_ptr,Bitu flags_type) {
 }
 #endif
 
-static void cache_block_closing(Bit8u* block_start,Bitu block_size) { }
+static void cache_block_closing(Bit8u* block_start,Bitu block_size) { (void)block_start; (void)block_size; }
 
 static void cache_block_before_close(void) { }

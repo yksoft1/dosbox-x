@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -386,20 +386,20 @@ static INLINE void gen_lea(HostReg dest_reg,Bitu scale,Bits imm) {
 #define DELAY cache_addd(0)			// nop
 
 // generate a call to a parameterless function
-static void INLINE gen_call_function_raw(void * func) {
+template <typename T> static void INLINE gen_call_function_raw(const T func) {
 #if C_DEBUG
-	if ((cache.pos ^ func) & 0xf0000000) LOG_MSG("jump overflow\n");
+    if ((cache.pos ^ func) & 0xf0000000) LOG_MSG("jump overflow\n");
 #endif
-	temp1_valid = false;
-	cache_addd(0x0c000000+(((Bit32u)func>>2)&0x3ffffff));		// jal func
-	DELAY;
+    temp1_valid = false;
+    cache_addd(0x0c000000+(((Bit32u)func>>2)&0x3ffffff));		// jal func
+    DELAY;
 }
 
 // generate a call to a function with paramcount parameters
 // note: the parameters are loaded in the architecture specific way
 // using the gen_load_param_ functions below
-static Bit32u INLINE gen_call_function_setup(void * func,Bitu paramcount,bool fastcall=false) {
-	Bit32u proc_addr = (Bit32u)cache.pos;
+template <typename T> static Bit32u INLINE gen_call_function_setup(const T func,Bitu paramcount,bool fastcall=false) {
+    Bit32u proc_addr = (Bit32u)cache.pos;
 	gen_call_function_raw(func);
 	return proc_addr;
 }

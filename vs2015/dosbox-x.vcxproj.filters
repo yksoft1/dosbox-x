@@ -112,6 +112,9 @@
     <Filter Include="Sources\cpu\core_dynrec">
       <UniqueIdentifier>{8d1a73c6-be58-4d9f-aa03-b9f57516bedb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Sources\hardware\mame">
+      <UniqueIdentifier>{31feddeb-9587-415e-9cd8-a8bc0bed318c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src\aviwriter\avi_rw_iobuf.cpp">
@@ -756,9 +759,6 @@
     <ClCompile Include="..\src\dosbox.cpp">
       <Filter>Sources</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\cpu\core_dyn_x86.cpp">
-      <Filter>Sources\cpu</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\hardware\8255.cpp">
       <Filter>Sources\hardware</Filter>
     </ClCompile>
@@ -896,6 +896,30 @@
     </ClCompile>
     <ClCompile Include="..\src\cpu\core_dynrec.cpp">
       <Filter>Sources\cpu\core_dynrec</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\misc\iconvpp.cpp">
+      <Filter>Sources\misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\cpu\core_prefetch_286.cpp">
+      <Filter>Sources\cpu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\cpu\core_prefetch_8086.cpp">
+      <Filter>Sources\cpu</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\mame\fmopl.cpp">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\mame\saa1099.cpp">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\mame\sn76496.cpp">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\mame\ymdeltat.cpp">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\hardware\mame\ymf262.cpp">
+      <Filter>Sources\hardware\mame</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -1331,9 +1355,6 @@
     <ClInclude Include="..\include\mmx.h">
       <Filter>Includes</Filter>
     </ClInclude>
-    <ClInclude Include="..\include\modules.h">
-      <Filter>Includes</Filter>
-    </ClInclude>
     <ClInclude Include="..\include\mouse.h">
       <Filter>Includes</Filter>
     </ClInclude>
@@ -1389,9 +1410,6 @@
       <Filter>Includes</Filter>
     </ClInclude>
     <ClInclude Include="..\include\resource.h">
-      <Filter>Includes</Filter>
-    </ClInclude>
-    <ClInclude Include="..\include\selftest.h">
       <Filter>Includes</Filter>
     </ClInclude>
     <ClInclude Include="..\include\serialport.h">
@@ -1552,6 +1570,27 @@
     </ClInclude>
     <ClInclude Include="..\src\output\direct3d\ScalingEffect.h">
       <Filter>Sources\output\direct3d</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\midi.h">
+      <Filter>Includes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\fmopl.h">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\saa1099.h">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\sn76496.h">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\ymdeltat.h">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\ymf262.h">
+      <Filter>Sources\hardware\mame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\hardware\mame\emu.h">
+      <Filter>Sources\hardware\mame</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

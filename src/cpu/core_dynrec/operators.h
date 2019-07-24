@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -86,6 +86,8 @@ static void DRC_CALL_CONV dynrec_cmp_byte(Bit8u op1,Bit8u op2) {
 
 static void DRC_CALL_CONV dynrec_cmp_byte_simple(Bit8u op1,Bit8u op2) DRC_FC;
 static void DRC_CALL_CONV dynrec_cmp_byte_simple(Bit8u op1,Bit8u op2) {
+	(void)op1;
+	(void)op2;
 }
 
 static Bit8u DRC_CALL_CONV dynrec_xor_byte(Bit8u op1,Bit8u op2) DRC_FC;
@@ -140,6 +142,8 @@ static void DRC_CALL_CONV dynrec_test_byte(Bit8u op1,Bit8u op2) {
 
 static void DRC_CALL_CONV dynrec_test_byte_simple(Bit8u op1,Bit8u op2) DRC_FC;
 static void DRC_CALL_CONV dynrec_test_byte_simple(Bit8u op1,Bit8u op2) {
+	(void)op1;
+	(void)op2;
 }
 
 static Bit16u DRC_CALL_CONV dynrec_add_word(Bit16u op1,Bit16u op2) DRC_FC;
@@ -210,6 +214,8 @@ static void DRC_CALL_CONV dynrec_cmp_word(Bit16u op1,Bit16u op2) {
 
 static void DRC_CALL_CONV dynrec_cmp_word_simple(Bit16u op1,Bit16u op2) DRC_FC;
 static void DRC_CALL_CONV dynrec_cmp_word_simple(Bit16u op1,Bit16u op2) {
+	(void)op1;
+	(void)op2;
 }
 
 static Bit16u DRC_CALL_CONV dynrec_xor_word(Bit16u op1,Bit16u op2) DRC_FC;
@@ -264,6 +270,8 @@ static void DRC_CALL_CONV dynrec_test_word(Bit16u op1,Bit16u op2) {
 
 static void DRC_CALL_CONV dynrec_test_word_simple(Bit16u op1,Bit16u op2) DRC_FC;
 static void DRC_CALL_CONV dynrec_test_word_simple(Bit16u op1,Bit16u op2) {
+	(void)op1;
+	(void)op2;
 }
 
 static Bit32u DRC_CALL_CONV dynrec_add_dword(Bit32u op1,Bit32u op2) DRC_FC;
@@ -334,6 +342,8 @@ static void DRC_CALL_CONV dynrec_cmp_dword(Bit32u op1,Bit32u op2) {
 
 static void DRC_CALL_CONV dynrec_cmp_dword_simple(Bit32u op1,Bit32u op2) DRC_FC;
 static void DRC_CALL_CONV dynrec_cmp_dword_simple(Bit32u op1,Bit32u op2) {
+	(void)op1;
+	(void)op2;
 }
 
 static Bit32u DRC_CALL_CONV dynrec_xor_dword(Bit32u op1,Bit32u op2) DRC_FC;
@@ -388,48 +398,50 @@ static void DRC_CALL_CONV dynrec_test_dword(Bit32u op1,Bit32u op2) {
 
 static void DRC_CALL_CONV dynrec_test_dword_simple(Bit32u op1,Bit32u op2) DRC_FC;
 static void DRC_CALL_CONV dynrec_test_dword_simple(Bit32u op1,Bit32u op2) {
+	(void)op1;
+	(void)op2;
 }
 
 
 static void dyn_dop_byte_gencall(DualOps op) {
 	switch (op) {
 		case DOP_ADD:
-			InvalidateFlags((void*)&dynrec_add_byte_simple,t_ADDb);
-			gen_call_function_raw((void*)&dynrec_add_byte);
+			InvalidateFlags(dynrec_add_byte_simple,t_ADDb);
+			gen_call_function_raw(dynrec_add_byte);
 			break;
 		case DOP_ADC:
 			AcquireFlags(FLAG_CF);
-			InvalidateFlagsPartially((void*)&dynrec_adc_byte_simple,t_ADCb);
-			gen_call_function_raw((void*)&dynrec_adc_byte);
+			InvalidateFlagsPartially(dynrec_adc_byte_simple,t_ADCb);
+			gen_call_function_raw(dynrec_adc_byte);
 			break;
 		case DOP_SUB:
-			InvalidateFlags((void*)&dynrec_sub_byte_simple,t_SUBb);
-			gen_call_function_raw((void*)&dynrec_sub_byte);
+			InvalidateFlags(dynrec_sub_byte_simple,t_SUBb);
+			gen_call_function_raw(dynrec_sub_byte);
 			break;
 		case DOP_SBB:
 			AcquireFlags(FLAG_CF);
-			InvalidateFlagsPartially((void*)&dynrec_sbb_byte_simple,t_SBBb);
-			gen_call_function_raw((void*)&dynrec_sbb_byte);
+			InvalidateFlagsPartially(dynrec_sbb_byte_simple,t_SBBb);
+			gen_call_function_raw(dynrec_sbb_byte);
 			break;
 		case DOP_CMP:
-			InvalidateFlags((void*)&dynrec_cmp_byte_simple,t_CMPb);
-			gen_call_function_raw((void*)&dynrec_cmp_byte);
+			InvalidateFlags(dynrec_cmp_byte_simple,t_CMPb);
+			gen_call_function_raw(dynrec_cmp_byte);
 			break;
 		case DOP_XOR:
-			InvalidateFlags((void*)&dynrec_xor_byte_simple,t_XORb);
-			gen_call_function_raw((void*)&dynrec_xor_byte);
+			InvalidateFlags(dynrec_xor_byte_simple,t_XORb);
+			gen_call_function_raw(dynrec_xor_byte);
 			break;
 		case DOP_AND:
-			InvalidateFlags((void*)&dynrec_and_byte_simple,t_ANDb);
-			gen_call_function_raw((void*)&dynrec_and_byte);
+			InvalidateFlags(dynrec_and_byte_simple,t_ANDb);
+			gen_call_function_raw(dynrec_and_byte);
 			break;
 		case DOP_OR:
-			InvalidateFlags((void*)&dynrec_or_byte_simple,t_ORb);
-			gen_call_function_raw((void*)&dynrec_or_byte);
+			InvalidateFlags(dynrec_or_byte_simple,t_ORb);
+			gen_call_function_raw(dynrec_or_byte);
 			break;
 		case DOP_TEST:
-			InvalidateFlags((void*)&dynrec_test_byte_simple,t_TESTb);
-			gen_call_function_raw((void*)&dynrec_test_byte);
+			InvalidateFlags(dynrec_test_byte_simple,t_TESTb);
+			gen_call_function_raw(dynrec_test_byte);
 			break;
 		default: IllegalOptionDynrec("dyn_dop_byte_gencall");
 	}
@@ -439,84 +451,84 @@ static void dyn_dop_word_gencall(DualOps op,bool dword) {
 	if (dword) {
 		switch (op) {
 			case DOP_ADD:
-				InvalidateFlags((void*)&dynrec_add_dword_simple,t_ADDd);
-				gen_call_function_raw((void*)&dynrec_add_dword);
+				InvalidateFlags(dynrec_add_dword_simple,t_ADDd);
+				gen_call_function_raw(dynrec_add_dword);
 				break;
 			case DOP_ADC:
 				AcquireFlags(FLAG_CF);
-				InvalidateFlagsPartially((void*)&dynrec_adc_dword_simple,t_ADCd);
-				gen_call_function_raw((void*)&dynrec_adc_dword);
+				InvalidateFlagsPartially(dynrec_adc_dword_simple,t_ADCd);
+				gen_call_function_raw(dynrec_adc_dword);
 				break;
 			case DOP_SUB:
-				InvalidateFlags((void*)&dynrec_sub_dword_simple,t_SUBd);
-				gen_call_function_raw((void*)&dynrec_sub_dword);
+				InvalidateFlags(dynrec_sub_dword_simple,t_SUBd);
+				gen_call_function_raw(dynrec_sub_dword);
 				break;
 			case DOP_SBB:
 				AcquireFlags(FLAG_CF);
-				InvalidateFlagsPartially((void*)&dynrec_sbb_dword_simple,t_SBBd);
-				gen_call_function_raw((void*)&dynrec_sbb_dword);
+				InvalidateFlagsPartially(dynrec_sbb_dword_simple,t_SBBd);
+				gen_call_function_raw(dynrec_sbb_dword);
 				break;
 			case DOP_CMP:
-				InvalidateFlags((void*)&dynrec_cmp_dword_simple,t_CMPd);
-				gen_call_function_raw((void*)&dynrec_cmp_dword);
+				InvalidateFlags(dynrec_cmp_dword_simple,t_CMPd);
+				gen_call_function_raw(dynrec_cmp_dword);
 				break;
 			case DOP_XOR:
-				InvalidateFlags((void*)&dynrec_xor_dword_simple,t_XORd);
-				gen_call_function_raw((void*)&dynrec_xor_dword);
+				InvalidateFlags(dynrec_xor_dword_simple,t_XORd);
+				gen_call_function_raw(dynrec_xor_dword);
 				break;
 			case DOP_AND:
-				InvalidateFlags((void*)&dynrec_and_dword_simple,t_ANDd);
-				gen_call_function_raw((void*)&dynrec_and_dword);
+				InvalidateFlags(dynrec_and_dword_simple,t_ANDd);
+				gen_call_function_raw(dynrec_and_dword);
 				break;
 			case DOP_OR:
-				InvalidateFlags((void*)&dynrec_or_dword_simple,t_ORd);
-				gen_call_function_raw((void*)&dynrec_or_dword);
+				InvalidateFlags(dynrec_or_dword_simple,t_ORd);
+				gen_call_function_raw(dynrec_or_dword);
 				break;
 			case DOP_TEST:
-				InvalidateFlags((void*)&dynrec_test_dword_simple,t_TESTd);
-				gen_call_function_raw((void*)&dynrec_test_dword);
+				InvalidateFlags(dynrec_test_dword_simple,t_TESTd);
+				gen_call_function_raw(dynrec_test_dword);
 				break;
 			default: IllegalOptionDynrec("dyn_dop_dword_gencall");
 		}
 	} else {
 		switch (op) {
 			case DOP_ADD:
-				InvalidateFlags((void*)&dynrec_add_word_simple,t_ADDw);
-				gen_call_function_raw((void*)&dynrec_add_word);
+				InvalidateFlags(dynrec_add_word_simple,t_ADDw);
+				gen_call_function_raw(dynrec_add_word);
 				break;
 			case DOP_ADC:
 				AcquireFlags(FLAG_CF);
-				InvalidateFlagsPartially((void*)&dynrec_adc_word_simple,t_ADCw);
-				gen_call_function_raw((void*)&dynrec_adc_word);
+				InvalidateFlagsPartially(dynrec_adc_word_simple,t_ADCw);
+				gen_call_function_raw(dynrec_adc_word);
 				break;
 			case DOP_SUB:
-				InvalidateFlags((void*)&dynrec_sub_word_simple,t_SUBw);
-				gen_call_function_raw((void*)&dynrec_sub_word);
+				InvalidateFlags(dynrec_sub_word_simple,t_SUBw);
+				gen_call_function_raw(dynrec_sub_word);
 				break;
 			case DOP_SBB:
 				AcquireFlags(FLAG_CF);
-				InvalidateFlagsPartially((void*)&dynrec_sbb_word_simple,t_SBBw);
-				gen_call_function_raw((void*)&dynrec_sbb_word);
+				InvalidateFlagsPartially(dynrec_sbb_word_simple,t_SBBw);
+				gen_call_function_raw(dynrec_sbb_word);
 				break;
 			case DOP_CMP:
-				InvalidateFlags((void*)&dynrec_cmp_word_simple,t_CMPw);
-				gen_call_function_raw((void*)&dynrec_cmp_word);
+				InvalidateFlags(dynrec_cmp_word_simple,t_CMPw);
+				gen_call_function_raw(dynrec_cmp_word);
 				break;
 			case DOP_XOR:
-				InvalidateFlags((void*)&dynrec_xor_word_simple,t_XORw);
-				gen_call_function_raw((void*)&dynrec_xor_word);
+				InvalidateFlags(dynrec_xor_word_simple,t_XORw);
+				gen_call_function_raw(dynrec_xor_word);
 				break;
 			case DOP_AND:
-				InvalidateFlags((void*)&dynrec_and_word_simple,t_ANDw);
-				gen_call_function_raw((void*)&dynrec_and_word);
+				InvalidateFlags(dynrec_and_word_simple,t_ANDw);
+				gen_call_function_raw(dynrec_and_word);
 				break;
 			case DOP_OR:
-				InvalidateFlags((void*)&dynrec_or_word_simple,t_ORw);
-				gen_call_function_raw((void*)&dynrec_or_word);
+				InvalidateFlags(dynrec_or_word_simple,t_ORw);
+				gen_call_function_raw(dynrec_or_word);
 				break;
 			case DOP_TEST:
-				InvalidateFlags((void*)&dynrec_test_word_simple,t_TESTw);
-				gen_call_function_raw((void*)&dynrec_test_word);
+				InvalidateFlags(dynrec_test_word_simple,t_TESTw);
+				gen_call_function_raw(dynrec_test_word);
 				break;
 			default: IllegalOptionDynrec("dyn_dop_word_gencall");
 		}
@@ -666,19 +678,19 @@ static Bit32u DRC_CALL_CONV dynrec_neg_dword_simple(Bit32u op) {
 static void dyn_sop_byte_gencall(SingleOps op) {
 	switch (op) {
 		case SOP_INC:
-			InvalidateFlagsPartially((void*)&dynrec_inc_byte_simple,t_INCb);
-			gen_call_function_raw((void*)&dynrec_inc_byte);
+			InvalidateFlagsPartially(dynrec_inc_byte_simple,t_INCb);
+			gen_call_function_raw(dynrec_inc_byte);
 			break;
 		case SOP_DEC:
-			InvalidateFlagsPartially((void*)&dynrec_dec_byte_simple,t_DECb);
-			gen_call_function_raw((void*)&dynrec_dec_byte);
+			InvalidateFlagsPartially(dynrec_dec_byte_simple,t_DECb);
+			gen_call_function_raw(dynrec_dec_byte);
 			break;
 		case SOP_NOT:
-			gen_call_function_raw((void*)&dynrec_not_byte);
+			gen_call_function_raw(dynrec_not_byte);
 			break;
 		case SOP_NEG:
-			InvalidateFlags((void*)&dynrec_neg_byte_simple,t_NEGb);
-			gen_call_function_raw((void*)&dynrec_neg_byte);
+			InvalidateFlags(dynrec_neg_byte_simple,t_NEGb);
+			gen_call_function_raw(dynrec_neg_byte);
 			break;
 		default: IllegalOptionDynrec("dyn_sop_byte_gencall");
 	}
@@ -688,38 +700,38 @@ static void dyn_sop_word_gencall(SingleOps op,bool dword) {
 	if (dword) {
 		switch (op) {
 			case SOP_INC:
-				InvalidateFlagsPartially((void*)&dynrec_inc_dword_simple,t_INCd);
-				gen_call_function_raw((void*)&dynrec_inc_dword);
+				InvalidateFlagsPartially(dynrec_inc_dword_simple,t_INCd);
+				gen_call_function_raw(dynrec_inc_dword);
 				break;
 			case SOP_DEC:
-				InvalidateFlagsPartially((void*)&dynrec_dec_dword_simple,t_DECd);
-				gen_call_function_raw((void*)&dynrec_dec_dword);
+				InvalidateFlagsPartially(dynrec_dec_dword_simple,t_DECd);
+				gen_call_function_raw(dynrec_dec_dword);
 				break;
 			case SOP_NOT:
-				gen_call_function_raw((void*)&dynrec_not_dword);
+				gen_call_function_raw(dynrec_not_dword);
 				break;
 			case SOP_NEG:
-				InvalidateFlags((void*)&dynrec_neg_dword_simple,t_NEGd);
-				gen_call_function_raw((void*)&dynrec_neg_dword);
+				InvalidateFlags(dynrec_neg_dword_simple,t_NEGd);
+				gen_call_function_raw(dynrec_neg_dword);
 				break;
 			default: IllegalOptionDynrec("dyn_sop_dword_gencall");
 		}
 	} else {
 		switch (op) {
 			case SOP_INC:
-				InvalidateFlagsPartially((void*)&dynrec_inc_word_simple,t_INCw);
-				gen_call_function_raw((void*)&dynrec_inc_word);
+				InvalidateFlagsPartially(dynrec_inc_word_simple,t_INCw);
+				gen_call_function_raw(dynrec_inc_word);
 				break;
 			case SOP_DEC:
-				InvalidateFlagsPartially((void*)&dynrec_dec_word_simple,t_DECw);
-				gen_call_function_raw((void*)&dynrec_dec_word);
+				InvalidateFlagsPartially(dynrec_dec_word_simple,t_DECw);
+				gen_call_function_raw(dynrec_dec_word);
 				break;
 			case SOP_NOT:
-				gen_call_function_raw((void*)&dynrec_not_word);
+				gen_call_function_raw(dynrec_not_word);
 				break;
 			case SOP_NEG:
-				InvalidateFlags((void*)&dynrec_neg_word_simple,t_NEGw);
-				gen_call_function_raw((void*)&dynrec_neg_word);
+				InvalidateFlags(dynrec_neg_word_simple,t_NEGw);
+				gen_call_function_raw(dynrec_neg_word);
 				break;
 			default: IllegalOptionDynrec("dyn_sop_word_gencall");
 		}
@@ -1114,33 +1126,33 @@ static Bit32u DRC_CALL_CONV dynrec_sar_dword_simple(Bit32u op1,Bit8u op2) {
 static void dyn_shift_byte_gencall(ShiftOps op) {
 	switch (op) {
 		case SHIFT_ROL:
-			InvalidateFlagsPartially((void*)&dynrec_rol_byte_simple,t_ROLb);
-			gen_call_function_raw((void*)&dynrec_rol_byte);
+			InvalidateFlagsPartially(dynrec_rol_byte_simple,t_ROLb);
+			gen_call_function_raw(dynrec_rol_byte);
 			break;
 		case SHIFT_ROR:
-			InvalidateFlagsPartially((void*)&dynrec_ror_byte_simple,t_RORb);
-			gen_call_function_raw((void*)&dynrec_ror_byte);
+			InvalidateFlagsPartially(dynrec_ror_byte_simple,t_RORb);
+			gen_call_function_raw(dynrec_ror_byte);
 			break;
 		case SHIFT_RCL:
 			AcquireFlags(FLAG_CF);
-			gen_call_function_raw((void*)&dynrec_rcl_byte);
+			gen_call_function_raw(dynrec_rcl_byte);
 			break;
 		case SHIFT_RCR:
 			AcquireFlags(FLAG_CF);
-			gen_call_function_raw((void*)&dynrec_rcr_byte);
+			gen_call_function_raw(dynrec_rcr_byte);
 			break;
 		case SHIFT_SHL:
 		case SHIFT_SAL:
-			InvalidateFlagsPartially((void*)&dynrec_shl_byte_simple,t_SHLb);
-			gen_call_function_raw((void*)&dynrec_shl_byte);
+			InvalidateFlagsPartially(dynrec_shl_byte_simple,t_SHLb);
+			gen_call_function_raw(dynrec_shl_byte);
 			break;
 		case SHIFT_SHR:
-			InvalidateFlagsPartially((void*)&dynrec_shr_byte_simple,t_SHRb);
-			gen_call_function_raw((void*)&dynrec_shr_byte);
+			InvalidateFlagsPartially(dynrec_shr_byte_simple,t_SHRb);
+			gen_call_function_raw(dynrec_shr_byte);
 			break;
 		case SHIFT_SAR:
-			InvalidateFlagsPartially((void*)&dynrec_sar_byte_simple,t_SARb);
-			gen_call_function_raw((void*)&dynrec_sar_byte);
+			InvalidateFlagsPartially(dynrec_sar_byte_simple,t_SARb);
+			gen_call_function_raw(dynrec_sar_byte);
 			break;
 		default: IllegalOptionDynrec("dyn_shift_byte_gencall");
 	}
@@ -1150,66 +1162,66 @@ static void dyn_shift_word_gencall(ShiftOps op,bool dword) {
 	if (dword) {
 		switch (op) {
 			case SHIFT_ROL:
-				InvalidateFlagsPartially((void*)&dynrec_rol_dword_simple,t_ROLd);
-				gen_call_function_raw((void*)&dynrec_rol_dword);
+				InvalidateFlagsPartially(dynrec_rol_dword_simple,t_ROLd);
+				gen_call_function_raw(dynrec_rol_dword);
 				break;
 			case SHIFT_ROR:
-				InvalidateFlagsPartially((void*)&dynrec_ror_dword_simple,t_RORd);
-				gen_call_function_raw((void*)&dynrec_ror_dword);
+				InvalidateFlagsPartially(dynrec_ror_dword_simple,t_RORd);
+				gen_call_function_raw(dynrec_ror_dword);
 				break;
 			case SHIFT_RCL:
 				AcquireFlags(FLAG_CF);
-				gen_call_function_raw((void*)&dynrec_rcl_dword);
+				gen_call_function_raw(dynrec_rcl_dword);
 				break;
 			case SHIFT_RCR:
 				AcquireFlags(FLAG_CF);
-				gen_call_function_raw((void*)&dynrec_rcr_dword);
+				gen_call_function_raw(dynrec_rcr_dword);
 				break;
 			case SHIFT_SHL:
 			case SHIFT_SAL:
-				InvalidateFlagsPartially((void*)&dynrec_shl_dword_simple,t_SHLd);
-				gen_call_function_raw((void*)&dynrec_shl_dword);
+				InvalidateFlagsPartially(dynrec_shl_dword_simple,t_SHLd);
+				gen_call_function_raw(dynrec_shl_dword);
 				break;
 			case SHIFT_SHR:
-				InvalidateFlagsPartially((void*)&dynrec_shr_dword_simple,t_SHRd);
-				gen_call_function_raw((void*)&dynrec_shr_dword);
+				InvalidateFlagsPartially(dynrec_shr_dword_simple,t_SHRd);
+				gen_call_function_raw(dynrec_shr_dword);
 				break;
 			case SHIFT_SAR:
-				InvalidateFlagsPartially((void*)&dynrec_sar_dword_simple,t_SARd);
-				gen_call_function_raw((void*)&dynrec_sar_dword);
+				InvalidateFlagsPartially(dynrec_sar_dword_simple,t_SARd);
+				gen_call_function_raw(dynrec_sar_dword);
 				break;
 			default: IllegalOptionDynrec("dyn_shift_dword_gencall");
 		}
 	} else {
 		switch (op) {
 			case SHIFT_ROL:
-				InvalidateFlagsPartially((void*)&dynrec_rol_word_simple,t_ROLw);
-				gen_call_function_raw((void*)&dynrec_rol_word);
+				InvalidateFlagsPartially(dynrec_rol_word_simple,t_ROLw);
+				gen_call_function_raw(dynrec_rol_word);
 				break;
 			case SHIFT_ROR:
-				InvalidateFlagsPartially((void*)&dynrec_ror_word_simple,t_RORw);
-				gen_call_function_raw((void*)&dynrec_ror_word);
+				InvalidateFlagsPartially(dynrec_ror_word_simple,t_RORw);
+				gen_call_function_raw(dynrec_ror_word);
 				break;
 			case SHIFT_RCL:
 				AcquireFlags(FLAG_CF);
-				gen_call_function_raw((void*)&dynrec_rcl_word);
+				gen_call_function_raw(dynrec_rcl_word);
 				break;
 			case SHIFT_RCR:
 				AcquireFlags(FLAG_CF);
-				gen_call_function_raw((void*)&dynrec_rcr_word);
+				gen_call_function_raw(dynrec_rcr_word);
 				break;
 			case SHIFT_SHL:
 			case SHIFT_SAL:
-				InvalidateFlagsPartially((void*)&dynrec_shl_word_simple,t_SHLw);
-				gen_call_function_raw((void*)&dynrec_shl_word);
+				InvalidateFlagsPartially(dynrec_shl_word_simple,t_SHLw);
+				gen_call_function_raw(dynrec_shl_word);
 				break;
 			case SHIFT_SHR:
-				InvalidateFlagsPartially((void*)&dynrec_shr_word_simple,t_SHRw);
-				gen_call_function_raw((void*)&dynrec_shr_word);
+				InvalidateFlagsPartially(dynrec_shr_word_simple,t_SHRw);
+				gen_call_function_raw(dynrec_shr_word);
 				break;
 			case SHIFT_SAR:
-				InvalidateFlagsPartially((void*)&dynrec_sar_word_simple,t_SARw);
-				gen_call_function_raw((void*)&dynrec_sar_word);
+				InvalidateFlagsPartially(dynrec_sar_word_simple,t_SARw);
+				gen_call_function_raw(dynrec_sar_word);
 				break;
 			default: IllegalOptionDynrec("dyn_shift_word_gencall");
 		}
@@ -1298,21 +1310,21 @@ static Bit32u DRC_CALL_CONV dynrec_dshr_dword_simple(Bit32u op1,Bit32u op2,Bit8u
 
 static void dyn_dpshift_word_gencall(bool left) {
 	if (left) {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshl_word,FC_OP3);
-		InvalidateFlagsPartially((void*)&dynrec_dshl_word_simple,proc_addr,t_DSHLw);
+		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3(dynrec_dshl_word,FC_OP3);
+		InvalidateFlagsPartially(dynrec_dshl_word_simple,proc_addr,t_DSHLw);
 	} else {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshr_word,FC_OP3);
-		InvalidateFlagsPartially((void*)&dynrec_dshr_word_simple,proc_addr,t_DSHRw);
+		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3(dynrec_dshr_word,FC_OP3);
+		InvalidateFlagsPartially(dynrec_dshr_word_simple,proc_addr,t_DSHRw);
 	}
 }
 
 static void dyn_dpshift_dword_gencall(bool left) {
 	if (left) {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshl_dword,FC_OP3);
-		InvalidateFlagsPartially((void*)&dynrec_dshl_dword_simple,proc_addr,t_DSHLd);
+		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3(dynrec_dshl_dword,FC_OP3);
+		InvalidateFlagsPartially(dynrec_dshl_dword_simple,proc_addr,t_DSHLd);
 	} else {
-		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3((void*)&dynrec_dshr_dword,FC_OP3);
-		InvalidateFlagsPartially((void*)&dynrec_dshr_dword_simple,proc_addr,t_DSHRd);
+		DRC_PTR_SIZE_IM proc_addr=gen_call_function_R3(dynrec_dshr_dword,FC_OP3);
+		InvalidateFlagsPartially(dynrec_dshr_dword_simple,proc_addr,t_DSHRd);
 	}
 }
 
@@ -1355,23 +1367,23 @@ static Bit32u DRC_CALL_CONV dynrec_get_nzf_and_sf_eq_of(void)	{ return TFLG_NLE;
 
 static void dyn_branchflag_to_reg(BranchTypes btype) {
 	switch (btype) {
-		case BR_O:gen_call_function_raw((void*)&dynrec_get_of);break;
-		case BR_NO:gen_call_function_raw((void*)&dynrec_get_nof);break;
-		case BR_B:gen_call_function_raw((void*)&dynrec_get_cf);break;
-		case BR_NB:gen_call_function_raw((void*)&dynrec_get_ncf);break;
-		case BR_Z:gen_call_function_raw((void*)&dynrec_get_zf);break;
-		case BR_NZ:gen_call_function_raw((void*)&dynrec_get_nzf);break;
-		case BR_BE:gen_call_function_raw((void*)&dynrec_get_cf_or_zf);break;
-		case BR_NBE:gen_call_function_raw((void*)&dynrec_get_ncf_and_nzf);break;
+		case BR_O:gen_call_function_raw(dynrec_get_of);break;
+		case BR_NO:gen_call_function_raw(dynrec_get_nof);break;
+		case BR_B:gen_call_function_raw(dynrec_get_cf);break;
+		case BR_NB:gen_call_function_raw(dynrec_get_ncf);break;
+		case BR_Z:gen_call_function_raw(dynrec_get_zf);break;
+		case BR_NZ:gen_call_function_raw(dynrec_get_nzf);break;
+		case BR_BE:gen_call_function_raw(dynrec_get_cf_or_zf);break;
+		case BR_NBE:gen_call_function_raw(dynrec_get_ncf_and_nzf);break;
 
-		case BR_S:gen_call_function_raw((void*)&dynrec_get_sf);break;
-		case BR_NS:gen_call_function_raw((void*)&dynrec_get_nsf);break;
-		case BR_P:gen_call_function_raw((void*)&dynrec_get_pf);break;
-		case BR_NP:gen_call_function_raw((void*)&dynrec_get_npf);break;
-		case BR_L:gen_call_function_raw((void*)&dynrec_get_sf_neq_of);break;
-		case BR_NL:gen_call_function_raw((void*)&dynrec_get_sf_eq_of);break;
-		case BR_LE:gen_call_function_raw((void*)&dynrec_get_zf_or_sf_neq_of);break;
-		case BR_NLE:gen_call_function_raw((void*)&dynrec_get_nzf_and_sf_eq_of);break;
+		case BR_S:gen_call_function_raw(dynrec_get_sf);break;
+		case BR_NS:gen_call_function_raw(dynrec_get_nsf);break;
+		case BR_P:gen_call_function_raw(dynrec_get_pf);break;
+		case BR_NP:gen_call_function_raw(dynrec_get_npf);break;
+		case BR_L:gen_call_function_raw(dynrec_get_sf_neq_of);break;
+		case BR_NL:gen_call_function_raw(dynrec_get_sf_eq_of);break;
+		case BR_LE:gen_call_function_raw(dynrec_get_zf_or_sf_neq_of);break;
+		case BR_NLE:gen_call_function_raw(dynrec_get_nzf_and_sf_eq_of);break;
 	}
 }
 
@@ -1422,7 +1434,7 @@ static void DRC_CALL_CONV dynrec_mul_word(Bit16u op) {
 static void DRC_CALL_CONV dynrec_imul_word(Bit16u op) DRC_FC;
 static void DRC_CALL_CONV dynrec_imul_word(Bit16u op) {
 	FillFlagsNoCFOF();
-	Bits temps=((Bit16s)reg_ax)*((Bit16s)op);
+	Bits temps=((Bit16s)reg_ax)*((Bits)op);
 	reg_ax=(Bit16s)(temps);
 	reg_dx=(Bit16s)(temps >> 16);
 	if (((temps & 0xffff8000)==0xffff8000 || (temps & 0xffff8000)==0x0000)) {
@@ -1555,7 +1567,7 @@ static bool DRC_CALL_CONV dynrec_idiv_dword(Bit32u op) {
 static Bit16u DRC_CALL_CONV dynrec_dimul_word(Bit16u op1,Bit16u op2) DRC_FC;
 static Bit16u DRC_CALL_CONV dynrec_dimul_word(Bit16u op1,Bit16u op2) {
 	FillFlagsNoCFOF();
-	Bits res=((Bit16s)op1) * ((Bit16s)op2);
+	Bits res=((Bit16s)op1) * ((Bits)op2);
 	if ((res>-32768)  && (res<32767)) {
 		SETFLAGBIT(CF,false);
 		SETFLAGBIT(OF,false);
@@ -1664,8 +1676,8 @@ static Bit32u DRC_CALL_CONV dynrec_movsb_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count-CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	for (;count>0;count--) {
@@ -1701,8 +1713,8 @@ static Bit32u DRC_CALL_CONV dynrec_movsw_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count-CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	add_index<<=1;
@@ -1739,8 +1751,8 @@ static Bit32u DRC_CALL_CONV dynrec_movsd_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	add_index<<=2;
@@ -1776,8 +1788,8 @@ static Bit32u DRC_CALL_CONV dynrec_lodsb_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	for (;count>0;count--) {
@@ -1811,8 +1823,8 @@ static Bit32u DRC_CALL_CONV dynrec_lodsw_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	add_index<<=1;
@@ -1847,8 +1859,8 @@ static Bit32u DRC_CALL_CONV dynrec_lodsd_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	add_index<<=2;
@@ -1883,8 +1895,8 @@ static Bit32u DRC_CALL_CONV dynrec_stosb_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count= (Bit32u)CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	for (;count>0;count--) {
@@ -1918,8 +1930,8 @@ static Bit32u DRC_CALL_CONV dynrec_stosw_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count=(Bit32u) CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	add_index<<=1;
@@ -1954,8 +1966,8 @@ static Bit32u DRC_CALL_CONV dynrec_stosd_dword(Bit32u count,Bit32s add_index,Phy
 	if (count<(Bitu)CPU_Cycles) {
 		count_left=0;
 	} else {
-		count_left=count-CPU_Cycles;
-		count=CPU_Cycles;
+		count_left= (Bit32u)(count - CPU_Cycles);
+		count=(Bit32u) CPU_Cycles;
 		CPU_Cycles=0;
 	}
 	add_index<<=2;

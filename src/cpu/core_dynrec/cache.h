@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -113,11 +113,11 @@ public:
 
 	// clear out blocks that contain code which has been modified
 	bool InvalidateRange(Bitu start,Bitu end) {
-		Bits index=1+(end>>DYN_HASH_SHIFT);
+		Bits index=1+(Bits)(end>>(Bitu)DYN_HASH_SHIFT);
 		bool is_current_block=false;	// if the current block is modified, it has to be exited as soon as possible
 
 		Bit32u ip_point=SegPhys(cs)+reg_eip;
-		ip_point=(PAGING_GetPhysicalPage(ip_point)-(phys_page<<12))+(ip_point&0xfff);
+		ip_point=(Bit32u)((PAGING_GetPhysicalPage(ip_point)-(phys_page<<12))+(ip_point&0xfff));
 		while (index>=0) {
 			Bitu map=0;
 			// see if there is still some code in the range
@@ -140,9 +140,9 @@ public:
 	}
 
 	// the following functions will clean all cache blocks that are invalid now due to the write
-	void writeb(PhysPt addr,Bitu val){
+	void writeb(PhysPt addr,Bit8u val){
 		addr&=4095;
-		if (host_readb(hostmem+addr)==(Bit8u)val) return;
+		if (host_readb(hostmem+addr)==val) return;
 		host_writeb(hostmem+addr,val);
 		// see if there's code where we are writing to
 		if (!host_readb(&write_map[addr])) {
@@ -157,9 +157,9 @@ public:
 		invalidation_map[addr]++;
 		InvalidateRange(addr,addr);
 	}
-	void writew(PhysPt addr,Bitu val){
+	void writew(PhysPt addr,Bit16u val){
 		addr&=4095;
-		if (host_readw(hostmem+addr)==(Bit16u)val) return;
+		if (host_readw(hostmem+addr)==val) return;
 		host_writew(hostmem+addr,val);
 		// see if there's code where we are writing to
 		if (!host_readw(&write_map[addr])) {
@@ -177,11 +177,11 @@ public:
 #else
 		(*(Bit16u*)&invalidation_map[addr])+=0x101;
 #endif
-		InvalidateRange(addr,addr+1);
+		InvalidateRange(addr,addr+(Bitu)1);
 	}
-	void writed(PhysPt addr,Bitu val){
+	void writed(PhysPt addr,Bit32u val){
 		addr&=4095;
-		if (host_readd(hostmem+addr)==(Bit32u)val) return;
+		if (host_readd(hostmem+addr)==val) return;
 		host_writed(hostmem+addr,val);
 		// see if there's code where we are writing to
 		if (!host_readd(&write_map[addr])) {
@@ -199,11 +199,11 @@ public:
 #else
 		(*(Bit32u*)&invalidation_map[addr])+=0x1010101;
 #endif
-		InvalidateRange(addr,addr+3);
+		InvalidateRange(addr,addr+(Bitu)3);
 	}
-	bool writeb_checked(PhysPt addr,Bitu val) {
+	bool writeb_checked(PhysPt addr,Bit8u val) {
 		addr&=4095;
-		if (host_readb(hostmem+addr)==(Bit8u)val) return false;
+		if (host_readb(hostmem+addr)==val) return false;
 		// see if there's code where we are writing to
 		if (!host_readb(&write_map[addr])) {
 			if (!active_blocks) {
@@ -225,9 +225,9 @@ public:
 		host_writeb(hostmem+addr,val);
 		return false;
 	}
-	bool writew_checked(PhysPt addr,Bitu val) {
+	bool writew_checked(PhysPt addr,Bit16u val) {
 		addr&=4095;
-		if (host_readw(hostmem+addr)==(Bit16u)val) return false;
+		if (host_readw(hostmem+addr)==val) return false;
 		// see if there's code where we are writing to
 		if (!host_readw(&write_map[addr])) {
 			if (!active_blocks) {
@@ -246,7 +246,7 @@ public:
 #else
 			(*(Bit16u*)&invalidation_map[addr])+=0x101;
 #endif
-			if (InvalidateRange(addr,addr+1)) {
+			if (InvalidateRange(addr,addr+(Bitu)1)) {
 				cpu.exception.which=SMC_CURRENT_BLOCK;
 				return true;
 			}
@@ -254,9 +254,9 @@ public:
 		host_writew(hostmem+addr,val);
 		return false;
 	}
-	bool writed_checked(PhysPt addr,Bitu val) {
+	bool writed_checked(PhysPt addr,Bit32u val) {
 		addr&=4095;
-		if (host_readd(hostmem+addr)==(Bit32u)val) return false;
+		if (host_readd(hostmem+addr)==val) return false;
 		// see if there's code where we are writing to
 		if (!host_readd(&write_map[addr])) {
 			if (!active_blocks) {
@@ -275,7 +275,7 @@ public:
 #else
 			(*(Bit32u*)&invalidation_map[addr])+=0x1010101;
 #endif
-			if (InvalidateRange(addr,addr+3)) {
+			if (InvalidateRange(addr,addr+(Bitu)3)) {
 				cpu.exception.which=SMC_CURRENT_BLOCK;
 				return true;
 			}
@@ -286,7 +286,7 @@ public:
 
     // add a cache block to this page and note it in the hash map
 	void AddCacheBlock(CacheBlockDynRec * block) {
-		Bitu index=1+(block->page.start>>DYN_HASH_SHIFT);
+		Bitu index=1u+(Bitu)(block->page.start>>(Bit16u)DYN_HASH_SHIFT);
 		block->hash.next=hash_map[index];	// link to old block at index from the new block
 		block->hash.index=index;
 		hash_map[index]=block;				// put new block at hash position
@@ -500,8 +500,8 @@ static void cache_closeblock(void) {
 	Bitu written=(Bitu)(cache.pos-block->cache.start);
 	if (written>block->cache.size) {
 		if (!block->cache.next) {
-			if (written>block->cache.size+CACHE_MAXSIZE) E_Exit("CacheBlock overrun 1 %d",written-block->cache.size);	
-		} else E_Exit("CacheBlock overrun 2 written %d size %d",written,block->cache.size);	
+			if (written>block->cache.size+CACHE_MAXSIZE) E_Exit("CacheBlock overrun 1 %lu",(unsigned long)written-block->cache.size);
+		} else E_Exit("CacheBlock overrun 2 written %lu size %lu",(unsigned long)written,(unsigned long)block->cache.size);
 	} else {
 		Bitu new_size;
 		Bitu left=block->cache.size-written;
@@ -596,7 +596,7 @@ static void cache_init(bool enable) {
 			if(!cache_code_start_ptr) E_Exit("Allocating dynamic cache failed");
 
 			// align the cache at a page boundary
-			cache_code=(Bit8u*)(((Bitu)cache_code_start_ptr + PAGESIZE_TEMP-1) & ~(PAGESIZE_TEMP-1));//Bitu is same size as a pointer.
+			cache_code=(Bit8u*)(((Bitu)cache_code_start_ptr + (Bitu)(PAGESIZE_TEMP-1)) & ~((Bitu)(PAGESIZE_TEMP-1)));//Bitu is same size as a pointer.
 
 			cache_code_link_blocks=cache_code;
 			cache_code=cache_code+PAGESIZE_TEMP;
@@ -623,7 +623,7 @@ static void cache_init(bool enable) {
 		dyn_return(BR_Link2,false);
 
 		cache.pos=&cache_code_link_blocks[64];
-		core_dynrec.runcode=(BlockReturn (*)(Bit8u*))cache.pos;
+		*(void**)(&core_dynrec.runcode) = (void*)cache.pos;
 //		link_blocks[1].cache.start=cache.pos;
 		dyn_run_code();
 

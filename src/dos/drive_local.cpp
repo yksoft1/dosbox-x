@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -22,6 +22,7 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
+#include <limits.h>
 
 #include "dosbox.h"
 #include "dos_inc.h"
@@ -35,27 +36,6 @@
 #include <sys/utime.h>
 #include <sys/locking.h>
 #endif
-
-class localFile : public DOS_File {
-public:
-	localFile(const char* name, FILE * handle);
-	bool Read(Bit8u * data,Bit16u * size);
-	bool Write(const Bit8u * data,Bit16u * size);
-	bool Seek(Bit32u * pos,Bit32u type);
-	bool Close();
-#ifdef WIN32
-	bool LockFile(Bit8u mode, Bit32u pos, Bit16u size);
-#endif
-	Bit16u GetInformation(void);
-	bool UpdateDateTimeFromHost(void);   
-	void FlagReadOnlyMedium(void);
-	void Flush(void);
-	Bit32u GetSeekPos(void);
-private:
-	FILE * fhandle;
-	bool read_only_medium;
-	enum { NONE,READ,WRITE } last_action;
-};
 
 #include "cp437_uni.h"
 #include "cp932_uni.h"
@@ -162,7 +142,7 @@ template <class MT> bool String_DBCS_TO_HOST_SHIFTJIS(host_cnv_char_t *d/*CROSS_
         if (rawofs == 0xFFFF)
             return false;
 
-        assert((size_t)(rawofs+0x40) <= rawtbl_max);
+        assert((size_t)(rawofs+ (Bitu)0x40) <= rawtbl_max);
         wc = rawtbl[rawofs + (ic & 0x3F)];
         if (wc == 0x0000)
             return false;
@@ -197,7 +177,7 @@ template <class MT> int DBCS_SHIFTJIS_From_Host_Find(int c,const MT *hitbl,const
         MT ofs = hitbl[h];
 
         if (ofs == 0xFFFF) continue;
-        assert((size_t)(ofs+0x40) <= rawtbl_max);
+        assert((size_t)(ofs+ (Bitu)0x40) <= rawtbl_max);
 
         for (size_t l=0;l < 0x40;l++) {
             if ((MT)c == rawtbl[ofs+l])
@@ -1076,7 +1056,8 @@ bool localFile::Read(Bit8u * data,Bit16u * size) {
 }
 
 bool localFile::Write(const Bit8u * data,Bit16u * size) {
-	if ((this->flags & 0xf) == OPEN_READ) {	// check if file opened in read-only mode
+	Bit32u lastflags = this->flags & 0xf;
+	if (lastflags == OPEN_READ || lastflags == OPEN_READ_NO_MOD) {	// check if file opened in read-only mode
 		DOS_SetError(DOSERR_ACCESS_DENIED);
 		return false;
 	}
@@ -1163,14 +1144,11 @@ bool localFile::Seek(Bit32u * pos,Bit32u type) {
 }
 
 bool localFile::Close() {
-	// only close if one reference left
-	if (refCtr==1) {
-		if(fhandle) fclose(fhandle); 
-		fhandle = 0;
-		open = false;
-	};
+	if (newtime && fhandle) {
+        // force STDIO to flush buffers on this file handle, or else fclose() will write buffered data
+        // and cause mtime to reset back to current time.
+        fflush(fhandle);
 
-	if (newtime) {
  		// backport from DOS_PackDate() and DOS_PackTime()
 		struct tm tim = { 0 };
 		tim.tm_sec  = (time&0x1f)*2;
@@ -1179,24 +1157,46 @@ bool localFile::Close() {
 		tim.tm_mday = date&0x1f;
 		tim.tm_mon  = ((date>>5)&0x0f)-1;
 		tim.tm_year = (date>>9)+1980-1900;
+        // sanitize the date in case of invalid timestamps (such as 0x0000 date/time fields)
+        if (tim.tm_mon < 0) tim.tm_mon = 0;
+        if (tim.tm_mday == 0) tim.tm_mday = 1;
 		//  have the C run-time library code compute whether standard time or daylight saving time is in effect.
 		tim.tm_isdst = -1;
 		// serialize time
 		mktime(&tim);
 
-		struct utimbuf ftim;
-		ftim.actime = ftim.modtime = mktime(&tim);
-	
-		char fullname[DOS_PATHLENGTH];
-		strcpy(fullname, Drives[drive]->GetBaseDir());
-		strcat(fullname, name);
-//		Dos_SpecoalChar(fullname, true);
-		CROSS_FILENAME(fullname);
-		if (utime(fullname, &ftim)) {
-//			extern int errno; 
-//			LOG_MSG("Set time failed for %s (%s)", fullname, strerror(errno));
-			return false;
-		}
+        // change file time by file handle (while we still have it open)
+        // so that we do not have to duplicate guest to host filename conversion here.
+        // This should help Yksoft1 with file date/time, PC-98, and Shift-JIS Japanese filenames as well on Windows.
+
+#if defined(WIN32) /* TODO: What about MinGW? */
+        struct _utimbuf ftim;
+        ftim.actime = ftim.modtime = mktime(&tim);
+
+        if (_futime(fileno(fhandle), &ftim)) {
+            extern int errno; 
+            LOG_MSG("Set time failed (%s)", strerror(errno));
+        }
+#elif !defined(RISCOS) // Linux (TODO: What about Mac OS X/Darwin?)
+        // NTS: Do not attempt futime, Linux doesn't have it.
+        //      Do not attempt futimes, Linux man pages LIE about having it. It's even there in the freaking header, but not recognized!
+        //      Use futimens. Modern stuff should have it. [https://pubs.opengroup.org/onlinepubs/9699919799/functions/futimens.html]
+        struct timespec ftsp[2];
+        ftsp[0].tv_sec =  ftsp[1].tv_sec =  mktime(&tim);
+        ftsp[0].tv_nsec = ftsp[1].tv_nsec = 0;
+
+        if (futimens(fileno(fhandle), ftsp)) {
+            extern int errno; 
+            LOG_MSG("Set time failed (%s)", strerror(errno));
+        }
+#endif
+	}
+
+	// only close if one reference left
+	if (refCtr==1) {
+		if(fhandle) fclose(fhandle); 
+		fhandle = 0;
+		open = false;
 	}
 
 	return true;
@@ -1208,7 +1208,7 @@ Bit16u localFile::GetInformation(void) {
 	
 
 Bit32u localFile::GetSeekPos() {
-	return ftell( fhandle );
+	return (Bit32u)ftell( fhandle );
 }
 
 
@@ -1262,7 +1262,10 @@ bool MSCDEX_GetVolumeName(Bit8u subUnit, char* name);
 
 
 cdromDrive::cdromDrive(const char driveLetter, const char * startdir,Bit16u _bytes_sector,Bit8u _sectors_cluster,Bit16u _total_clusters,Bit16u _free_clusters,Bit8u _mediaid, int& error)
-		   :localDrive(startdir,_bytes_sector,_sectors_cluster,_total_clusters,_free_clusters,_mediaid) {
+		   :localDrive(startdir,_bytes_sector,_sectors_cluster,_total_clusters,_free_clusters,_mediaid),
+		    subUnit(0),
+		    driveLetter('\0')
+{
 	// Init mscdex
 	error = MSCDEX_AddDrive(driveLetter,startdir,subUnit);
 	strcpy(info, "CDRom ");

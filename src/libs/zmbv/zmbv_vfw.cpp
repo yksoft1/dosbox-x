@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 //
 // Zipped Motion Block Video
@@ -50,6 +50,7 @@ void Msg(const char fmt[], ...) {
   
   va_start(val, fmt);
   wvsprintf(buf, fmt, val);
+  va_end(val);
 
   const COORD _80x50 = {80,50};
   static BOOL startup = (AllocConsole(), SetConsoleScreenBufferSize(GetStdHandle(STD_OUTPUT_HANDLE), _80x50));
@@ -300,7 +301,29 @@ DWORD CodecInst::Compress(ICCOMPRESS* icinfo, DWORD dwSize) {
 	if (icinfo->dwFlags & ICCOMPRESS_KEYFRAME)
 		flags |= 1;
 
-	codec->PrepareCompressFrame( flags, format, 0, icinfo->lpOutput, 99999999);
+	char palette[256 * 4];
+	char *pal = NULL;
+
+	if (lpbiIn->biBitCount == 8) {
+		const int entries = icinfo->lpbiInput->biClrUsed ? icinfo->lpbiInput->biClrUsed : 256;
+		const char* srcpal = (char *)icinfo->lpbiInput + icinfo->lpbiInput->biSize;
+		char* dstpal = palette;
+
+		memset(palette, 0, sizeof palette);
+
+		for(int i=0; i<entries; ++i) {
+			dstpal[0] = srcpal[2];
+			dstpal[1] = srcpal[1];
+			dstpal[2] = srcpal[0];
+			dstpal[3] = 0;
+			dstpal += 4;
+			srcpal += 4;
+		}
+
+		pal = palette;
+	}
+
+	codec->PrepareCompressFrame( flags, format, pal, icinfo->lpOutput, 99999999);
 	char *readPt = (char *)icinfo->lpInput + pitch*(lpbiIn->biHeight - 1);
 	for(i = 0;i<lpbiIn->biHeight;i++) {
 		codec->CompressLines(1, (void **)&readPt );

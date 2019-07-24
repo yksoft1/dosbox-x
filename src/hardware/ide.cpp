@@ -63,6 +63,8 @@ static const unsigned short IDE_default_alts[4] = {
 
 bool fdc_takes_port_3F7();
 
+static void ide_pc98ctlio_w(Bitu port,Bitu val,Bitu iolen);
+static Bitu ide_pc98ctlio_r(Bitu port,Bitu iolen);
 static void ide_altio_w(Bitu port,Bitu val,Bitu iolen);
 static Bitu ide_altio_r(Bitu port,Bitu iolen);
 static void ide_baseio_w(Bitu port,Bitu val,Bitu iolen);
@@ -190,6 +192,7 @@ public:
     Bitu phys_heads,phys_sects,phys_cyls;
     unsigned char sector[512*128];
     Bitu sector_i,sector_total;
+    bool geo_translate;
 };
 
 enum {
@@ -2036,6 +2039,7 @@ IDEATADevice::IDEATADevice(IDEController *c,unsigned char bios_disk_index) : IDE
     id_model = "DOSBox IDE disk";
     multiple_sector_max = sizeof(sector) / 512;
     multiple_sector_count = 1;
+    geo_translate = false;
 }
 
 IDEATADevice::~IDEATADevice() {
@@ -2071,6 +2075,7 @@ void IDEATADevice::update_from_biosdisk() {
     }
 
     headshr = 0;
+    geo_translate = false;
     cyls = dsk->cylinders;
     heads = dsk->heads;
     sects = dsk->sectors;
@@ -2091,6 +2096,8 @@ void IDEATADevice::update_from_biosdisk() {
      * print a warning to reminder the user of exactly that. */
     if (heads > 16) {
         unsigned long tmp;
+
+        geo_translate = true;
 
         tmp = heads * cyls * sects;
         sects = 63;
@@ -2493,7 +2500,7 @@ void IDE_EmuINT13DiskReadByBIOS(unsigned char disk,unsigned int cyl,unsigned int
                     }
 
                     /* translate BIOS INT 13h geometry to IDE geometry */
-                    if (ata->headshr != 0) {
+                    if (ata->headshr != 0 || ata->geo_translate) {
                         unsigned long lba;
 
                         if (dsk == NULL) return;
@@ -3109,24 +3116,43 @@ static void IDE_DelayedCommand(Bitu idx/*which IDE controller*/) {
     }
 }
 
+void PC98_IDE_UpdateIRQ(void);
+
 void IDEController::raise_irq() {
     irq_pending = true;
-    if (IRQ >= 0 && interrupt_enable) PIC_ActivateIRQ((unsigned int)IRQ);
+    if (IS_PC98_ARCH) {
+        PC98_IDE_UpdateIRQ();
+    }
+    else {
+        if (IRQ >= 0 && interrupt_enable) PIC_ActivateIRQ((unsigned int)IRQ);
+    }
 }
 
 void IDEController::lower_irq() {
     irq_pending = false;
-    if (IRQ >= 0) PIC_DeActivateIRQ((unsigned int)IRQ);
+    if (IS_PC98_ARCH) {
+        PC98_IDE_UpdateIRQ();
+    }
+    else {
+        if (IRQ >= 0) PIC_DeActivateIRQ((unsigned int)IRQ);
+    }
 }
+
+unsigned int pc98_ide_select = 0;
 
 IDEController *match_ide_controller(Bitu port) {
     unsigned int i;
 
-    for (i=0;i < MAX_IDE_CONTROLLERS;i++) {
-        IDEController *ide = idecontroller[i];
-        if (ide == NULL) continue;
-        if (ide->base_io != 0U && ide->base_io == (port&0xFFF8U)) return ide;
-        if (ide->alt_io != 0U && ide->alt_io == (port&0xFFFEU)) return ide;
+    if (IS_PC98_ARCH) {
+        return idecontroller[pc98_ide_select];
+    }
+    else {
+        for (i=0;i < MAX_IDE_CONTROLLERS;i++) {
+            IDEController *ide = idecontroller[i];
+            if (ide == NULL) continue;
+            if (ide->base_io != 0U && ide->base_io == (port&0xFFF8U)) return ide;
+            if (ide->alt_io != 0U && ide->alt_io == (port&0xFFFEU)) return ide;
+        }
     }
 
     return NULL;
@@ -3546,6 +3572,7 @@ IDEController::IDEController(Section* configuration,unsigned char index):Module_
     select = 0;
     alt_io = 0;
     IRQ = -1;
+    drivehead = 0;
 
     i = section->Get_int("irq");
     if (i > 0 && i <= 15) IRQ = i;
@@ -3556,7 +3583,17 @@ IDEController::IDEController(Section* configuration,unsigned char index):Module_
     i = section->Get_hex("altio");
     if (i >= 0x100 && i <= 0x3FF) alt_io = (unsigned int)(i & ~1);
 
-    if (index < sizeof(IDE_default_IRQs)) {
+    if (IS_PC98_ARCH) {
+        /* PC-98 evidently maps all IDE controllers to one set of I/O ports and allows
+         * "bank switching" between them through I/O ports 430h-435h. This is also why
+         * the IDE emulation will NOT register I/O ports per controller in PC-98 mode.
+         * If PC-98 supports IDE controllers outside this scheme, then that shall be
+         * implemented later. */
+        IRQ = 9; // INT 8+9 = 17 = 11h
+        alt_io = 0x74C; // even
+        base_io = 0x640; // even
+    }
+    else if (index < sizeof(IDE_default_IRQs)) {
         if (IRQ < 0) IRQ = IDE_default_IRQs[index];
         if (alt_io == 0) alt_io = IDE_default_alts[index];
         if (base_io == 0) base_io = IDE_default_bases[index];
@@ -3568,6 +3605,9 @@ IDEController::IDEController(Section* configuration,unsigned char index):Module_
 }
 
 void IDEController::register_isapnp() {
+    if (IS_PC98_ARCH)
+        return;
+
     if (register_pnp && base_io > 0 && alt_io > 0) {
         unsigned char tmp[256];
         unsigned int i;
@@ -3628,6 +3668,9 @@ void IDEController::register_isapnp() {
 void IDEController::install_io_port(){
     unsigned int i;
 
+    if (IS_PC98_ARCH)
+        return;
+
     if (base_io != 0) {
         for (i=0;i < 8;i++) {
             WriteHandler[i].Install(base_io+i,ide_baseio_w,IO_MA);
@@ -3662,6 +3705,58 @@ IDEController::~IDEController() {
     }
 }
 
+static void IDE_PC98_Select(Bitu val) {
+    val &= 1;
+    if (pc98_ide_select != val) {
+        pc98_ide_select = val;
+        // TODO: IRQ raise by signal
+    }
+}
+
+static void ide_pc98ctlio_w(Bitu port,Bitu val,Bitu iolen) {
+    (void)iolen;
+
+    switch (port & 7) {
+        case 0:     // 430h
+            // ???
+            break;
+        case 2:     // 432h
+            if (val & 0x80) {
+                // test write?
+            }
+            else {
+                IDE_PC98_Select(val & 1);
+            }
+            break;
+        case 5:     // 435h
+            // ???
+            break;
+    }
+}
+
+static Bitu ide_pc98ctlio_r(Bitu port,Bitu iolen) {
+    (void)iolen;
+
+    switch (port & 7) {
+        case 0:     // 430h
+            return pc98_ide_select;
+        case 2:     // 432h
+            return pc98_ide_select;
+        case 5:     // 435h
+            {
+                Bitu bf = ~0ul;
+                if (idecontroller[0] != NULL)
+                    bf &= ~(1u << 0u);
+                if (idecontroller[1] != NULL)
+                    bf &= ~(1u << 1u);
+
+                return bf;
+            }
+    }
+
+    return ~0ul;
+}
+
 static void ide_altio_w(Bitu port,Bitu val,Bitu iolen) {
     IDEController *ide = match_ide_controller(port);
     if (ide == NULL) {
@@ -3677,14 +3772,23 @@ static void ide_altio_w(Bitu port,Bitu val,Bitu iolen) {
     else if (ide->ignore_pio32 && iolen == 4)
         return;
 
-    port &= 1;
+    if (IS_PC98_ARCH)
+        port = (port >> 1) & 1;
+    else
+        port &= 1;
+
     if (port == 0) {/*3F6*/
         ide->interrupt_enable = (val&2u)?0:1;
         if (ide->interrupt_enable) {
             if (ide->irq_pending) ide->raise_irq();
         }
         else {
-            if (ide->IRQ >= 0) PIC_DeActivateIRQ((unsigned int)ide->IRQ);
+            if (IS_PC98_ARCH) {
+                PC98_IDE_UpdateIRQ();
+            }
+            else {
+                if (ide->IRQ >= 0) PIC_DeActivateIRQ((unsigned int)ide->IRQ);
+            }
         }
 
         if ((val&4) && !ide->host_reset) {
@@ -3715,7 +3819,12 @@ static Bitu ide_altio_r(Bitu port,Bitu iolen) {
         return ~0ul;
 
     dev = ide->device[ide->select];
-    port &= 1;
+
+    if (IS_PC98_ARCH)
+        port = (port >> 1) & 1;
+    else
+        port &= 1;
+
     if (port == 0)/*3F6(R) status, does NOT clear interrupt*/
         return (dev != NULL) ? dev->status : ide->status;
     else /*3F7(R) Drive Address Register*/
@@ -3741,7 +3850,12 @@ static Bitu ide_baseio_r(Bitu port,Bitu iolen) {
         return ~0ul;
 
     dev = ide->device[ide->select];
-    port &= 7;
+
+    if (IS_PC98_ARCH)
+        port = (port >> 1) & 7;
+    else
+        port &= 7;
+
     switch (port) {
         case 0: /* 1F0 */
             ret = (dev != NULL) ? dev->data_read(iolen) : 0xFFFFFFFFUL;
@@ -3799,7 +3913,11 @@ static void ide_baseio_w(Bitu port,Bitu val,Bitu iolen) {
         return;
 
     dev = ide->device[ide->select];
-    port &= 7;
+
+    if (IS_PC98_ARCH)
+        port = (port >> 1) & 7;
+    else
+        port &= 7;
 
     /* ignore I/O writes if the controller is busy */
     if (dev) {
@@ -3903,6 +4021,9 @@ static void IDE_Init(Section* sec,unsigned char ide_interface) {
 
     assert(ide_interface < MAX_IDE_CONTROLLERS);
 
+    if (IS_PC98_ARCH && ide_interface >= 2)
+        return;
+
     if (!section->Get_bool("enable"))
         return;
 
@@ -3977,11 +4098,61 @@ void (*ide_inits[MAX_IDE_CONTROLLERS])(Section *) = {
     &IDE_Octernary_Init
 };
 
+IO_ReadHandleObject  PC98_ReadHandler[8], PC98_ReadHandlerAlt[2], PC98_ReadHandlerSel[3];
+IO_WriteHandleObject PC98_WriteHandler[8],PC98_WriteHandlerAlt[2],PC98_WriteHandlerSel[3];
+
+void PC98_IDE_UpdateIRQ(void) {
+    if (IS_PC98_ARCH) {
+        bool raise = false;
+        IDEController *ide = match_ide_controller(0);
+        if (ide != NULL)
+            raise = ide->irq_pending && ide->interrupt_enable;
+
+        if (raise)
+            PIC_ActivateIRQ(9);
+        else
+            PIC_DeActivateIRQ(9);
+    }
+}
+
 void IDE_OnReset(Section *sec) {
     (void)sec;//UNUSED
-    if (IS_PC98_ARCH) return;
 
     for (size_t i=0;i < MAX_IDE_CONTROLLERS;i++) ide_inits[i](control->GetSection(ide_names[i]));
+
+    if (IS_PC98_ARCH) {//TODO: Only if any IDE interfaces are enabled
+        for (size_t i=0;i < 8;i++) {
+            PC98_WriteHandler[i].Uninstall();
+            PC98_ReadHandler[i].Uninstall();
+            PC98_WriteHandler[i].Install(0x640+(i*2),ide_baseio_w,IO_MA);
+            PC98_ReadHandler[i].Install(0x640+(i*2),ide_baseio_r,IO_MA);
+        }
+
+        for (size_t i=0;i < 2;i++) {
+            PC98_WriteHandlerAlt[i].Uninstall();
+            PC98_ReadHandlerAlt[i].Uninstall();
+        }
+
+        PC98_WriteHandlerAlt[0].Install(0x74C,ide_altio_w,IO_MA);
+        PC98_ReadHandlerAlt[0].Install(0x74C,ide_altio_r,IO_MA);
+
+        PC98_WriteHandlerAlt[1].Install(0x74E,ide_altio_w,IO_MA);
+        PC98_ReadHandlerAlt[1].Install(0x74E,ide_altio_r,IO_MA);
+
+        for (size_t i=0;i < 3;i++) {
+            PC98_WriteHandlerSel[i].Uninstall();
+            PC98_ReadHandlerSel[i].Uninstall();
+        }
+
+        PC98_WriteHandlerSel[0].Install(0x430,ide_pc98ctlio_w,IO_MA);
+        PC98_ReadHandlerSel[0].Install(0x430,ide_pc98ctlio_r,IO_MA);
+
+        PC98_WriteHandlerSel[1].Install(0x432,ide_pc98ctlio_w,IO_MA);
+        PC98_ReadHandlerSel[1].Install(0x432,ide_pc98ctlio_r,IO_MA);
+
+        PC98_WriteHandlerSel[2].Install(0x435,ide_pc98ctlio_w,IO_MA);
+        PC98_ReadHandlerSel[2].Install(0x435,ide_pc98ctlio_r,IO_MA);
+    }
 }
 
 void IDE_Init() {

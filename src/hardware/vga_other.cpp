@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -175,7 +175,7 @@ static void write_crtc_data_mcga(Bitu port,Bitu val,Bitu iolen) {
         switch (vga.other.index) {
             case 0x10: /* MCGA Mode Control */
                 {
-                    const Bit8u changed = (vga.other.mcga_mode_control ^ val);
+                    const Bit8u changed = (vga.other.mcga_mode_control ^ (Bit8u)val);
 
                     /* bit 0: 1=select 320x200 256-color mode    0=all else
                      * bit 1: 1=select 640x480 2-color mode      0=all else
@@ -185,7 +185,7 @@ static void write_crtc_data_mcga(Bitu port,Bitu val,Bitu iolen) {
                      * bit 5: reserved
                      * bit 6: inverse of bit 8 of vertical displayed register 0x06
                      * bit 7: 1=write protect registers 0-7 */
-                    vga.other.mcga_mode_control = val;
+                    vga.other.mcga_mode_control = (Bit8u)val;
                     if (val & 0x80)
                         crtc(read_only) = true;
                     else
@@ -422,9 +422,9 @@ static void update_cga16_color(void) {
 					rgbi = ((bits >> (3-p)) & (even ? 1 : 2)) != 0 ? overscan : 0;
 				else
 					if (even)
-						rgbi = CGApal[(bits >> (2-(p&2)))&3];
+						rgbi = (Bit8u)CGApal[(bits >> (2-(p&2)))&3];
 					else
-						rgbi = CGApal[(bits >> (4-((p+1)&6)))&3];
+						rgbi = (Bit8u)CGApal[(bits >> (4-((p+1)&6)))&3];
 				Bit8u c = rgbi & 7;
 				if (bw && c != 0)
 					c = 7;
@@ -482,7 +482,7 @@ static void DecreaseHue(bool pressed) {
 }
 
 static void write_cga_color_select(Bitu val) {
-	vga.tandy.color_select=val;
+	vga.tandy.color_select=(Bit8u)val;
 
     if (vga.other.mcga_mode_control & 1) /* ignore COMPLETELY in 256-color MCGA mode */
         return;
@@ -506,7 +506,7 @@ static void write_cga_color_select(Bitu val) {
 		vga.attr.overscan_color = 0;
 		break;
 	case M_CGA16:
-		cga16_color_select(val);
+		cga16_color_select((Bit8u)val);
 		break;
 	case M_TEXT:
 		vga.tandy.border_color = val & 0xf;
@@ -774,7 +774,7 @@ static void write_tandy(Bitu port,Bitu val,Bitu /*iolen*/) {
 		}
 		break;
 	case 0x3d9:
-		vga.tandy.color_select=val;
+		vga.tandy.color_select=(Bit8u)val;
 		tandy_update_palette();
 		break;
 	case 0x3da:
@@ -953,7 +953,7 @@ static void write_hercules(Bitu port,Bitu val,Bitu /*iolen*/) {
 		}
 	case 0x3bf:
 		if ( vga.herc.enable_bits ^ val) {
-			vga.herc.enable_bits=val;
+			vga.herc.enable_bits=(Bit8u)val;
 			// Bit 1 enables the upper 32k of video memory,
 			// so update the handlers
 			VGA_SetupHandlers();
@@ -1015,6 +1015,10 @@ void VGA_SetupOther(void) {
 	memset( &vga.tandy, 0, sizeof( vga.tandy ));
 	vga.attr.disabled = 0;
 	vga.config.bytes_skip=0;
+
+	//Initialize monochrome pal and bright
+	herc_pal = mono_cga_pal = vga.draw.monochrome_pal;
+	mono_cga_bright = vga.draw.monochrome_bright;
 
 	//Initialize values common for most machines, can be overwritten
 	vga.tandy.draw_base = vga.mem.linear;
@@ -1087,9 +1091,6 @@ void VGA_SetupOther(void) {
 		write_pcjr( 0x3df, 0x7 | (0x7 << 3), 0 );
 		IO_RegisterWriteHandler(0x3da,write_pcjr,IO_MB);
 		IO_RegisterWriteHandler(0x3df,write_pcjr,IO_MB);
-		// additional CRTC access documented
-		IO_RegisterWriteHandler(0x3d0,write_crtc_index_other,IO_MB);
-		IO_RegisterWriteHandler(0x3d1,write_crtc_data_other,IO_MB);
 	}
 	if (machine==MCH_HERC || machine==MCH_MDA) {
 		Bitu base=0x3b0;
@@ -1103,12 +1104,17 @@ void VGA_SetupOther(void) {
 		}
 		vga.herc.blend=false;
 		vga.herc.enable_bits=0;
-		vga.herc.mode_control=0xa; // first mode written will be text mode
+
+        if (machine==MCH_HERC)
+            vga.herc.mode_control=0xa; // first mode written will be text mode
+        else
+            vga.herc.mode_control=0x8; // first mode written will be text mode
+
 		vga.crtc.underline_location = 13;
 		IO_RegisterReadHandler(0x3ba,read_herc_status,IO_MB);
+        IO_RegisterWriteHandler(0x3b8,write_hercules,IO_MB);
     }
 	if (machine==MCH_HERC) {
-        IO_RegisterWriteHandler(0x3b8,write_hercules,IO_MB);
 		IO_RegisterWriteHandler(0x3bf,write_hercules,IO_MB);
 	}
 	if (machine==MCH_MDA) {
@@ -1122,22 +1128,6 @@ void VGA_SetupOther(void) {
 			IO_RegisterReadHandler(base+port_ct*2,read_crtc_index_other,IO_MB);
 			IO_RegisterReadHandler(base+port_ct*2+1,read_crtc_data_other,IO_MB);
 		}
-	}
-	if (machine==MCH_MCGA) {
-		Bitu base=0x3d0;
-		for (Bitu port_ct=0; port_ct<4; port_ct++) {
-			IO_RegisterWriteHandler(base+port_ct*2,write_crtc_index_other,IO_MB);
-			IO_RegisterWriteHandler(base+port_ct*2+1,write_crtc_data_mcga,IO_MB);
-			IO_RegisterReadHandler(base+port_ct*2,read_crtc_index_other,IO_MB);
-			IO_RegisterReadHandler(base+port_ct*2+1,read_crtc_data_mcga,IO_MB);
-		}
-	}
-	if (IS_TANDY_ARCH) {
-		Bitu base=0x3d4;
-		IO_RegisterWriteHandler(base,write_crtc_index_other,IO_MB);
-		IO_RegisterWriteHandler(base+1,write_crtc_data_other,IO_MB);
-		IO_RegisterReadHandler(base,read_crtc_index_other,IO_MB);
-		IO_RegisterReadHandler(base+1,read_crtc_data_other,IO_MB);
 	}
 	if (machine==MCH_AMSTRAD) {
 		Bitu base=(machine==MCH_HERC || machine==MCH_MDA) ? 0x3b4 : 0x3d4;
@@ -1154,7 +1144,14 @@ void VGA_SetupOther(void) {
 			IO_RegisterReadHandler(base,read_crtc_index_other,IO_MB);
 			IO_RegisterReadHandler(base+1,read_crtc_data_other,IO_MB);
 		}
+	} else if (!IS_EGAVGA_ARCH) {
+		Bitu base=0x3d0;
+		for (Bitu port_ct=0; port_ct<4; port_ct++) {
+			IO_RegisterWriteHandler(base+port_ct*2,write_crtc_index_other,IO_MB);
+			IO_RegisterWriteHandler(base+port_ct*2+1,write_crtc_data_mcga,IO_MB);
+			IO_RegisterReadHandler(base+port_ct*2,read_crtc_index_other,IO_MB);
+			IO_RegisterReadHandler(base+port_ct*2+1,read_crtc_data_mcga,IO_MB);
+		}
 	}
-	// AMSTRAD
 }
 

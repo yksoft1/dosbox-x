@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #ifndef _RENDER_SCALERS_H
@@ -55,6 +55,7 @@ typedef enum scalerOperation {
 	scalerOpTV,
 	scalerOpRGB,
 	scalerOpScan,
+	scalerOpGray,
 #endif
 	scalerLast
 } scalerOperation_t;
@@ -117,11 +118,17 @@ extern ScalerSimpleBlock_t ScaleNormal4x;
 extern ScalerSimpleBlock_t ScaleNormal5x;
 #if RENDER_USE_ADVANCED_SCALERS>0
 extern ScalerSimpleBlock_t ScaleTV2x;
+extern ScalerSimpleBlock_t ScaleTVDh;
 extern ScalerSimpleBlock_t ScaleTV3x;
 extern ScalerSimpleBlock_t ScaleRGB2x;
 extern ScalerSimpleBlock_t ScaleRGB3x;
 extern ScalerSimpleBlock_t ScaleScan2x;
+extern ScalerSimpleBlock_t ScaleScanDh;
 extern ScalerSimpleBlock_t ScaleScan3x;
+extern ScalerSimpleBlock_t ScaleGrayNormal;
+extern ScalerSimpleBlock_t ScaleGrayDw;
+extern ScalerSimpleBlock_t ScaleGrayDh;
+extern ScalerSimpleBlock_t ScaleGray2x;
 #endif
 /* Complex scalers */
 #if RENDER_USE_ADVANCED_SCALERS>2

@@ -30,6 +30,7 @@
  */
 
 #include "config.h"
+#include "dosbox.h"
 
 #include <SDL.h>
 #include "gui_tk.h"
@@ -46,10 +47,10 @@ namespace Color {
 	RGB SelectionBackground =	0xff000080;
 	RGB SelectionForeground =	0xffffffff;
 	RGB EditableBackground =	0xffffffff;
-	RGB Titlebar =			0xff000080;
-	RGB TitlebarText =		0xffffffff;
+	RGB Titlebar =			0xffa4c8f0;
+	RGB TitlebarText =		0xff000000;
 	RGB TitlebarInactive =			0xffffffff;
-	RGB TitlebarInactiveText =		0xff7f7f7f;
+	RGB TitlebarInactiveText =		0xff000000;
 }
 
 std::map<const char *,Font *,Font::ltstr> Font::registry;
@@ -163,7 +164,7 @@ void Drawable::drawText(const String& text, bool interpret, Size start, Size len
 				} while (0);
 			default:
 				width += font->getWidth(text[start]);
-				if (x > 0 && x+width > cw) gotoXY(0,y+font->getHeight());
+				if (x > 0 && x+width > this->width) gotoXY(0,y+font->getHeight());
 			}
 			start++;
 		}
@@ -459,7 +460,7 @@ void Drawable::drawText(const Char c, bool interpret)
 		case Font::Tab: gotoXY((((int)(x/font->getWidth()/8))+1)*8*font->getWidth(),y); return;
 		default: break;
 		}
-		if (font->getWidth(c)+x > cw) gotoXY(0,y+font->getHeight());
+		if (font->getWidth(c)+x > this->width) gotoXY(0,y+font->getHeight());
 	}
 	font->drawChar(this,c);
 }
@@ -1038,7 +1039,7 @@ bool Input::keyDown(const Key &key)
 			break;
 		}
 		if (start_sel != end_sel) clearSelection();
-		if (insert || pos >= text.size() ) text.insert(text.begin()+pos++,key.character);
+		if (insert || pos >= text.size() ) text.insert(text.begin()+int(pos++),key.character);
 		else text[pos++] = key.character;
 		break;
 	case Key::Left:
@@ -1065,12 +1066,12 @@ bool Input::keyDown(const Key &key)
 		break;
 	case Key::Backspace:
 		if (!key.shift && start_sel != end_sel) clearSelection();
-		else if (pos > 0) text.erase(text.begin()+ --pos);
+		else if (pos > 0) text.erase(text.begin()+int(--pos));
 		break;
 	case Key::Delete:
 		if (key.shift) cutSelection();
 		else if (start_sel != end_sel) clearSelection();
-		else if (pos < text.size()) text.erase(text.begin()+pos);
+		else if (pos < text.size()) text.erase(text.begin()+int(pos));
 		break;
 	case Key::Insert:
 		if (key.ctrl) copySelection();
@@ -1080,14 +1081,14 @@ bool Input::keyDown(const Key &key)
 	case Key::Enter:
 		if (multi) {
 			if (start_sel != end_sel) clearSelection();
-			if (insert || pos >= text.size() ) text.insert(text.begin()+pos++,f->fromSpecial(Font::LF));
+			if (insert || pos >= text.size() ) text.insert(text.begin()+int(pos++),f->fromSpecial(Font::LF));
 			else text[pos++] = f->fromSpecial(Font::LF);
 		} else executeAction(text);
 		break;
 	case Key::Tab:
 		if (multi && enable_tab_input) {
 			if (start_sel != end_sel) clearSelection();
-			if (insert || pos >= text.size() ) text.insert(text.begin()+pos++,f->fromSpecial(Font::Tab));
+			if (insert || pos >= text.size() ) text.insert(text.begin()+int(pos++),f->fromSpecial(Font::Tab));
 			else text[pos++] = f->fromSpecial(Font::Tab);
 		} else return false;
 		break;
@@ -1557,6 +1558,86 @@ static MouseButton SDL_to_GUI(const int button)
 }
 
 #if defined(C_SDL2)
+static GUI::Char SDLSymToChar(const SDL_Keysym &key) {
+    /* SDL will not uppercase the char for us with shift, etc. */
+    /* Additionally we have to filter out non-char values */
+    if (key.sym == 0 || key.sym > 0x7f) return 0;
+
+    GUI::Char ret = key.sym;
+
+    if (key.mod & KMOD_SHIFT) {
+        switch (ret) {
+            case '[':
+                ret = (GUI::Char)('{');
+                break;
+            case ']':
+                ret = (GUI::Char)('}');
+                break;
+            case '\\':
+                ret = (GUI::Char)('|');
+                break;
+            case ';':
+                ret = (GUI::Char)(':');
+                break;
+            case '\'':
+                ret = (GUI::Char)('"');
+                break;
+            case ',':
+                ret = (GUI::Char)('<');
+                break;
+            case '.':
+                ret = (GUI::Char)('>');
+                break;
+            case '/':
+                ret = (GUI::Char)('?');
+                break;
+            case '-':
+                ret = (GUI::Char)('_');
+                break;
+            case '=':
+                ret = (GUI::Char)('+');
+                break;
+            case '1':
+                ret = (GUI::Char)('!');
+                break;
+            case '2':
+                ret = (GUI::Char)('@');
+                break;
+            case '3':
+                ret = (GUI::Char)('#');
+                break;
+            case '4':
+                ret = (GUI::Char)('$');
+                break;
+            case '5':
+                ret = (GUI::Char)('%');
+                break;
+            case '6':
+                ret = (GUI::Char)('^');
+                break;
+            case '7':
+                ret = (GUI::Char)('&');
+                break;
+            case '8':
+                ret = (GUI::Char)('*');
+                break;
+            case '9':
+                ret = (GUI::Char)('(');
+                break;
+            case '0':
+                ret = (GUI::Char)(')');
+                break;
+            default:
+                ret = (GUI::Char)toupper((int)ret);
+                break;
+        }
+    }
+
+    return ret;
+}
+#endif
+
+#if defined(C_SDL2)
 static const Key SDL_to_GUI(const SDL_Keysym &key)
 #else
 static const Key SDL_to_GUI(const SDL_keysym &key)
@@ -1602,10 +1683,29 @@ static const Key SDL_to_GUI(const SDL_keysym &key)
 	case SDLK_F1:case SDLK_F2:case SDLK_F3:case SDLK_F4:case SDLK_F5:case SDLK_F6:
 	case SDLK_F7:case SDLK_F8:case SDLK_F9:case SDLK_F10:case SDLK_F11:case SDLK_F12:
 		ksym = (GUI::Key::Special)(GUI::Key::F1 + key.sym-SDLK_F1);
-	default: break;
+    /* do not provide a character code for these keys */
+    case SDLK_LSHIFT: case SDLK_RSHIFT:
+    case SDLK_LCTRL:  case SDLK_RCTRL:
+    case SDLK_LALT:   case SDLK_RALT:
+#if defined(C_SDL2)
+    	return Key(0, ksym,
+    		(key.mod&KMOD_SHIFT)>0,
+    		(key.mod&KMOD_CTRL)>0,
+    		(key.mod&KMOD_ALT)>0,
+            false);
+#else
+    	return Key(0, ksym,
+    		(key.mod&KMOD_SHIFT)>0,
+    		(key.mod&KMOD_CTRL)>0,
+    		(key.mod&KMOD_ALT)>0,
+    		(key.mod&KMOD_META)>0);
+#endif
+    /* anything else, go ahead */
+	default:
+        break;
 	}
 #if defined(C_SDL2)
-	return Key(key.sym, ksym,
+	return Key(SDLSymToChar(key), ksym,
 		(key.mod&KMOD_SHIFT)>0,
 		(key.mod&KMOD_CTRL)>0,
 		(key.mod&KMOD_ALT)>0,
@@ -1681,7 +1781,7 @@ bool ScreenSDL::event(const SDL_Event &event) {
 #endif
 
 	switch (event.type) {
-#if defined(C_SDL2)
+#if defined(C_SDL2) && !defined(IGNORE_TOUCHSCREEN)
     case SDL_FINGERUP:
     case SDL_FINGERDOWN:
     case SDL_FINGERMOTION: {

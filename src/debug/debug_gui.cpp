@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -21,6 +21,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 
 #include "dosbox.h"
 #include "logging.h"
@@ -458,7 +459,7 @@ static void MakeSubWindows(void) {
 
             /* add height to the window */
             yheight[wndi] += (unsigned int)expand_by;
-            outy += (int)wndi;
+            outy += (int)expand_by;
             wndi++;
 
             /* move the others down */
@@ -577,6 +578,10 @@ void DEBUG_EndPagedContent(void) {
 #endif
 }
 
+extern bool gfx_in_mapper;
+
+bool in_debug_showmsg = false;
+
 bool IsDebuggerActive(void);
 
 void DEBUG_ShowMsg(char const* format,...) {
@@ -585,12 +590,16 @@ void DEBUG_ShowMsg(char const* format,...) {
 	va_list msg;
 	size_t len;
 
+    in_debug_showmsg = true;
+
     // in case of runaway error from the CPU core, user responsiveness can be helpful
     CPU_CycleLeft += CPU_Cycles;
     CPU_Cycles = 0;
 
-    void GFX_Events();
-    GFX_Events();
+    if (!gfx_in_mapper && !in_debug_showmsg) {
+        void GFX_Events();
+        GFX_Events();
+    }
 
     va_start(msg,format);
 	len = (size_t)vsnprintf(buf,sizeof(buf)-2u,format,msg); /* <- NTS: Did you know sprintf/vsnprintf returns number of chars written? */
@@ -684,6 +693,8 @@ void DEBUG_ShowMsg(char const* format,...) {
         }
     }
 #endif
+
+    in_debug_showmsg = false;
 }
 
 /* callback function when DOSBox-X exits */
@@ -740,7 +751,7 @@ void LOG::ParseEnableSetting(_LogGroup &group,const char *setting) {
 }
 
 void LOG::Init() {
-	char buf[1024];
+	char buf[64];
 
 	assert(control != NULL);
 
@@ -776,9 +787,8 @@ void LOG::Init() {
 
 	/* read settings for each log category, unless the -debug option was given,
 	 * in which case everything is set to debug level */
-	for (Bitu i=1;i<LOG_MAX;i++) {
-		strcpy(buf,loggrp[i].front);
-		buf[strlen(buf)]=0;
+	for (Bitu i = LOG_ALL + 1;i < LOG_MAX;i++) { //Skip LOG_ALL, it is always enabled
+		safe_strncpy(buf,loggrp[i].front,sizeof(buf));
 		lowcase(buf);
 
 		if (control->opt_debug)
@@ -861,9 +871,9 @@ void LOG::SetupConfigSection(void) {
 	Section_prop * sect=control->AddSection_prop("log",Null_Init);
 	Prop_string* Pstring = sect->Add_string("logfile",Property::Changeable::Always,"");
 	Pstring->Set_help("file where the log messages will be saved to");
-	char buf[1024];
-	for (Bitu i=1;i<LOG_MAX;i++) {
-		strcpy(buf,loggrp[i].front);
+	char buf[64];
+	for (Bitu i = LOG_ALL + 1;i < LOG_MAX;i++) {
+		safe_strncpy(buf,loggrp[i].front, sizeof(buf));
 		lowcase(buf);
 
 		Pstring = sect->Add_string(buf,Property::Changeable::Always,"false");

@@ -1607,18 +1607,18 @@ public:
 
 	/// Clear selected area.
 	void clearSelection() {
-		text.erase(text.begin()+(pos = imin(start_sel,end_sel)),text.begin()+imax(start_sel,end_sel));
+		text.erase(text.begin()+int(pos = imin(start_sel,end_sel)),text.begin()+int(imax(start_sel,end_sel)));
 		start_sel = end_sel = pos;
 	}
 
 	/// Copy selection to clipboard.
 	void copySelection() {
-		setClipboard(String(text.begin()+imin(start_sel,end_sel),text.begin()+imax(start_sel,end_sel)));
+		setClipboard(String(text.begin()+int(imin(start_sel,end_sel)),text.begin()+int(imax(start_sel,end_sel))));
 	}
 
 	/// Cut selection to clipboard.
 	void cutSelection() {
-		setClipboard(String(text.begin()+imin(start_sel,end_sel),text.begin()+imax(start_sel,end_sel)));
+		setClipboard(String(text.begin()+int(imin(start_sel,end_sel)),text.begin()+int(imax(start_sel,end_sel))));
 		clearSelection();
 	}
 
@@ -1626,7 +1626,7 @@ public:
 	void pasteSelection() {
 		String c = getClipboard();
 		clearSelection();
-		text.insert(text.begin()+pos,c.begin(),c.end());
+		text.insert(text.begin()+int(pos),c.begin(),c.end());
 		start_sel = end_sel = pos += (Size)c.size();
 	}
 
@@ -2229,10 +2229,20 @@ public:
 	}
 
 	/// Handle keyboard input.
-	virtual bool keyDown(const Key &key) { (void)key; return true; }
+	virtual bool keyDown(const Key &key) {
+        if (key.special == Key::Tab)
+            return false;
 
-	/// Handle keyboard input.
-	virtual bool keyUp(const Key &key) { (void)key; return true; }
+        return true;
+    }
+
+    /// Handle keyboard input.
+    virtual bool keyUp(const Key &key) {
+        if (key.special == Key::Tab)
+            return false;
+
+        return true;
+    }
 
 	virtual void actionExecuted(ActionEventSource *src, const String &arg) {
 		std::list<ActionEventSource_Callback*>::iterator i = actionHandlers.begin();
@@ -2372,7 +2382,8 @@ protected:
 
 	/// Execute handlers.
 	virtual void actionExecuted(ActionEventSource *src, const String &arg) {
-        (void)arg;//UNUSED
+        // HACK: Attempting to cast a String to void causes "forming reference to void" errors when building with GCC 4.7
+        (void)arg.size();//UNUSED
 		for (std::list<Window *>::iterator i = children.begin(); i != children.end(); ++i) {
 			Radiobox *r = dynamic_cast<Radiobox*>(*i);
 			if (r != NULL && src != dynamic_cast<ActionEventSource*>(r)) r->setChecked(false);
@@ -2418,6 +2429,22 @@ public:
 		close->move(width/2-40, 20+message->getHeight());
 		resize(width, message->getHeight()+100);
 	}
+
+	virtual bool keyDown(const GUI::Key &key) {
+        if (GUI::ToplevelWindow::keyDown(key)) return true;
+        return false;
+    }
+
+	virtual bool keyUp(const GUI::Key &key) {
+        if (GUI::ToplevelWindow::keyUp(key)) return true;
+
+        if (key.special == GUI::Key::Escape) {
+            close->executeAction();
+            return true;
+        }
+
+        return false;
+    }
 };
 
 template <typename STR> ToplevelWindow::ToplevelWindow(Screen *parent, int x, int y, int w, int h, const STR title) :

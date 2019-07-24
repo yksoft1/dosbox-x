@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -88,6 +88,10 @@ typedef Bit8u HostReg;
 
 
 static void cache_block_closing(Bit8u* block_start,Bitu block_size) {
+#ifdef _MSC_VER
+    //flush cache - Win32 API for MSVC
+    FlushInstructionCache(GetCurrentProcess(), block_start, block_size);
+#else
 #if (__ARM_EABI__)
 	//flush cache - eabi
 	register unsigned long _beg __asm ("a1") = (unsigned long)(block_start);				// block start
@@ -109,5 +113,6 @@ static void cache_block_closing(Bit8u* block_start,Bitu block_size) {
 		: "r" (_beg), "r" (_end), "r" (_flg)
 		);
 // GP2X END
+#endif
 #endif
 }

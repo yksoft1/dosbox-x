@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,13 +13,14 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #ifndef DOSBOX_BIOS_DISK_H
 #define DOSBOX_BIOS_DISK_H
 
 #include <stdio.h>
+#include <stdlib.h>
 #ifndef DOSBOX_MEM_H
 #include "mem.h"
 #endif
@@ -337,25 +338,25 @@ private:
 		bool IsValid();
 	};
 
-	imageDiskVHD() : imageDisk(ID_VHD), parentDisk(NULL), copiedFooter(false), currentBlock(0xFFFFFFFF), currentBlockAllocated(false), currentBlockDirtyMap(NULL) { }
+	imageDiskVHD() : imageDisk(ID_VHD) { }
 	static ErrorCodes TryOpenParent(const char* childFileName, const ParentLocatorEntry &entry, Bit8u* data, const Bit32u dataLength, imageDisk** disk, const Bit8u* uniqueId);
 	static ErrorCodes Open(const char* fileName, const bool readOnly, imageDisk** imageDisk, const Bit8u* matchUniqueId);
 	virtual bool loadBlock(const Bit32u blockNumber);
 	static bool convert_UTF16_for_fopen(std::string &string, const void* data, const Bit32u dataLength);
 
-	imageDisk* parentDisk;// = 0;
-	Bit64u footerPosition;
-	VHDFooter footer;
-	VHDFooter originalFooter;
-	bool copiedFooter;// = false;
-	DynamicHeader dynamicHeader;
-	Bit32u sectorsPerBlock;
-	Bit32u blockMapSectors;
-	Bit32u blockMapSize;
-	Bit32u currentBlock;// = 0xFFFFFFFF;
-	bool currentBlockAllocated;// = false;
-	Bit32u currentBlockSectorOffset;
-	Bit8u* currentBlockDirtyMap;// = 0;
+    imageDisk* parentDisk = NULL;
+	Bit64u footerPosition = 0;
+    VHDFooter footer = {};
+    VHDFooter originalFooter = {};
+    bool copiedFooter = false;
+    DynamicHeader dynamicHeader = {};
+	Bit32u sectorsPerBlock = 0;
+	Bit32u blockMapSectors = 0;
+	Bit32u blockMapSize = 0;
+	Bit32u currentBlock = 0xFFFFFFFF;
+    bool currentBlockAllocated = false;
+	Bit32u currentBlockSectorOffset = 0;
+	Bit8u* currentBlockDirtyMap = 0;
 };
 
 void updateDPT(void);
@@ -369,14 +370,13 @@ void incrementFDD(void);
 
 extern bool imageDiskChange[MAX_DISK_IMAGES];
 extern imageDisk *imageDiskList[MAX_DISK_IMAGES];
-extern imageDisk *diskSwap[20];
-extern Bits swapPosition;
+extern imageDisk *diskSwap[MAX_SWAPPABLE_DISKS];
+extern Bit32s swapPosition;
 extern Bit16u imgDTASeg; /* Real memory location of temporary DTA pointer for fat image disk access */
 extern RealPt imgDTAPtr; /* Real memory location of temporary DTA pointer for fat image disk access */
 extern DOS_DTA *imgDTA;
 
 void swapInDisks(void);
-void swapInNextDisk(void);
 bool getSwapRequest(void);
 imageDisk *GetINT13HardDrive(unsigned char drv);
 imageDisk *GetINT13FloppyDrive(unsigned char drv);

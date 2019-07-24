@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2012  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #include "dosbox.h"
@@ -364,6 +364,7 @@ static void pc_xt_nmi_write(Bitu port,Bitu val,Bitu iolen) {
     (void)iolen;//UNUSED
     (void)port;//UNUSED
     CPU_NMI_gate = (val & 0x80) ? true : false;
+    CPU_Check_NMI();
 }
 
 /* FIXME: This should be called something else that's true to the ISA bus, like PIC_PulseIRQ, not Activate IRQ.
@@ -447,6 +448,8 @@ unsigned int PIC_parse_IRQ_hack_string(const char *str) {
 }
 
 static bool IRQ_hack_check_cs_equ_ds(const int IRQ) {
+    (void)IRQ;
+
     uint16_t s_cs = SegValue(cs);
     uint16_t s_ds = SegValue(ds);
 
@@ -508,7 +511,11 @@ void PIC_runIRQs(void) {
     if (!GETFLAG(IF)) return;
     if (GCC_UNLIKELY(!PIC_IRQCheck)) return;
     if (GCC_UNLIKELY(cpudecoder==CPU_Core_Normal_Trap_Run)) return; // FIXME: Why?
-    if (GCC_UNLIKELY(CPU_NMI_active) || GCC_UNLIKELY(CPU_NMI_pending)) return; /* NMI has higher priority than PIC */
+    if (GCC_UNLIKELY(CPU_NMI_active)) return;
+    if (GCC_UNLIKELY(CPU_NMI_pending)) {
+        CPU_NMI_Interrupt(); // converts pending to active
+        return; /* NMI has higher priority than PIC */
+    }
 
     const Bit8u p = (master.irr & master.imrr)&master.isrr;
     Bit8u max = master.special?8:master.active_irq;
@@ -816,7 +823,7 @@ void TIMER_AddTick(void) {
     PIC_Ticks++;
     if ((PIC_Ticks&0x3fff) == 0) {
         unsigned long ticks = GetTicks();
-        int delta = (PIC_Ticks-PIC_tickstart)*10000/(ticks-PIC_benchstart)+5;
+        int delta = int((PIC_Ticks-PIC_tickstart)*10000/(ticks-PIC_benchstart)+5);
         GFX_SetTitle(-1,-1,delta,false);
         PIC_benchstart = ticks;
         PIC_tickstart = PIC_Ticks;
@@ -941,7 +948,7 @@ void PIC_Reset(Section *sec) {
         PIC_SetIRQMask(i,true);
 
     PIC_SetIRQMask(0,false);                    /* Enable system timer */
-    PIC_SetIRQMask(1,false);                    /* Enable system timer */
+    PIC_SetIRQMask(1,false);                    /* Enable keyboard interrupt */
     PIC_SetIRQMask(8,false);                    /* Enable RTC IRQ */
 
     if (master_cascade_irq >= 0) {

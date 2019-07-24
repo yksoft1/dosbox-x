@@ -47,7 +47,9 @@ public:
     enum method {
         METHOD_NONE=0,
         METHOD_X11,
-        METHOD_XRANDR
+        METHOD_XRANDR,
+        METHOD_WIN98BASE,
+        METHOD_COREGRAPHICS
     };
 public:
     struct wxh {
@@ -58,7 +60,16 @@ public:
             width = height = -1;
         }
     };
+    struct xvy {
+        double      x = 0;
+        double      y = 0;
+
+        void clear(void) {
+            x = y = 0;
+        }
+    };
 public:
+    xvy             screen_position_pixels;     // position of the screen on the "virtual" overall desktop
     wxh             screen_dimensions_pixels;   // size of the screen in pixels
     wxh             screen_dimensions_mm;       // size of the screen in mm
     wxh             screen_dpi;                 // DPI of the screen
@@ -68,6 +79,7 @@ public:
         screen_dpi.clear();
         screen_dimensions_mm.clear();
         screen_dimensions_pixels.clear();
+        screen_position_pixels.clear();
         method = METHOD_NONE;
     }
 };
@@ -98,6 +110,7 @@ struct SDL_Block {
             Bit16u width, height;
             bool fixed;
             bool display_res;
+            bool width_auto = false,height_auto = false;
         } full;
         struct {
             Bit16u width, height;
@@ -115,7 +128,7 @@ struct SDL_Block {
         SCREEN_TYPES want_type;
     } desktop;
     struct {
-        SDL_Surface * surface;
+        SDL_Surface * surface = NULL;
 #if (HAVE_DDRAW_H) && defined(WIN32)
         RECT rect;
 #endif
@@ -125,25 +138,26 @@ struct SDL_Block {
         PRIORITY_LEVELS nofocus;
     } priority;
     SDL_Rect clip;
-    SDL_Surface * surface;
+    SDL_Surface * surface = NULL;
 #if defined(C_SDL2)
-    SDL_Window * window;
-    SDL_Renderer * renderer;
-    const char * rendererDriver;
+    SDL_Window * window = NULL;
+    SDL_Renderer * renderer = NULL;
+    const char * rendererDriver = NULL;
     int displayNumber;
     struct {
-        SDL_Texture * texture;
-        SDL_PixelFormat * pixelFormat;
+        SDL_Texture * texture = NULL;
+        SDL_PixelFormat * pixelFormat = NULL;
     } texture;
 #endif
-    SDL_cond *cond;
+    SDL_cond *cond = NULL;
     struct {
         bool autolock;
         AUTOLOCK_FEEDBACK autolock_feedback;
         bool autoenable;
         bool requestlock;
         bool locked;
-        Bitu sensitivity;
+        int xsensitivity;
+        int ysensitivity;
         MOUSE_EMULATION emulation;
     } mouse;
     SDL_Rect updateRects[1024];
@@ -152,6 +166,8 @@ struct SDL_Block {
     Bitu num_joysticks;
 #if defined (WIN32)
     bool using_windib;
+    // Time when sdl regains focus (alt-tab) in windowed mode
+    Bit32u focus_ticks;
 #endif
     // state of alt-keys for certain special handlings
     Bit16u laltstate;
@@ -203,6 +219,10 @@ void UpdateWindowDimensions(Bitu width, Bitu height);
 
 #if defined(C_SDL2)
 SDL_Window* GFX_SetSDLWindowMode(Bit16u width, Bit16u height, SCREEN_TYPES screenType);
+#endif
+
+#if defined(C_SDL2) && defined(C_OPENGL)/*HACK*/
+void SDL_GL_SwapBuffers(void);
 #endif
 
 #endif /*DOSBOX_SDLMAIN_H*/

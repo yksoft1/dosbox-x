@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -43,7 +43,7 @@
 
 #ifndef CH_CSTDIO
 #define CH_CSTDIO
-#include <cstdio>
+#include <stdio.h>
 #endif
 
 
@@ -55,7 +55,6 @@ public:
 	Hex():_hex(0) { };
 	bool operator==(Hex const& other) {return _hex == other._hex;}
 	operator int () const { return _hex; }
-   
 };
 
 class Value {
@@ -68,25 +67,25 @@ class Value {
  */
 private:
 	Hex _hex;
-	bool _bool;
-	int _int;
-	std::string* _string;
-	double _double;
+	bool _bool = false;
+	int _int = 0;
+	std::string* _string = NULL;
+	double _double = 0;
 public:
 	class WrongType { }; // Conversion error class
-	enum Etype { V_NONE, V_HEX, V_BOOL, V_INT, V_STRING, V_DOUBLE,V_CURRENT} type;
-	
+	enum Etype { V_NONE, V_HEX, V_BOOL, V_INT, V_STRING, V_DOUBLE,V_CURRENT} type = V_NONE;
+
 	/* Constructors */
-	Value()                      :_string(0),   type(V_NONE)                  { };
+    Value() { };
 	Value(Hex in)                :_hex(in),     type(V_HEX)                   { };
 	Value(int in)                :_int(in),     type(V_INT)                   { };
 	Value(bool in)               :_bool(in),    type(V_BOOL)                  { };
 	Value(double in)             :_double(in),  type(V_DOUBLE)                { };
 	Value(std::string const& in) :_string(new std::string(in)),type(V_STRING) { };
 	Value(char const * const in) :_string(new std::string(in)),type(V_STRING) { };
-	Value(Value const& in):_string(0) {plaincopy(in);}
+	Value(Value const& in) {plaincopy(in);}
 	~Value() { destroy();};
-	Value(std::string const& in,Etype _t) :_hex(0),_bool(false),_int(0),_string(0),_double(0),type(V_NONE) {SetValue(in,_t);}
+    Value(std::string const& in, Etype _t) { SetValue(in, _t); }
 
 	/* Assigment operators */
 	Value& operator= (Hex in)                { return copy(Value(in));}
@@ -129,20 +128,26 @@ public:
 	virtual	bool SetValue(std::string const& str)=0;
 	Value const& GetValue() const { return value;}
 	Value const& Get_Default_Value() const { return default_value; }
-	//CheckValue returns true  if value is in suggested_values;
+	//CheckValue returns true, if value is in suggested_values;
 	//Type specific properties are encouraged to override this and check for type
 	//specific features.
 	virtual bool CheckValue(Value const& in, bool warn);
-	//Set interval value to in or default if in is invalid. force always sets the value.
-	bool SetVal(Value const& in, bool forced,bool warn=true,bool init=false) {
-		if(forced || CheckValue(in,warn)) {value = in; is_modified = !init; return true;} else { value = default_value; is_modified = false; return false;}}
-	virtual ~Property(){ } 
+	virtual ~Property(){ }
 	virtual const std::vector<Value>& GetValues() const;
 	Value::Etype Get_type(){return default_value.type;}
 	Changeable::Value getChange() {return change;}
 	bool modified() const { return is_modified; };
 
 protected:
+	//Set interval value to in or default if in is invalid. force always sets the value.
+	//Can be overriden to set a different value if invalid.
+	virtual bool SetVal(Value const& in, bool forced,bool warn=true,bool init=false) {
+		if(forced || CheckValue(in,warn)) {
+			value = in; is_modified = !init; return true;
+		} else {
+			value = default_value; is_modified = false; return false;
+		}
+	}
 	Value value;
 	bool is_modified;
 	std::vector<Value> suggested_values;
@@ -156,12 +161,12 @@ protected:
 class Prop_int:public Property {
 public:
 	Prop_int(std::string const& _propname,Changeable::Value when, int _value)
-		:Property(_propname,when) { 
+		:Property(_propname,when) {
 		default_value = value = _value;
 		min = max = -1;
 	}
 	Prop_int(std::string const&  _propname,Changeable::Value when, int _min,int _max,int _value)
-		:Property(_propname,when) { 
+		:Property(_propname,when) {
 		default_value = value = _value;
 		min = _min;
 		max = _max;
@@ -172,6 +177,9 @@ public:
 	bool SetValue(std::string const& in);
 	virtual ~Prop_int(){ }
 	virtual bool CheckValue(Value const& in, bool warn);
+	// Override SetVal, so it takes min,max in account when there are no suggested values
+	virtual bool SetVal(Value const& in, bool forced,bool warn=true,bool init=false);
+
 private:
 	Value min,max;
 };
@@ -203,7 +211,7 @@ private:
 class Prop_bool:public Property {
 public:
 	Prop_bool(std::string const& _propname, Changeable::Value when, bool _value)
-		:Property(_propname,when) { 
+		:Property(_propname,when) {
 		default_value = value = _value;
 	}
 	bool SetValue(std::string const& in);
@@ -213,7 +221,7 @@ public:
 class Prop_string:public Property{
 public:
 	Prop_string(std::string const& _propname, Changeable::Value when, char const * const _value)
-		:Property(_propname,when) { 
+		:Property(_propname,when) {
 		default_value = value = _value;
 	}
 	bool SetValue(std::string const& in);
@@ -224,7 +232,7 @@ class Prop_path:public Prop_string{
 public:
 	std::string realpath;
 	Prop_path(std::string const& _propname, Changeable::Value when, char const * const _value)
-		:Prop_string(_propname,when,_value) { 
+		:Prop_string(_propname,when,_value) {
 		default_value = value = _value;
 		realpath = _value;
 	}
@@ -235,7 +243,7 @@ public:
 class Prop_hex:public Property {
 public:
 	Prop_hex(std::string const& _propname, Changeable::Value when, Hex _value)
-		:Property(_propname,when) { 
+		:Property(_propname,when) {
 		default_value = value = _value;
 	}
 	bool SetValue(std::string const& in);
@@ -383,10 +391,10 @@ public:
 class Prop_multival:public Property{
 protected:
 	Section_prop* section;
-	std::string seperator;
+	std::string separator;
 	void make_default_value();
 public:
-	Prop_multival(std::string const& _propname, Changeable::Value when,std::string const& sep):Property(_propname,when), section(new Section_prop("")),seperator(sep) {
+	Prop_multival(std::string const& _propname, Changeable::Value when,std::string const& sep):Property(_propname,when), section(new Section_prop("")),separator(sep) {
 		default_value = value = "";
 	}
 	Section_prop *GetSection() { return section; }
@@ -405,7 +413,7 @@ public:
 	virtual bool SetValue(std::string const& input) { return SetValue(input,/*init*/false); };
 };
 
-   
+
 class Section_line: public Section{
 public:
 	Section_line(std::string const& _sectionname):Section(_sectionname){}

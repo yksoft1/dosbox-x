@@ -2,7 +2,7 @@
 /* Hand-edited by Jonathan Campbell for Visual Studio 2008 */
 
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,7 +16,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 /* DOSBox-X currently targets Windows XP or higher. */
@@ -70,16 +70,16 @@
    */
 #define C_DIRECTSERIAL 1
 
-#ifdef _M_AMD64 /* Microsoft C++ amd64 */
+#if defined (_M_AMD64) || defined (_M_ARM64) || defined (_M_ARM) /* Microsoft C++ amd64, arm32 and arm64 */
 # undef C_DYNAMIC_X86
 # undef C_TARGETCPU
 # define C_DYNREC 1
 #else
 /* The type of cpu this target has */
-#define C_TARGETCPU X86
+# define C_TARGETCPU X86
 /* Define to 1 to use x86 dynamic cpu core */
-# define C_DYNAMIC_X86			1
-# undef C_DYNREC
+# undef C_DYNAMIC_X86
+# define C_DYNREC 1
 #endif
 
 /* Define to 1 to enable fluidsynth MIDI synthesis */
@@ -87,6 +87,16 @@
 
 /* Define to 1 to enable floating point emulation */
 #define C_FPU					1
+
+/* Define to 1 to use a x86/x64 assembly fpu core */
+/* FIXME: VS2015 x86_64 will not allow inline asm! */
+#ifdef _M_AMD64 /* Microsoft C++ amd64 */
+//TODO
+#elif defined(_M_ARM64) || defined (_M_ARM) /* Microsoft C++ arm32 and arm64 */
+# undef C_FPU_X86
+#else
+# define C_FPU_X86 1
+#endif
 
 /* Determines if the compilers supports attributes for structures. */
 #undef C_HAS_ATTRIBUTE
@@ -120,16 +130,17 @@
 /* Define to 1 to enable NE2000 ethernet passthrough, requires libpcap */
 #define C_NE2000 1
 
-/* Define to 1 to use opengl display output support */
-#if !defined(C_SDL2)
-#define C_OPENGL 1
-#endif
-
 /* Set to 1 to enable SDL 1.x support */
 #define C_SDL1 1
 
 /* Set to 1 to enable SDL 2.x support */
 /* #undef C_SDL2 */
+
+/* Define to 1 to use opengl display output support */
+/* TODO: Windows SDK ARM32 and ARM64 doesn't provide opengl32.lib, find alternatives */
+#if !defined(_M_ARM64) && !defined (_M_ARM)
+# define C_OPENGL 1
+#endif
 
 #if !defined(C_SDL2)
 /* Set to 1 to enable XBRZ support */
@@ -234,7 +245,7 @@
 /* Define to the version of this package. */
 
 /* The size of `int *', as computed by sizeof. */
-#ifdef _M_AMD64 /* Microsoft C++ amd64 */
+#if defined (_M_AMD64) || defined (_M_ARM64) /* Microsoft C++ amd64 and arm64*/
 # define SIZEOF_INT_P				8
 #else
 # define SIZEOF_INT_P				4

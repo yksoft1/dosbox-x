@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -9,11 +9,11 @@
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU Library General Public License for more details.
+ *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -57,6 +57,7 @@
 #include "mapper.h"
 #include "hardware.h"
 #include "programs.h"
+#include "midi.h"
 
 #define MIXER_SSIZE 4
 #define MIXER_VOLSHIFT 13
@@ -96,6 +97,112 @@ static struct {
     Bitu            prebuffer_samples;
     bool            mute;
 } mixer;
+
+uint32_t Mixer_MIXQ(void) {
+    return  ((uint32_t)mixer.freq) |
+            ((uint32_t)2u/*channels*/ << (uint32_t)20u) |
+            (mixer.swapstereo ?      ((uint32_t)1u << (uint32_t)29u) : 0u) |
+            (mixer.mute       ?      ((uint32_t)1u << (uint32_t)30u) : 0u) |
+            (mixer.nosound    ? 0u : ((uint32_t)1u << (uint32_t)31u));
+}
+
+PhysPt mixer_capture_write = 0;
+PhysPt mixer_capture_write_begin = 0;
+PhysPt mixer_capture_write_end = 0;
+uint32_t mixer_control = 0;
+
+// mixer capture source bits [23:16]
+enum {
+    MIXER_SRC_MIXDOWN=0
+};
+
+unsigned int Mixer_MIXC_Source(void) {
+    return (unsigned int)((mixer_control >> 16ul) & 0xFFul);
+}
+
+bool Mixer_MIXC_Active(void) {
+    return ((mixer_control & 3u) == 3u)/*capture interface enable|write to memory*/;
+}
+
+bool Mixer_MIXC_Error(void) {
+    return ((mixer_control & 8u) == 8u);
+}
+
+bool Mixer_MIXC_ShouldLoop(void) {
+    return ((mixer_control & 4u) == 4u);
+}
+
+void Mixer_MIXC_Stop(void) {
+    mixer_control &= ~1u; // clear enable
+}
+
+void Mixer_MIXC_LoopAround(void) {
+    mixer_capture_write = mixer_capture_write_begin;
+}
+
+// NTS: Check AFTER writing sample
+bool Mixer_MIXC_AtEnd(void) {
+    return (mixer_capture_write >= mixer_capture_write_end);
+}
+
+void Mixer_MIXC_MarkError(void) {
+    mixer_control &= ~1u; // clear enable
+    mixer_control |=  8u; // set error
+}
+
+PhysPt Mixer_MIXWritePos(void) {
+    return mixer_capture_write;
+}
+
+void Mixer_MIXWritePos_Write(PhysPt np) {
+    if (!Mixer_MIXC_Active())
+        mixer_capture_write = np;
+}
+
+void Mixer_MIXWriteBegin_Write(PhysPt np) {
+    if (!Mixer_MIXC_Active())
+        mixer_capture_write_begin = np;
+}
+
+void Mixer_MIXWriteEnd_Write(PhysPt np) {
+    if (!Mixer_MIXC_Active())
+        mixer_capture_write_end = np;
+}
+
+void Mixer_MIXC_Validate(void) {
+    if (Mixer_MIXC_Active()) {
+        // NTS: phys_writew() will cause a segfault if the address is beyond the end of memory,
+        //      because it computes MemBase+addr
+        PhysPt MemMax = (PhysPt)MEM_TotalPages() * (PhysPt)4096ul;
+
+        if (Mixer_MIXC_Error() ||
+            Mixer_MIXC_Source() != 0x00 ||
+            mixer_capture_write == 0 || mixer_capture_write_begin == 0 || mixer_capture_write_end == 0 ||
+            mixer_capture_write < mixer_capture_write_begin ||
+            mixer_capture_write > mixer_capture_write_end ||
+            mixer_capture_write_begin > mixer_capture_write_end ||
+            mixer_capture_write >= MemMax ||
+            mixer_capture_write_end >= MemMax ||
+            mixer_capture_write_begin >= MemMax)
+            Mixer_MIXC_MarkError();
+    }
+}
+
+uint32_t Mixer_MIXC(void) {
+    return mixer_control;
+}
+
+void Mixer_MIXC_Write(uint32_t v) {
+    /* bit [0:0] = enable capture interface
+     * bit [1:1] = enable writing to memory
+     * bit [2:2] = enable loop around, when write == write_end, set write == write_begin
+     * bit [3:3] = 1=error condition  0=no error
+     * bit [23:16] = source selection (see list) */
+    if (mixer_control != v) {
+        mixer_control = (v & 0x00FF00FFUL);
+        Mixer_MIXC_Validate();
+    }
+}
 
 bool Mixer_SampleAccurate() {
     return mixer.sampleaccurate;
@@ -222,7 +329,7 @@ void MixerChannel::lowpassUpdate() {
 
         tau = 1.0 / (lowpass_freq * 2 * M_PI);
         talpha = timeInterval / (tau + timeInterval);
-        lowpass_alpha = (Bitu)(talpha * 0x10000); // double -> 16.16 fixed point
+        lowpass_alpha = (Bit32s)(talpha * 0x10000); // double -> 16.16 fixed point
 
 //      LOG_MSG("Lowpass freq_n=%u freq_d=%u timeInterval=%.12f tau=%.12f alpha=%.6f onload=%u onout=%u",
 //          freq_n,freq_d_orig,timeInterval,tau,talpha,lowpass_on_load,lowpass_on_out);
@@ -321,7 +428,7 @@ void MixerChannel::EndFrame(Bitu samples) {
         memmove(&msbuffer[0][0],&msbuffer[samples][0],msbuffer_o*sizeof(Bit32s)*2/*stereo*/);
     }
 
-    last_sample_write -= (unsigned int)samples;
+    last_sample_write -= (int)samples;
 }
 
 void MixerChannel::Mix(Bitu whole,Bitu frac) {
@@ -532,7 +639,7 @@ inline bool MixerChannel::runSampleInterpolation(const Bitu upto) {
 
 template<class Type,bool stereo,bool signeddata,bool nativeorder>
 inline void MixerChannel::AddSamples(Bitu len, const Type* data) {
-    last_sample_write = mixer.samples_rendered_ms.w;
+    last_sample_write = (Bits)mixer.samples_rendered_ms.w;
 
     if (msbuffer_o >= 2048) {
         fprintf(stderr,"WARNING: addSample overrun (immediate)\n");
@@ -647,8 +754,8 @@ static void MIXER_MixData(Bitu fracs/*render up to*/) {
     unsigned int whole,frac;
     bool endframe = false;
 
-    if (fracs >= (Bitu)(mixer.samples_this_ms.w * mixer.samples_this_ms.fd)) {
-        fracs = (Bitu)(mixer.samples_this_ms.w * mixer.samples_this_ms.fd);
+    if (fracs >= ((Bitu)mixer.samples_this_ms.w * mixer.samples_this_ms.fd)) {
+        fracs = ((Bitu)mixer.samples_this_ms.w * mixer.samples_this_ms.fd);
         endframe = true;
     }
 
@@ -678,6 +785,35 @@ static void MIXER_MixData(Bitu fracs/*render up to*/) {
         CAPTURE_AddWave( mixer.freq, added, (Bit16s*)convert );
     }
 
+    if (Mixer_MIXC_Active() && prev_rendered < whole) {
+        Bitu readpos = mixer.work_in + prev_rendered;
+        Bitu added = whole - prev_rendered;
+        Bitu cando = (mixer_capture_write_end - mixer_capture_write) / 2/*bytes/sample*/ / 2/*channels*/;
+        if (cando > added) cando = added;
+
+        if (cando == 0 && !Mixer_MIXC_AtEnd()) {
+            Mixer_MIXC_MarkError();
+        }
+        else if (cando != 0) {
+            for (Bitu i=0;i < cando;i++) {
+                phys_writew(mixer_capture_write,(Bit16u)MIXER_CLIP(((Bit64s)mixer.work[readpos][0]) >> (MIXER_VOLSHIFT)));
+                mixer_capture_write += 2;
+
+                phys_writew(mixer_capture_write,(Bit16u)MIXER_CLIP(((Bit64s)mixer.work[readpos][1]) >> (MIXER_VOLSHIFT)));
+                mixer_capture_write += 2;
+
+                readpos++;
+            }
+
+            if (Mixer_MIXC_AtEnd()) {
+                if (Mixer_MIXC_ShouldLoop())
+                    Mixer_MIXC_LoopAround();
+                else
+                    Mixer_MIXC_Stop();
+            }
+        }
+    }
+
     mixer.samples_rendered_ms.w = whole;
     mixer.samples_rendered_ms.fd = frac;
     mixer_sample_counter += mixer.samples_rendered_ms.w - prev_rendered;
@@ -687,7 +823,7 @@ static void MIXER_FillUp(void) {
     SDL_LockAudio();
     float index = PIC_TickIndex();
     if (index < 0) index = 0;
-    MIXER_MixData((Bitu)(index * ((Bitu)mixer.samples_this_ms.w * (Bitu)mixer.samples_this_ms.fd)));
+    MIXER_MixData((Bitu)(((double)index * ((Bitu)mixer.samples_this_ms.w * mixer.samples_this_ms.fd))));
     SDL_UnlockAudio();
 }
 
@@ -735,7 +871,7 @@ static void MIXER_Mix(void) {
     MIXER_FillUp();
 }
 
-static void MIXER_CallBack(void * userdata, Uint8 *stream, int len) {
+static void SDLCALL MIXER_CallBack(void * userdata, Uint8 *stream, int len) {
     (void)userdata;//UNUSED
     Bit32s volscale1 = (Bit32s)(mixer.mastervol[0] * (1 << MIXER_VOLSHIFT));
     Bit32s volscale2 = (Bit32s)(mixer.mastervol[1] * (1 << MIXER_VOLSHIFT));
@@ -865,23 +1001,14 @@ public:
 private:
     void ShowVolume(const char * name,float vol0,float vol1) {
         WriteOut("%-8s %3.0f:%-3.0f  %+3.2f:%-+3.2f \n",name,
-            vol0*100,vol1*100,
+            (double)vol0*100,(double)vol1*100,
             20*log(vol0)/log(10.0f),20*log(vol1)/log(10.0f)
         );
     }
 
     void ListMidi(){
-#if defined (WIN32)
-        unsigned int total = midiOutGetNumDevs();   
-        for(unsigned int i=0;i<total;i++) {
-            MIDIOUTCAPS mididev;
-            midiOutGetDevCaps(i, &mididev, sizeof(MIDIOUTCAPS));
-            WriteOut("%2d\t \"%s\"\n",i,mididev.szPname);
-        }
-#endif
-    return;
+        if(midi.handler) midi.handler->ListAll(this);
     };
-
 };
 
 static void MIXER_ProgramStart(Program * * make) {
@@ -926,7 +1053,7 @@ bool MENU_get_swapstereo(void) {
 void MAPPER_VolumeUp(bool pressed) {
     if (!pressed) return;
 
-    double newvol = ((mixer.mastervol[0] + mixer.mastervol[1]) / 0.7) * 0.5;
+    double newvol = (((double)mixer.mastervol[0] + mixer.mastervol[1]) / 0.7) * 0.5;
 
     if (newvol > 1) newvol = 1;
 
@@ -938,7 +1065,7 @@ void MAPPER_VolumeUp(bool pressed) {
 void MAPPER_VolumeDown(bool pressed) {
     if (!pressed) return;
 
-    double newvol = (mixer.mastervol[0] + mixer.mastervol[1]) * 0.7 * 0.5;
+    double newvol = ((double)mixer.mastervol[0] + mixer.mastervol[1]) * 0.7 * 0.5;
 
     if (fabs(newvol - 1.0) < 0.25)
         newvol = 1;
@@ -951,7 +1078,7 @@ void MAPPER_VolumeDown(bool pressed) {
 void MAPPER_RecVolumeUp(bool pressed) {
     if (!pressed) return;
 
-    double newvol = ((mixer.recordvol[0] + mixer.recordvol[1]) / 0.7) * 0.5;
+    double newvol = (((double)mixer.recordvol[0] + mixer.recordvol[1]) / 0.7) * 0.5;
 
     if (newvol > 1) newvol = 1;
 
@@ -963,7 +1090,7 @@ void MAPPER_RecVolumeUp(bool pressed) {
 void MAPPER_RecVolumeDown(bool pressed) {
     if (!pressed) return;
 
-    double newvol = (mixer.recordvol[0] + mixer.recordvol[1]) * 0.7 * 0.5;
+    double newvol = ((double)mixer.recordvol[0] + mixer.recordvol[1]) * 0.7 * 0.5;
 
     if (fabs(newvol - 1.0) < 0.25)
         newvol = 1;

@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #include "dosbox.h"
@@ -48,6 +48,8 @@ void pc98_egc_shift_reinit();
 
 extern egc_quad             pc98_egc_bgcm;
 extern egc_quad             pc98_egc_fgcm;
+
+uint16_t                    pc98_egc_raw_values[8] = {0};
 
 uint8_t                     pc98_egc_access=0;
 uint8_t                     pc98_egc_srcmask[2]; /* host given (Neko: egc.srcmask) */
@@ -96,6 +98,8 @@ void pc98_egc4a0_write(Bitu port,Bitu val,Bitu iolen) {
 //        LOG_MSG("EGC 4A0 write port 0x%x when EGC not enabled",(unsigned int)port);
         return;
     }
+
+    pc98_egc_raw_values[(port>>1u)&7u] = (uint16_t)val;
 
     /* assume: (port & 1) == 0 [even] and iolen == 2 */
     switch (port & 0x0E) {
@@ -168,15 +172,15 @@ void pc98_egc4a0_write(Bitu port,Bitu val,Bitu iolen) {
              * If FGC = 1 or BGC = 1:
              *   bits [15:8] = 0
              *   bits [7:0] = foreground color (all 8 bits used in 256-color mode) */
-            pc98_egc_foreground_color = val;
+            pc98_egc_foreground_color = (uint8_t)val;
             pc98_egc_fgcm[0].w = (val & 1) ? 0xFFFF : 0x0000;
             pc98_egc_fgcm[1].w = (val & 2) ? 0xFFFF : 0x0000;
             pc98_egc_fgcm[2].w = (val & 4) ? 0xFFFF : 0x0000;
             pc98_egc_fgcm[3].w = (val & 8) ? 0xFFFF : 0x0000;
             break;
         case 0x8: /* 0x4A8 */
-            if (pc98_egc_compare_lead == 0)
-                *((uint16_t*)pc98_egc_mask) = val;
+            if (pc98_egc_fgc == 0)
+                *((uint16_t*)pc98_egc_mask) = (uint16_t)val;
             break;
         case 0xA: /* 0x4AA */
             /* If FGC = 0 and BGC = 0:
@@ -184,7 +188,7 @@ void pc98_egc4a0_write(Bitu port,Bitu val,Bitu iolen) {
              * If FGC = 1 or BGC = 1:
              *   bits [15:8] = 0
              *   bits [7:0] = foreground color (all 8 bits used in 256-color mode) */
-            pc98_egc_background_color = val;
+            pc98_egc_background_color = (uint8_t)val;
             pc98_egc_bgcm[0].w = (val & 1) ? 0xFFFF : 0x0000;
             pc98_egc_bgcm[1].w = (val & 2) ? 0xFFFF : 0x0000;
             pc98_egc_bgcm[2].w = (val & 4) ? 0xFFFF : 0x0000;
@@ -237,10 +241,19 @@ void pc98_egc4a0_write_warning(Bitu port,Bitu val,Bitu iolen) {
         return;
     }
 
+    if (port & 1) {
+        pc98_egc_raw_values[(port>>1u)&7u] &= ~0xFF00u;
+        pc98_egc_raw_values[(port>>1u)&7u] |= val << 8u;
+    }
+    else {
+        pc98_egc_raw_values[(port>>1u)&7u] &= ~0xFFu;
+        pc98_egc_raw_values[(port>>1u)&7u] |= val;
+    }
+
     switch (port & 0xF) {
         case 0x6:
             /* if the BIOS reports EGC, many early games will write bytewise I/O to port 4A6h */
-            pc98_egc_foreground_color = val;
+            pc98_egc_foreground_color = (uint8_t)val;
             pc98_egc_fgcm[0].w = (val & 1) ? 0xFFFF : 0x0000;
             pc98_egc_fgcm[1].w = (val & 2) ? 0xFFFF : 0x0000;
             pc98_egc_fgcm[2].w = (val & 4) ? 0xFFFF : 0x0000;

@@ -8,6 +8,10 @@
 aclocal.m4
 configure
 
+vs2015/sdlnet/Makefile.in
+vs2015/sdlnet/aclocal.m4
+vs2015/sdlnet/configure
+
 # User-specific files
 *.suo
 *.user
@@ -324,6 +328,10 @@ autom4te.cache/*
 windows-installer/DOSBox-X-standalone-*
 windows-installer/DOSBox-X-setup-*.exe
 windows-installer/DOSBox-X-setup-*.zip
+
+\!DosBox-X/*,ff8
+\!DosBox-X/CHANGELOG,fff
+\!DosBox-X/resources/*
 
 *.o
 *.a

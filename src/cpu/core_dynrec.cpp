@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2018  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -143,6 +143,10 @@ static struct {
 #if !defined(C_TARGETCPU)
 # if defined(_MSC_VER) && defined(_M_AMD64)
 #  define C_TARGETCPU X86_64
+# elif defined(_MSC_VER) && defined(_M_ARM)
+#  define C_TARGETCPU ARMV7LE
+# elif defined(_MSC_VER) && defined(_M_ARM64)
+#  define C_TARGETCPU ARMV8LE
 # endif
 #endif
 
@@ -153,7 +157,11 @@ static struct {
 #elif C_TARGETCPU == MIPSEL
 #include "core_dynrec/risc_mipsel32.h"
 #elif (C_TARGETCPU == ARMV4LE) || (C_TARGETCPU == ARMV7LE)
+#ifdef _MSC_VER
+#pragma message("warning: Using ARMV4 or ARMV7")
+#else
 #warning Using ARMV4 or ARMV7
+#endif
 #include "core_dynrec/risc_armv4le.h"
 #elif C_TARGETCPU == ARMV8LE
 #include "core_dynrec/risc_armv8le.h"
@@ -164,7 +172,7 @@ static struct {
 CacheBlockDynRec * LinkBlocks(BlockReturn ret) {
 	CacheBlockDynRec * block=NULL;
 	// the last instruction was a control flow modifying instruction
-	Bitu temp_ip=SegPhys(cs)+reg_eip;
+	Bit32u temp_ip=SegPhys(cs)+reg_eip;
 	CodePageHandlerDynRec * temp_handler=(CodePageHandlerDynRec *)get_tlb_readhandler(temp_ip);
 	if (temp_handler->flags & PFLAG_HASCODE) {
 		// see if the target is an already translated block
@@ -221,7 +229,7 @@ Bits CPU_Core_Dynrec_Run(void) {
 		// Determine the linear address of CS:EIP
 		PhysPt ip_point=SegPhys(cs)+reg_eip;
 		#if C_HEAVY_DEBUG
-			if (DEBUG_HeavyIsBreakpoint()) return debugCallback;
+			if (DEBUG_HeavyIsBreakpoint()) return (Bits)debugCallback;
 		#endif
 
 		CodePageHandlerDynRec * chandler=0;
@@ -245,7 +253,7 @@ Bits CPU_Core_Dynrec_Run(void) {
 				block=CreateCacheBlock(chandler,ip_point,32);
 			} else {
 				// let the normal core handle this instruction to avoid zero-sized blocks
-				Bitu old_cycles=CPU_Cycles;
+				cpu_cycles_count_t old_cycles=CPU_Cycles;
 				CPU_Cycles=1;
 				Bits nc_retcode=CPU_Core_Normal_Run();
 				if (!nc_retcode) {
@@ -277,7 +285,7 @@ run_block:
 		case BR_Iret:
 #if C_DEBUG
 #if C_HEAVY_DEBUG
-			if (DEBUG_HeavyIsBreakpoint()) return debugCallback;
+			if (DEBUG_HeavyIsBreakpoint()) return (Bits)debugCallback;
 #endif
 #endif
 			if (!GETFLAG(TF)) {
@@ -295,7 +303,7 @@ run_block:
 			// or the maximum number of instructions to translate was reached
 #if C_DEBUG
 #if C_HEAVY_DEBUG
-			if (DEBUG_HeavyIsBreakpoint()) return debugCallback;
+			if (DEBUG_HeavyIsBreakpoint()) return (Bits)debugCallback;
 #endif
 #endif
 			break;
@@ -305,7 +313,7 @@ run_block:
 			// external events, schedule the pic...
 #if C_DEBUG
 #if C_HEAVY_DEBUG
-			if (DEBUG_HeavyIsBreakpoint()) return debugCallback;
+			if (DEBUG_HeavyIsBreakpoint()) return (Bits)debugCallback;
 #endif
 #endif
 			return CBRET_NONE;
@@ -313,7 +321,7 @@ run_block:
 		case BR_CallBack:
 			// the callback code is executed in dosbox.conf, return the callback number
 			FillFlags();
-			return core_dynrec.callback;
+			return (Bits)core_dynrec.callback;
 
 		case BR_SMCBlock:
 //			LOG_MSG("selfmodification of running block at %x:%x",SegValue(cs),reg_eip);

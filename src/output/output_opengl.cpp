@@ -1,9 +1,17 @@
+
+// Tell Mac OS X to shut up about deprecated OpenGL calls
+#ifndef GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION
+#endif
+
 #include <sys/types.h>
 #include <assert.h>
 #include <math.h>
 
 #include "dosbox.h"
 #include <output/output_opengl.h>
+
+#include <algorithm>
 
 #include "sdlmain.h"
 
@@ -17,7 +25,7 @@ PFNGLBUFFERDATAARBPROC glBufferDataARB = NULL;
 PFNGLMAPBUFFERARBPROC glMapBufferARB = NULL;
 PFNGLUNMAPBUFFERARBPROC glUnmapBufferARB = NULL;
 
-#if C_OPENGL && !defined(C_SDL2) && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
+#if C_OPENGL && DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
 extern unsigned int SDLDrawGenFontTextureUnitPerRow;
 extern unsigned int SDLDrawGenFontTextureRows;
 extern unsigned int SDLDrawGenFontTextureWidth;
@@ -39,31 +47,44 @@ static SDL_Surface* SetupSurfaceScaledOpenGL(Bit32u sdl_flags, Bit32u bpp)
     Bit16u windowWidth;
     Bit16u windowHeight;
 
+retry:
+#if defined(C_SDL2)
+    if (sdl.desktop.prevent_fullscreen) /* 3Dfx openGL do not allow resize */
+        sdl_flags &= ~((unsigned int)SDL_WINDOW_RESIZABLE);
+    if (sdl.desktop.want_type == SCREEN_OPENGL)
+        sdl_flags |= (unsigned int)SDL_WINDOW_OPENGL;
+#else
     if (sdl.desktop.prevent_fullscreen) /* 3Dfx openGL do not allow resize */
         sdl_flags &= ~((unsigned int)SDL_RESIZABLE);
-
     if (sdl.desktop.want_type == SCREEN_OPENGL)
         sdl_flags |= (unsigned int)SDL_OPENGL;
+#endif
 
     if (sdl.desktop.fullscreen) 
     {
         fixedWidth = sdl.desktop.full.fixed ? sdl.desktop.full.width : 0;
         fixedHeight = sdl.desktop.full.fixed ? sdl.desktop.full.height : 0;
+#if defined(C_SDL2)
+        sdl_flags |= (unsigned int)(SDL_WINDOW_FULLSCREEN);
+#else
         sdl_flags |= (unsigned int)(SDL_FULLSCREEN | SDL_HWSURFACE);
+#endif
     }
     else 
     {
         fixedWidth = sdl.desktop.window.width;
         fixedHeight = sdl.desktop.window.height;
+#if !defined(C_SDL2)
         sdl_flags |= (unsigned int)SDL_HWSURFACE;
+#endif
     }
 
     if (fixedWidth == 0 || fixedHeight == 0) 
     {
         Bitu consider_height = menu.maxwindow ? currentWindowHeight : 0;
         Bitu consider_width = menu.maxwindow ? currentWindowWidth : 0;
-        int final_height = max(consider_height, userResizeWindowHeight);
-        int final_width = max(consider_width, userResizeWindowWidth);
+        int final_height = (int)max(consider_height, userResizeWindowHeight);
+        int final_width = (int)max(consider_width, userResizeWindowWidth);
 
         fixedWidth = final_width;
         fixedHeight = final_height;
@@ -86,7 +107,7 @@ static SDL_Surface* SetupSurfaceScaledOpenGL(Bit32u sdl_flags, Bit32u bpp)
         LOG_MSG("menuScale=%d", scale);
         mainMenu.setScale((unsigned int)scale);
 
-        if (mainMenu.isVisible())
+        if (mainMenu.isVisible() && !sdl.desktop.fullscreen)
             fixedHeight -= mainMenu.menuBox.h;
     }
 #endif
@@ -121,14 +142,33 @@ static SDL_Surface* SetupSurfaceScaledOpenGL(Bit32u sdl_flags, Bit32u bpp)
         (unsigned int)sdl.clip.h);
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
-    if (mainMenu.isVisible()) 
+    if (mainMenu.isVisible() && !sdl.desktop.fullscreen) 
     {
         windowHeight += mainMenu.menuBox.h;
         sdl.clip.y += mainMenu.menuBox.h;
     }
 #endif
 
+#if defined(C_SDL2)
+    (void)bpp; // unused param
+    sdl.surface = NULL;
+    sdl.window = GFX_SetSDLWindowMode(windowWidth, windowHeight, (sdl_flags & SDL_WINDOW_OPENGL) ? SCREEN_OPENGL : SCREEN_SURFACE);
+    if (sdl.window != NULL) sdl.surface = SDL_GetWindowSurface(sdl.window);
+#else
     sdl.surface = SDL_SetVideoMode(windowWidth, windowHeight, (int)bpp, (unsigned int)sdl_flags);
+#endif
+    if (sdl.surface == NULL && sdl.desktop.fullscreen) {
+        LOG_MSG("Fullscreen not supported: %s", SDL_GetError());
+        sdl.desktop.fullscreen = false;
+#if defined(C_SDL2)
+        sdl_flags &= ~SDL_WINDOW_FULLSCREEN;
+#else
+        sdl_flags &= ~SDL_FULLSCREEN;
+#endif
+        GFX_CaptureMouse();
+        goto retry;
+    }
+
     sdl.deferred_resize = false;
     sdl.must_redraw_all = true;
 
@@ -146,6 +186,7 @@ static SDL_Surface* SetupSurfaceScaledOpenGL(Bit32u sdl_flags, Bit32u bpp)
 
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
     mainMenu.screenWidth = (size_t)(sdl.surface->w);
+    mainMenu.screenHeight = (size_t)(sdl.surface->h);
     mainMenu.updateRect();
     mainMenu.setRedraw();
 #endif
@@ -202,13 +243,22 @@ Bitu OUTPUT_OPENGL_SetSize()
     sdl_opengl.framebuf = 0;
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-#if SDL_VERSION_ATLEAST(1, 2, 11)
-    Section_prop* sec = static_cast<Section_prop*>(control->GetSection("vsync"));
-    if (sec)
-        SDL_GL_SetAttribute(SDL_GL_SWAP_CONTROL, (!strcmp(sec->Get_string("vsyncmode"), "host")) ? 1 : 0);
+#if !defined(C_SDL2)
+# if SDL_VERSION_ATLEAST(1, 2, 11)
+    {
+        Section_prop* sec = static_cast<Section_prop*>(control->GetSection("vsync"));
+
+        if (sec)
+            SDL_GL_SetAttribute(SDL_GL_SWAP_CONTROL, (!strcmp(sec->Get_string("vsyncmode"), "host")) ? 1 : 0);
+    }
+# endif
 #endif
 
+#if defined(C_SDL2)
+    SetupSurfaceScaledOpenGL(SDL_WINDOW_RESIZABLE, 0);
+#else
     SetupSurfaceScaledOpenGL(SDL_RESIZABLE, 0);
+#endif
     if (!sdl.surface || sdl.surface->format->BitsPerPixel < 15)
     {
         LOG_MSG("SDL:OPENGL:Can't open drawing surface, are you running in 16bpp(or higher) mode?");
@@ -224,14 +274,14 @@ Bitu OUTPUT_OPENGL_SetSize()
     Bitu adjTexHeight = sdl.draw.height;
 #if C_XBRZ
     // we do the same as with Direct3D: precreate pixel buffer adjusted for xBRZ
-    if (sdl_xbrz.enable && xBRZ_SetScaleParameters(adjTexWidth, adjTexHeight, sdl.clip.w, sdl.clip.h))
+    if (sdl_xbrz.enable && xBRZ_SetScaleParameters((int)adjTexWidth, (int)adjTexHeight, (int)sdl.clip.w, (int)sdl.clip.h))
     {
-        adjTexWidth = adjTexWidth * sdl_xbrz.scale_factor;
-        adjTexHeight = adjTexHeight * sdl_xbrz.scale_factor;
+        adjTexWidth = adjTexWidth * (unsigned int)sdl_xbrz.scale_factor;
+        adjTexHeight = adjTexHeight * (unsigned int)sdl_xbrz.scale_factor;
     }
 #endif
 
-    int texsize = 2 << int_log2(adjTexWidth > adjTexHeight ? adjTexWidth : adjTexHeight);
+    int texsize = 2 << int_log2((int)(adjTexWidth > adjTexHeight ? adjTexWidth : adjTexHeight));
     if (texsize > sdl_opengl.max_texsize) 
     {
         LOG_MSG("SDL:OPENGL:No support for texturesize of %d (max size is %d), falling back to surface", texsize, sdl_opengl.max_texsize);
@@ -243,7 +293,7 @@ Bitu OUTPUT_OPENGL_SetSize()
     {
         glGenBuffersARB(1, &sdl_opengl.buffer);
         glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_EXT, sdl_opengl.buffer);
-        glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_EXT, adjTexWidth*adjTexHeight * 4, NULL, GL_STREAM_DRAW_ARB);
+        glBufferDataARB(GL_PIXEL_UNPACK_BUFFER_EXT, (int)(adjTexWidth*adjTexHeight * 4), NULL, GL_STREAM_DRAW_ARB);
         glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_EXT, 0);
     }
     else
@@ -319,10 +369,10 @@ Bitu OUTPUT_OPENGL_SetSize()
 
     glBegin(GL_QUADS);
 
-    glTexCoord2i(0, 0); glVertex2i(sdl.clip.x, sdl.clip.y); // lower left
-    glTexCoord2i(adjTexWidth, 0); glVertex2i(sdl.clip.x + sdl.clip.w, sdl.clip.y); // lower right
-    glTexCoord2i(adjTexWidth, adjTexHeight); glVertex2i(sdl.clip.x + sdl.clip.w, sdl.clip.y + sdl.clip.h); // upper right
-    glTexCoord2i(0, adjTexHeight); glVertex2i(sdl.clip.x, sdl.clip.y + sdl.clip.h); // upper left
+    glTexCoord2i(0, 0); glVertex2i((GLint)sdl.clip.x, (GLint)sdl.clip.y); // lower left
+    glTexCoord2i((GLint)adjTexWidth, 0); glVertex2i((GLint)sdl.clip.x + (GLint)sdl.clip.w, (GLint)sdl.clip.y); // lower right
+    glTexCoord2i((GLint)adjTexWidth, (GLint)adjTexHeight); glVertex2i((GLint)sdl.clip.x + (GLint)sdl.clip.w, (GLint)sdl.clip.y + (GLint)sdl.clip.h); // upper right
+    glTexCoord2i(0, (GLint)adjTexHeight); glVertex2i((GLint)sdl.clip.x, (GLint)sdl.clip.y + (GLint)sdl.clip.h); // upper left
 
     glEnd();
     glEndList();
@@ -367,7 +417,7 @@ Bitu OUTPUT_OPENGL_SetSize()
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SDLDrawGenFontTextureWidth, SDLDrawGenFontTextureHeight, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, 0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (int)SDLDrawGenFontTextureWidth, (int)SDLDrawGenFontTextureHeight, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, 0);
 
         /* load the font */
         {
@@ -462,10 +512,10 @@ void OUTPUT_OPENGL_EndUpdate(const Bit16u *changedLines)
         if (sdl_xbrz.enable && sdl_xbrz.scale_on)
         {
             // OpenGL pixel buffer is precreated for direct xBRZ output, while xBRZ render buffer is used for rendering
-            const int srcWidth = sdl.draw.width;
-            const int srcHeight = sdl.draw.height;
+            const Bit32u srcWidth = sdl.draw.width;
+            const Bit32u srcHeight = sdl.draw.height;
 
-            if (sdl_xbrz.renderbuf.size() == srcWidth * srcHeight && srcWidth > 0 && srcHeight > 0)
+            if (sdl_xbrz.renderbuf.size() == (unsigned int)srcWidth * (unsigned int)srcHeight && srcWidth > 0 && srcHeight > 0)
             {
                 // we assume render buffer is *not* scaled!
                 const uint32_t* renderBuf = &sdl_xbrz.renderbuf[0]; // help VS compiler a little + support capture by value
@@ -481,7 +531,7 @@ void OUTPUT_OPENGL_EndUpdate(const Bit16u *changedLines)
                 }
 
                 if (trgTex)
-                    xBRZ_Render(renderBuf, trgTex, changedLines, srcWidth, srcHeight, sdl_xbrz.scale_factor);
+                    xBRZ_Render(renderBuf, trgTex, changedLines, (int)srcWidth, (int)srcHeight, sdl_xbrz.scale_factor);
             }
 
             // and here we go repeating some stuff with xBRZ related modifications
@@ -490,16 +540,22 @@ void OUTPUT_OPENGL_EndUpdate(const Bit16u *changedLines)
                 glUnmapBufferARB(GL_PIXEL_UNPACK_BUFFER_EXT);
                 glBindTexture(GL_TEXTURE_2D, sdl_opengl.texture);
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                    sdl.draw.width * sdl_xbrz.scale_factor, sdl.draw.height * sdl_xbrz.scale_factor, GL_BGRA_EXT,
-                    GL_UNSIGNED_INT_8_8_8_8_REV, 0);
+                    (int)(sdl.draw.width * (unsigned int)sdl_xbrz.scale_factor), (int)(sdl.draw.height * (unsigned int)sdl_xbrz.scale_factor), GL_BGRA_EXT,
+#if defined (MACOSX) && !defined(C_SDL2)
+                    // needed for proper looking graphics on macOS 10.12, 10.13
+                    GL_UNSIGNED_INT_8_8_8_8,
+#else
+                    GL_UNSIGNED_INT_8_8_8_8_REV,
+#endif
+                    0);
                 glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_EXT, 0);
             }
             else
             {
                 glBindTexture(GL_TEXTURE_2D, sdl_opengl.texture);
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                    sdl.draw.width * sdl_xbrz.scale_factor, sdl.draw.height * sdl_xbrz.scale_factor, GL_BGRA_EXT,
-#if defined (MACOSX)
+                    (int)(sdl.draw.width * (unsigned int)sdl_xbrz.scale_factor), (int)(sdl.draw.height * (unsigned int)sdl_xbrz.scale_factor), GL_BGRA_EXT,
+#if defined (MACOSX) && !defined(C_SDL2)
                     // needed for proper looking graphics on macOS 10.12, 10.13
                     GL_UNSIGNED_INT_8_8_8_8,
 #else
@@ -522,7 +578,14 @@ void OUTPUT_OPENGL_EndUpdate(const Bit16u *changedLines)
             glBindTexture(GL_TEXTURE_2D, sdl_opengl.texture);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
                 (int)sdl.draw.width, (int)sdl.draw.height, GL_BGRA_EXT,
-                GL_UNSIGNED_INT_8_8_8_8_REV, (void*)0);
+#if defined (MACOSX)
+                // needed for proper looking graphics on macOS 10.12, 10.13
+                GL_UNSIGNED_INT_8_8_8_8,
+#else
+                // works on Linux
+                GL_UNSIGNED_INT_8_8_8_8_REV,
+#endif
+                (void*)0);
             glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_EXT, 0);
             glCallList(sdl_opengl.displaylist);
             SDL_GL_SwapBuffers();
@@ -546,7 +609,7 @@ void OUTPUT_OPENGL_EndUpdate(const Bit16u *changedLines)
                     Bitu height = changedLines[index];
                     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, (int)y,
                         (int)sdl.draw.width, (int)height, GL_BGRA_EXT,
-#if defined (MACOSX)
+#if defined (MACOSX) && !defined(C_SDL2)
                         // needed for proper looking graphics on macOS 10.12, 10.13
                         GL_UNSIGNED_INT_8_8_8_8,
 #else

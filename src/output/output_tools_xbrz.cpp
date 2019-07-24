@@ -84,8 +84,8 @@ void xBRZ_Render(const uint32_t* renderBuf, uint32_t* xbrzBuf, const Bit16u *cha
                 y += changedLines[index];
             else
             {
-                const int sliceFirst = y;
-                const int sliceLast = y + changedLines[index];
+                const int sliceFirst = (int)y;
+                const int sliceLast = (int)y + changedLines[index];
                 y += changedLines[index];
 
                 int yFirst = max(yLast, sliceFirst - 2); // we need to update two adjacent lines as well since they are analyzed by xBRZ!
@@ -127,20 +127,20 @@ void xBRZ_Render(const uint32_t* renderBuf, uint32_t* xbrzBuf, const Bit16u *cha
                 y += changedLines[index];
             else
             {
-                const int sliceFirst = y;
-                const int sliceLast = y + changedLines[index];
+                const int sliceFirst = int(y);
+                const int sliceLast = int(y + changedLines[index]);
                 y += changedLines[index];
 
                 int yFirst = max(yLast, sliceFirst - 2); // we need to update two adjacent lines as well since they are analyzed by xBRZ!
                 yLast = min(srcHeight, sliceLast + 2);  // (and make sure to not overlap with last slice!)
-                xbrz::scale(scalingFactor, renderBuf, xbrzBuf, srcWidth, srcHeight, xbrz::ColorFormat::RGB, xbrz::ScalerCfg(), yFirst, yLast);
+                xbrz::scale((size_t)scalingFactor, renderBuf, xbrzBuf, srcWidth, srcHeight, xbrz::ColorFormat::RGB, xbrz::ScalerCfg(), yFirst, yLast);
             }
             index++;
         }
     }
     else // process complete input image
     {
-        xbrz::scale(scalingFactor, renderBuf, xbrzBuf, srcWidth, srcHeight, xbrz::ColorFormat::RGB, xbrz::ScalerCfg(), 0, srcHeight);
+        xbrz::scale((size_t)scalingFactor, renderBuf, xbrzBuf, srcWidth, srcHeight, xbrz::ColorFormat::RGB, xbrz::ScalerCfg(), 0, srcHeight);
     }
 #endif /*XBRZ_PPL*/
 }
@@ -153,6 +153,8 @@ void xBRZ_PostScale(const uint32_t* src, const int srcWidth, const int srcHeight
                     uint32_t* tgt, const int tgtWidth, const int tgtHeight, const int tgtPitch, 
                     const bool bilinear, const int task_granularity)
 {
+    (void)task_granularity;
+
 # if defined(XBRZ_PPL)
     if (bilinear) {
         concurrency::task_group tg;

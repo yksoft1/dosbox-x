@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -58,6 +58,7 @@ static MEM_callout_vector MEM_callouts[MEM_callouts_max];
 
 bool a20_guest_changeable = true;
 bool a20_fake_changeable = false;
+bool a20_fast_changeable = false;
 
 bool enable_port92 = true;
 bool has_Init_RAM = false;
@@ -106,11 +107,11 @@ HostPt MemBase = NULL;
 class UnmappedPageHandler : public PageHandler {
 public:
     UnmappedPageHandler() : PageHandler(PFLAG_INIT|PFLAG_NOCODE) {}
-    Bitu readb(PhysPt addr) {
+    Bit8u readb(PhysPt addr) {
         (void)addr;//UNUSED
         return 0xFF; /* Real hardware returns 0xFF not 0x00 */
     } 
-    void writeb(PhysPt addr,Bitu val) {
+    void writeb(PhysPt addr,Bit8u val) {
         (void)addr;//UNUSED
         (void)val;//UNUSED
     }
@@ -119,7 +120,7 @@ public:
 class IllegalPageHandler : public PageHandler {
 public:
     IllegalPageHandler() : PageHandler(PFLAG_INIT|PFLAG_NOCODE) {}
-    Bitu readb(PhysPt addr) {
+    Bit8u readb(PhysPt addr) {
         (void)addr;
 #if C_DEBUG
         LOG_MSG("Warning: Illegal read from %x, CS:IP %8x:%8x",addr,SegValue(cs),reg_eip);
@@ -132,7 +133,7 @@ public:
 #endif
         return 0xFF; /* Real hardware returns 0xFF not 0x00 */
     } 
-    void writeb(PhysPt addr,Bitu val) {
+    void writeb(PhysPt addr,Bit8u val) {
         (void)addr;//UNUSED
         (void)val;//UNUSED
 #if C_DEBUG
@@ -152,10 +153,16 @@ public:
     RAMPageHandler() : PageHandler(PFLAG_READABLE|PFLAG_WRITEABLE) {}
     RAMPageHandler(Bitu flags) : PageHandler(flags) {}
     HostPt GetHostReadPt(Bitu phys_page) {
-        return MemBase+(phys_page&memory.mem_alias_pagemask_active)*MEM_PAGESIZE;
+        if (!a20_fast_changeable || (phys_page & (~0xFul/*64KB*/)) == 0x100ul/*@1MB*/)
+            return MemBase+(phys_page&memory.mem_alias_pagemask_active)*MEM_PAGESIZE;
+
+        return MemBase+phys_page*MEM_PAGESIZE;
     }
     HostPt GetHostWritePt(Bitu phys_page) {
-        return MemBase+(phys_page&memory.mem_alias_pagemask_active)*MEM_PAGESIZE;
+        if (!a20_fast_changeable || (phys_page & (~0xFul/*64KB*/)) == 0x100ul/*@1MB*/)
+            return MemBase+(phys_page&memory.mem_alias_pagemask_active)*MEM_PAGESIZE;
+
+        return MemBase+phys_page*MEM_PAGESIZE;
     }
 };
 
@@ -177,13 +184,13 @@ public:
     ROMPageHandler() {
         flags=PFLAG_READABLE|PFLAG_HASROM;
     }
-    void writeb(PhysPt addr,Bitu val){
+    void writeb(PhysPt addr,Bit8u val){
         LOG(LOG_CPU,LOG_ERROR)("Write %x to rom at %x",(int)val,(int)addr);
     }
-    void writew(PhysPt addr,Bitu val){
+    void writew(PhysPt addr,Bit16u val){
         LOG(LOG_CPU,LOG_ERROR)("Write %x to rom at %x",(int)val,(int)addr);
     }
-    void writed(PhysPt addr,Bitu val){
+    void writed(PhysPt addr,Bit32u val){
         LOG(LOG_CPU,LOG_ERROR)("Write %x to rom at %x",(int)val,(int)addr);
     }
 };
@@ -667,7 +674,7 @@ void MEM_ResetPageHandler_Unmapped(Bitu phys_page, Bitu pages) {
 }
 
 Bitu mem_strlen(PhysPt pt) {
-    Bitu x=0;
+    Bit16u x=0;
     while (x<1024) {
         if (!mem_readb_inline(pt+x)) return x;
         x++;
@@ -719,7 +726,7 @@ void MEM_BlockWrite(PhysPt pt,void const * const data,Bitu size) {
         const Bitu current = (((pt>>12)+1)<<12) - pt;
         Bitu remainder = size - current;
         MEM_BlockWrite(pt, data, current);
-        MEM_BlockWrite(pt+current, reinterpret_cast<Bit8u const * const>(data)+current, remainder);
+        MEM_BlockWrite((PhysPt)(pt+current), reinterpret_cast<Bit8u const * const>(data)+current, remainder);
     }
 }
 
@@ -796,11 +803,11 @@ Bitu MEM_AllocatedPages(MemHandle handle)
 
 //TODO Maybe some protection for this whole allocation scheme
 
-INLINE Bitu BestMatch(Bitu size) {
-    Bitu index=XMS_START;   
-    Bitu first=0;
-    Bitu best=0xfffffff;
-    Bitu best_first=0;
+INLINE Bit32u BestMatch(Bitu size) {
+    Bit32u index=XMS_START;   
+    Bit32u first=0;
+    Bit32u best=0xfffffff;
+    Bit32u best_first=0;
     while (index<memory.reported_pages) {
         /* Check if we are searching for first free page */
         if (!first) {
@@ -811,7 +818,7 @@ INLINE Bitu BestMatch(Bitu size) {
         } else {
             /* Check if this still is used page */
             if (memory.mhandles[index]) {
-                Bitu pages=index-first;
+                Bit32u pages=index-first;
                 if (pages==size) {
                     return first;
                 } else if (pages>size) {
@@ -835,11 +842,11 @@ INLINE Bitu BestMatch(Bitu size) {
 /* alternate copy, that will only allocate memory on addresses
  * where the 20th address bit is zero. memory allocated in this
  * way will always be accessible no matter the state of the A20 gate */
-INLINE Bitu BestMatch_A20_friendly(Bitu size) {
-    Bitu index=XMS_START;
-    Bitu first=0;
-    Bitu best=0xfffffff;
-    Bitu best_first=0;
+INLINE Bit32u BestMatch_A20_friendly(Bitu size) {
+    Bit32u index=XMS_START;
+    Bit32u first=0;
+    Bit32u best=0xfffffff;
+    Bit32u best_first=0;
 
     /* if the memory to allocate is more than 1MB this function will never work. give up now. */
     if (size > 0x100)
@@ -866,7 +873,7 @@ INLINE Bitu BestMatch_A20_friendly(Bitu size) {
         } else {
             /* Check if this still is used page or on odd megabyte */
             if (memory.mhandles[index] || (index & 0x100)) {
-                Bitu pages=index-first;
+                Bit32u pages=index-first;
                 if (pages==size) {
                     return first;
                 } else if (pages>size) {
@@ -891,11 +898,11 @@ MemHandle MEM_AllocatePages(Bitu pages,bool sequence) {
     MemHandle ret;
     if (!pages) return 0;
     if (sequence) {
-        Bitu index=BestMatch(pages);
+        Bit32u index=BestMatch(pages);
         if (!index) return 0;
         MemHandle * next=&ret;
         while (pages) {
-            *next=index;
+            *next=(MemHandle)index;
             next=&memory.mhandles[index];
             index++;pages--;
         }
@@ -904,10 +911,10 @@ MemHandle MEM_AllocatePages(Bitu pages,bool sequence) {
         if (MEM_FreeTotal()<pages) return 0;
         MemHandle * next=&ret;
         while (pages) {
-            Bitu index=BestMatch(1);
+            Bit32u index=BestMatch(1);
             if (!index) E_Exit("MEM:corruption during allocate");
             while (pages && (!memory.mhandles[index])) {
-                *next=index;
+                *next=(MemHandle)index;
                 next=&memory.mhandles[index];
                 index++;pages--;
             }
@@ -924,7 +931,7 @@ MemHandle MEM_AllocatePages_A20_friendly(Bitu pages,bool sequence) {
     MemHandle ret;
     if (!pages) return 0;
     if (sequence) {
-        Bitu index=BestMatch_A20_friendly(pages);
+        Bit32u index=BestMatch_A20_friendly(pages);
         if (!index) return 0;
 #if C_DEBUG
         if (index & 0x100) E_Exit("MEM_AllocatePages_A20_friendly failed to make sure address has bit 20 == 0");
@@ -932,7 +939,7 @@ MemHandle MEM_AllocatePages_A20_friendly(Bitu pages,bool sequence) {
 #endif
         MemHandle * next=&ret;
         while (pages) {
-            *next=index;
+            *next=(MemHandle)index;
             next=&memory.mhandles[index];
             index++;pages--;
         }
@@ -941,13 +948,13 @@ MemHandle MEM_AllocatePages_A20_friendly(Bitu pages,bool sequence) {
         if (MEM_FreeTotal()<pages) return 0;
         MemHandle * next=&ret;
         while (pages) {
-            Bitu index=BestMatch_A20_friendly(1);
+            Bit32u index=BestMatch_A20_friendly(1);
             if (!index) E_Exit("MEM:corruption during allocate");
 #if C_DEBUG
             if (index & 0x100) E_Exit("MEM_AllocatePages_A20_friendly failed to make sure address has bit 20 == 0");
 #endif
             while (pages && (!memory.mhandles[index])) {
-                *next=index;
+                *next=(MemHandle)index;
                 next=&memory.mhandles[index];
                 index++;pages--;
             }
@@ -1185,12 +1192,11 @@ void phys_writes(PhysPt addr, const char* string, Bitu length) {
 
 #include "control.h"
 
-void restart_program(std::vector<std::string> & parameters);
 unsigned char CMOS_GetShutdownByte();
 void CPU_Snap_Back_To_Real_Mode();
 void DEBUG_Enable(bool pressed);
 void CPU_Snap_Back_Forget();
-Bitu CPU_Pop16(void);
+Bit16u CPU_Pop16(void);
 
 static bool cmos_reset_type_9_sarcastic_win31_comments=true;
 
@@ -1389,9 +1395,7 @@ void On_Software_CPU_Reset() {
 #if C_DYNAMIC_X86
     /* this technique is NOT reliable when running the dynamic core! */
     if (cpudecoder == &CPU_Core_Dyn_X86_Run) {
-        LOG_MSG("Using traditional DOSBox re-exec, C++ exception method is not compatible with dynamic core\n");
-        control->startup_params.insert(control->startup_params.begin(),control->cmdline->GetFileName());
-        restart_program(control->startup_params);
+        E_Exit("C++ exception method is not compatible with dynamic core when emulating reset, aborting");
         return;
     }
 #endif
@@ -1405,7 +1409,7 @@ bool allow_port_92_reset = true;
 static void write_p92(Bitu port,Bitu val,Bitu iolen) {
     (void)iolen;//UNUSED
     (void)port;//UNUSED
-    memory.a20.controlport = val & ~2u;
+    memory.a20.controlport = (Bit8u)(val & ~2u);
     MEM_A20_Enable((val & 2u)>0);
 
     // Bit 0 = system reset (switch back to real mode)
@@ -1593,6 +1597,7 @@ public:
         if (cmd->FindString("SET",temp_line,false)) {
             char *x = (char*)temp_line.c_str();
 
+            a20_fast_changeable = false;
             a20_fake_changeable = false;
             a20_guest_changeable = true;
             MEM_A20_Enable(true);
@@ -1632,6 +1637,7 @@ public:
                 MEM_A20_Enable(false);
                 a20_guest_changeable = true;
                 a20_fake_changeable = false;
+                a20_fast_changeable = true;
                 WriteOut("A20 gate now fast mode\n");
             }
             else {
@@ -1721,7 +1727,7 @@ void MEM_LoadState(Section *sec) {
         ZIPFileEntry *ent = savestate_zip.get_entry("memory.bin");
         if (ent != NULL) {
             ent->rewind();
-            if ((memory.pages*4096) == ent->file_length)
+            if (((off_t)memory.pages * (off_t)4096) == ent->file_length)
                 ent->read(MemBase, memory.pages*4096);
             else
                 LOG_MSG("Memory load state failure: Memory size mismatch");
@@ -1806,10 +1812,21 @@ void Init_RAM() {
         memsizekb = (memory.mem_alias_pagemask+1) * 4;
     }
 
-    /* cap at just under 4GB */
-    if ((memsizekb/4) > ((1 << (32 - 10)) - 4)) {
-        LOG_MSG("Maximum memory size is %dKB",(1 << (32 - 10)) - 4);
-        memsizekb = (1 << (32 - 10)) - 4;
+    /* cap at 3.5GB */
+    {
+        Bitu maxsz;
+
+        if (sizeof(void*) > 4) // 64-bit address space
+            maxsz = (Bitu)(3584ul * 1024ul); // 3.5GB
+        else
+            maxsz = (Bitu)(1024ul * 1024ul); // 1.0GB
+
+        LOG_MSG("Max %lu sz %lu\n",(unsigned long)maxsz,(unsigned long)memsizekb);
+        if (memsizekb > maxsz) {
+            LOG_MSG("Maximum memory size is %luKB",(unsigned long)maxsz);
+            memsizekb = maxsz;
+        }
+        LOG_MSG("Final %lu\n",(unsigned long)memsizekb);
     }
     memory.reported_pages = memory.pages = memsizekb/4;
 
@@ -1929,6 +1946,7 @@ void A20Gate_TakeUserSetting(Section *sec) {
     memory.a20.enabled = 0;
     a20_fake_changeable = false;
     a20_guest_changeable = true;
+    a20_fast_changeable = false;
 
     // TODO: A20 gate control should also be handled by a motherboard init routine
     std::string ss = section->Get_string("a20");
@@ -1958,8 +1976,13 @@ void A20Gate_TakeUserSetting(Section *sec) {
         a20_fake_changeable = true;
         memory.a20.enabled = 0;
     }
-    else { /* "" or "fast" */
-        LOG(LOG_MISC,LOG_DEBUG)("A20: masking emulation (fast mode no longer supported)");
+    else if (ss == "fast") {
+        LOG(LOG_MISC,LOG_DEBUG)("A20: fast mode");
+        a20_fast_changeable = true;
+        a20_guest_changeable = true;
+    }
+    else {
+        LOG(LOG_MISC,LOG_DEBUG)("A20: masking emulation");
         a20_guest_changeable = true;
     }
 }
@@ -2078,5 +2101,9 @@ void Init_PCJR_CartridgeROM() {
 
 Bitu MEM_PageMask(void) {
     return memory.mem_alias_pagemask;
+}
+
+Bitu MEM_PageMaskActive(void) {
+    return memory.mem_alias_pagemask_active;
 }
 

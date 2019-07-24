@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 	CASE_0F_D(0x00)												/* GRP 6 Exxx */
@@ -28,7 +28,7 @@
 					if (!which) saveval=CPU_SLDT();
 					else saveval=CPU_STR();
 					if (rm >= 0xc0) {GetEArw;*earw=(Bit16u)saveval;}
-					else {GetEAa;SaveMw(eaa,saveval);}
+					else {GetEAa;SaveMw(eaa,(Bit16u)saveval);}
 				}
 				break;
 			case 0x02:case 0x03:case 0x04:case 0x05:

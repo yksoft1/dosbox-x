@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -201,7 +201,7 @@ static Bit32u read_kcl_file(const char* kcl_file_name, const char* layout_id, bo
 				}
 			}
 		}
-		fseek(tempfile, cur_pos+3+len, SEEK_SET);
+		fseek(tempfile, long(cur_pos+3+len), SEEK_SET);
 	}
 
 	fclose(tempfile);
@@ -308,7 +308,7 @@ Bitu keyboard_layout::read_keyboard_file(const char* keyboard_file_name, Bit32s 
 			return KEYB_FILENOTFOUND;
 		}
 		if (tempfile) {
-			fseek(tempfile, start_pos+2, SEEK_SET);
+			fseek(tempfile, long(start_pos+2), SEEK_SET);
 			read_buf_size=(Bit32u)fread(read_buf, sizeof(Bit8u), 65535, tempfile);
 			fclose(tempfile);
 		}
@@ -661,7 +661,7 @@ Bit16u keyboard_layout::extract_codepage(const char* keyboard_file_name) {
 			return (IS_PC98_ARCH ? 932 : 437);
 		}
 		if (tempfile) {
-			fseek(tempfile, start_pos+2, SEEK_SET);
+			fseek(tempfile, long(start_pos+2), SEEK_SET);
 			read_buf_size=(Bit32u)fread(read_buf, sizeof(Bit8u), 65535, tempfile);
 			fclose(tempfile);
 		}
@@ -828,7 +828,7 @@ Bitu keyboard_layout::read_codepage_file(const char* codepage_file_name, Bit32s 
 
 				// read in compressed CPX-file
 				fseek(tempfile, 0, SEEK_SET);
-				size_of_cpxdata=(Bitu)fread(cpi_buf, sizeof(Bit8u), 65536, tempfile);
+				size_of_cpxdata=(Bit32u)fread(cpi_buf, sizeof(Bit8u), 65536, tempfile);
 			}
 		} else {
 			// standard uncompressed cpi-file
@@ -910,32 +910,36 @@ Bitu keyboard_layout::read_codepage_file(const char* codepage_file_name, Bit32s 
 					// 16x8 font, IF supported by the video card
                     if (int10.rom.font_16 != 0) {
                         PhysPt font16pt=Real2Phys(int10.rom.font_16);
-                        for (Bitu i=0;i<256*16;i++) {
+                        for (Bit16u i=0;i<256*16;i++) {
                             phys_writeb(font16pt+i,cpi_buf[font_data_start+i]);
                         }
+                        // terminate alternate list to prevent loading
+                        phys_writeb(Real2Phys(int10.rom.font_16_alternate),0);
                         font_changed=true;
                     }
 				} else if (font_height==0x0e) {
 					// 14x8 font, IF supported by the video card
                     if (int10.rom.font_14 != 0) {
                         PhysPt font14pt=Real2Phys(int10.rom.font_14);
-                        for (Bitu i=0;i<256*14;i++) {
+                        for (Bit16u i=0;i<256*14;i++) {
                             phys_writeb(font14pt+i,cpi_buf[font_data_start+i]);
                         }
+                        // terminate alternate list to prevent loading
+                        phys_writeb(Real2Phys(int10.rom.font_14_alternate),0);
                         font_changed=true;
                     }
 				} else if (font_height==0x08) {
                     // 8x8 fonts. All video cards support it
                     if (int10.rom.font_8_first != 0) {
                         PhysPt font8pt=Real2Phys(int10.rom.font_8_first);
-                        for (Bitu i=0;i<128*8;i++) {
+                        for (Bit16u i=0;i<128*8;i++) {
                             phys_writeb(font8pt+i,cpi_buf[font_data_start+i]);
                         }
                         font_changed=true;
                     }
                     if (int10.rom.font_8_second != 0) {
                         PhysPt font8pt=Real2Phys(int10.rom.font_8_second);
-                        for (Bitu i=0;i<128*8;i++) {
+                        for (Bit16u i=0;i<128*8;i++) {
                             phys_writeb(font8pt+i,cpi_buf[font_data_start+i+128*8]);
                         }
                         font_changed=true;
@@ -992,7 +996,7 @@ Bitu keyboard_layout::switch_keyboard_layout(const char* new_layout, keyboard_la
 			}
 		} else {
 			keyboard_layout * temp_layout=new keyboard_layout();
-			Bitu req_codepage=temp_layout->extract_codepage(new_layout);
+			Bit16u req_codepage=temp_layout->extract_codepage(new_layout);
 			tried_cp = req_codepage;
 			Bitu kerrcode=temp_layout->read_keyboard_file(new_layout, req_codepage);
 			if (kerrcode) {
@@ -1115,9 +1119,9 @@ public:
 			char layoutID_string[KL_NAMELENGTH];
 			if (GetKeyboardLayoutName(layoutID_string)) {
 				if (strlen(layoutID_string) == 8) {
-					int cur_kb_layout_by_name = ConvHexWord((char*)&layoutID_string[4]);
+					int cur_kb_layout_by_name = (int)ConvHexWord((char*)&layoutID_string[4]);
 					layoutID_string[4] = 0;
-					int subID = ConvHexWord((char*)&layoutID_string[0]);
+					int subID = (int)ConvHexWord((char*)&layoutID_string[0]);
 					if ((cur_kb_layout_by_name>0) && (cur_kb_layout_by_name<65536)) {
 						// use layout ID extracted from the layout string
 						cur_kb_layout = (WORD)cur_kb_layout_by_name;
@@ -1260,14 +1264,14 @@ public:
 
 		bool extract_codepage = true;
 		if (wants_dos_codepage>0) {
-			if ((loaded_layout->read_codepage_file("auto", (Bitu)wants_dos_codepage)) == KEYB_NOERROR) {
+			if ((loaded_layout->read_codepage_file("auto", (Bit32s)wants_dos_codepage)) == KEYB_NOERROR) {
 				// preselected codepage was successfully loaded
 				extract_codepage = false;
 			}
 		}
 		if (extract_codepage) {
 			// try to find a good codepage for the requested layout
-			Bitu req_codepage = loaded_layout->extract_codepage(layoutname);
+			Bit16u req_codepage = loaded_layout->extract_codepage(layoutname);
 			loaded_layout->read_codepage_file("auto", req_codepage);
 		}
 

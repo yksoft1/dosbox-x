@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -73,7 +73,7 @@ class DOS_DTA;
 
 class DOS_File {
 public:
-	DOS_File():flags(0)		{ name=0; refCtr = 0; hdrive=0xff; newtime=false;};
+    DOS_File() :flags(0) { name = 0; attr = 0; date = 0; drive = 0; refCtr = 0; open = false; time = 0; hdrive = 0xff; newtime = false; };
 	DOS_File(const DOS_File& orig);
 	DOS_File & operator= (const DOS_File & orig);
 	virtual	~DOS_File(){if(name) delete [] name;};
@@ -134,6 +134,27 @@ public:
 	void SetDeviceNumber(Bitu num) { devnum=num;}
 private:
 	Bitu devnum;
+};
+
+class localFile : public DOS_File {
+public:
+	localFile(const char* name, FILE * handle);
+	bool Read(Bit8u * data,Bit16u * size);
+	bool Write(const Bit8u * data,Bit16u * size);
+	bool Seek(Bit32u * pos,Bit32u type);
+	bool Close();
+#ifdef WIN32
+	bool LockFile(Bit8u mode, Bit32u pos, Bit16u size);
+#endif
+	Bit16u GetInformation(void);
+	bool UpdateDateTimeFromHost(void);   
+	void FlagReadOnlyMedium(void);
+	void Flush(void);
+	Bit32u GetSeekPos(void);
+private:
+	FILE * fhandle;
+	bool read_only_medium;
+	enum { NONE,READ,WRITE } last_action;
 };
 
 /* The following variable can be lowered to free up some memory.

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,9 +13,13 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
+// Tell Mac OS X to shut up about deprecated OpenGL calls
+#ifndef GL_SILENCE_DEPRECATION
+#define GL_SILENCE_DEPRECATION
+#endif
 
 #include <stdlib.h>
 #include <math.h>
@@ -26,7 +30,7 @@
 
 #include "voodoo_emu.h"
 #include "voodoo_opengl.h"
-
+#include "sdlmain.h"
 
 #if C_OPENGL
 
@@ -119,7 +123,7 @@ static void ogl_get_depth(voodoo_state* VV, INT32 ITERZ, INT64 ITERW, INT32 *dep
 		*depthval = wfloat;
 	else
 	{
-		if ((ITERZ) & 0xf0000000l)
+		if ((unsigned int)(ITERZ) & 0xf0000000l)
 			*depthval = 0x0000;
 		else
 		{
@@ -1620,6 +1624,9 @@ void voodoo_ogl_reset_videomode(void) {
     DOSBox_SetMenu();
 #endif
 
+#if defined(C_SDL2)
+    E_Exit("SDL2 3Dfx OpenGL emulation not implemented yet");
+#else
     GFX_PreventFullscreen(true);
 
 	last_clear_color=0;
@@ -1766,6 +1773,7 @@ void voodoo_ogl_reset_videomode(void) {
 	glShadeModel(GL_SMOOTH);
 
 	LOG_MSG("VOODOO: OpenGL: mode set, resolution %d:%d %s", v->fbi.width, v->fbi.height, (sdl_flags & SDL_FULLSCREEN) ? "(fullscreen)" : "");
+#endif
 }
 
 void voodoo_ogl_update_dimensions(void) {

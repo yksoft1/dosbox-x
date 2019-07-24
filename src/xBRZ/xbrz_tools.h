@@ -32,11 +32,11 @@ inline unsigned char getRed  (uint32_t pix) { return getByte<2>(pix); }
 inline unsigned char getGreen(uint32_t pix) { return getByte<1>(pix); }
 inline unsigned char getBlue (uint32_t pix) { return getByte<0>(pix); }
 
-inline uint32_t makePixel(unsigned char a, unsigned char r, unsigned char g, unsigned char b) { return (a << 24) | (r << 16) | (g << 8) | b; }
-inline uint32_t makePixel(                 unsigned char r, unsigned char g, unsigned char b) { return             (r << 16) | (g << 8) | b; }
+inline uint32_t makePixel(unsigned char a, unsigned char r, unsigned char g, unsigned char b) { return ((uint32_t)a << (uint32_t)24) | ((uint32_t)r << (uint32_t)16) | ((uint32_t)g << (uint32_t)8) | (uint32_t)b; }
+inline uint32_t makePixel(                 unsigned char r, unsigned char g, unsigned char b) { return                                 ((uint32_t)r << (uint32_t)16) | ((uint32_t)g << (uint32_t)8) | (uint32_t)b; }
 
-inline uint32_t rgb555to888(uint16_t pix) { return ((pix & 0x7C00) << 9) | ((pix & 0x03E0) << 6) | ((pix & 0x001F) << 3); }
-inline uint32_t rgb565to888(uint16_t pix) { return ((pix & 0xF800) << 8) | ((pix & 0x07E0) << 5) | ((pix & 0x001F) << 3); }
+inline uint32_t rgb555to888(uint16_t pix) { return (((uint32_t)pix & (uint32_t)0x7C00) << (uint32_t)9) | (((uint32_t)pix & (uint32_t)0x03E0) << (uint32_t)6) | (((uint32_t)pix & (uint32_t)0x001F) << (uint32_t)3); }
+inline uint32_t rgb565to888(uint16_t pix) { return (((uint32_t)pix & (uint32_t)0xF800) << (uint32_t)8) | (((uint32_t)pix & (uint32_t)0x07E0) << (uint32_t)5) | (((uint32_t)pix & (uint32_t)0x001F) << (uint32_t)3); }
 
 inline uint16_t rgb888to555(uint32_t pix) { return static_cast<uint16_t>(((pix & 0xF80000) >> 9) | ((pix & 0x00F800) >> 6) | ((pix & 0x0000F8) >> 3)); }
 inline uint16_t rgb888to565(uint32_t pix) { return static_cast<uint16_t>(((pix & 0xF80000) >> 8) | ((pix & 0x00FC00) >> 5) | ((pix & 0x0000F8) >> 3)); }
@@ -221,7 +221,7 @@ void bilinearScale(const uint32_t* src, int srcWidth, int srcHeight, int srcPitc
         double xx1 = 0;
         double x2x = 0;
     };
-    std::vector<CoeffsX> buf(trgWidth);
+    std::vector<CoeffsX> buf((size_t)trgWidth);
     for (int x = 0; x < trgWidth; ++x)
     {
         const int x1 = srcWidth * x / trgWidth;
@@ -231,10 +231,10 @@ void bilinearScale(const uint32_t* src, int srcWidth, int srcHeight, int srcPitc
         const double xx1 = x / scaleX - x1;
         const double x2x = 1 - xx1;
 
-        buf[x].x1 = x1;
-        buf[x].x2 = x2;
-        buf[x].xx1 = xx1;
-        buf[x].x2x = x2x;
+        buf[(unsigned int)x].x1 = x1;
+        buf[(unsigned int)x].x2 = x2;
+        buf[(unsigned int)x].xx1 = xx1;
+        buf[(unsigned int)x].x2x = x2x;
     }
 
     for (int y = yFirst; y < yLast; ++y)
@@ -253,10 +253,10 @@ void bilinearScale(const uint32_t* src, int srcWidth, int srcHeight, int srcPitc
         for (int x = 0; x < trgWidth; ++x)
         {
             //perf: do NOT "simplify" the variable layout without measurement!
-            const int     x1 = buf[x].x1;
-            const int     x2 = buf[x].x2;
-            const double xx1 = buf[x].xx1;
-            const double x2x = buf[x].x2x;
+            const int     x1 = buf[(unsigned int)x].x1;
+            const int     x2 = buf[(unsigned int)x].x2;
+            const double xx1 = buf[(unsigned int)x].xx1;
+            const double x2x = buf[(unsigned int)x].x2x;
 
             const double x2xy2y = x2x * y2y;
             const double xx1y2y = xx1 * y2y;
@@ -291,7 +291,7 @@ void bilinearScale(const uint32_t* src, int srcWidth, int srcHeight, int srcPitc
 
             const uint32_t trgPix = (a << 24) | (r << 16) | (g << 8) | b;
 
-            trgLine[x] = pixCvrt(trgPix);
+            trgLine[(unsigned int)x] = pixCvrt(trgPix);
         }
     }
 }

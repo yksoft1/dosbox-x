@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -70,6 +70,7 @@ static Bit32s AutoAmp = 512;
 static bool unmask_irq = false;
 static bool enable_autoamp = false;
 static bool startup_ultrinit = false;
+static bool ignore_active_channel_write_while_active = false;
 static bool dma_enable_on_dma_control_polling = false;
 static Bit16u vol16bit[4096];
 static Bit32u pantable[16];
@@ -452,10 +453,10 @@ public:
 					if (Lc&2) sp[1] += L;
 					if (Rc&1) sp[0] += R;
 					if (Rc&2) sp[1] += R;
-				}
 
-				WaveUpdate();
-				RampUpdate();
+                    WaveUpdate();
+                    RampUpdate();
+                }
 			}
 		}
 		else {
@@ -468,10 +469,10 @@ public:
 				if ((GUS_reset_reg & 0x02/*DAC enable*/) == 0x02) {
 					stream[i<<1]+= tmpsamp * VolLeft;
 					stream[(i<<1)+1]+= tmpsamp * VolRight;
-				}
 
-				WaveUpdate();
-				RampUpdate();
+                    WaveUpdate();
+                    RampUpdate();
+                }
 			}
 		}
 	}
@@ -731,7 +732,9 @@ static Bit16u ExecuteReadRegister(void) {
 	case 0x8b: // Channel LSW current address register
 		if (curchan) return (Bit16u)(curchan->WaveAddr >> WAVE_BITS);
 		else return 0x0000;
-
+	case 0x8c: // Channel pan pot register
+        if (curchan) return (Bit16u)(curchan->PanPot << 8);
+        else return 0x0800;
 	case 0x8d: // Channel volume control register
 		if (curchan) return curchan->ReadRampCtrl() << 8;
 		else return 0x0300;
@@ -851,6 +854,19 @@ static void ExecuteGlobRegister(void) {
 		if(curchan) curchan->WriteRampCtrl((Bit16u)myGUS.gRegData>>8);
 		break;
 	case 0xE:  // Set active channel register
+        /* Hack for "Ice Fever" demoscene production:
+         * If the DAC is active (bit 1 of GUS reset is set), ignore writes to this register.
+         * The demo resets the GUS with 14 channels, then after reset changes it to 16 for some reason.
+         * Without this hack, music will sound slowed down and wrong.
+         * As far as I know, real hardware will accept the change immediately and produce the same
+         * slowed down sound music. --J.C. */
+        if (ignore_active_channel_write_while_active) {
+            if (GUS_reset_reg & 0x02/*DAC enable*/) {
+                LOG_MSG("GUS: Attempt to change active channel count while DAC active rejected");
+                break;
+            }
+        }
+
 		gus_chan->FillUp();
 		myGUS.gRegSelect = myGUS.gRegData>>8;		//JAZZ Jackrabbit seems to assume this?
 		myGUS.ActiveChannelsUser = 1+((myGUS.gRegData>>8) & 31); // NTS: The GUS SDK documents this field as bits 5-0, which is wrong, it's bits 4-0. 5-0 would imply 64 channels.
@@ -1668,7 +1684,8 @@ void GUS_Update_DMA_Event_transfer() {
 void GUS_DMA_Event_Transfer(DmaChannel *chan,Bitu dmawords) {
 	Bitu dmaaddr = (Bitu)(myGUS.dmaAddr << 4ul) + (Bitu)myGUS.dmaAddrOffset;
 	Bitu dmalimit = myGUS.memsize;
-	int step = 0,docount = 0;
+    unsigned int docount = 0;
+	unsigned int step = 0;
 	bool dma16xlate;
 	Bitu holdAddr;
 
@@ -1743,10 +1760,10 @@ void GUS_DMA_Event_Transfer(DmaChannel *chan,Bitu dmawords) {
 	}
 
 	if (dmaaddr < dmalimit)
-		docount = dmalimit - dmaaddr;
+		docount = (unsigned int)(dmalimit - dmaaddr);
 
-	docount /= (chan->DMA16+1);
-	if (docount > (chan->currcnt+1)) docount = chan->currcnt+1;
+	docount /= (chan->DMA16+1u);
+	if (docount > (chan->currcnt+1u)) docount = chan->currcnt+1u;
 	if ((Bitu)docount > dmawords) docount = dmawords;
 
 	// hack: some programs especially Gravis Ultrasound MIDI playback like to upload by DMA but never clear the DMA TC flag on the DMA controller.
@@ -2052,6 +2069,8 @@ public:
         memset(&myGUS,0,sizeof(myGUS));
         memset(GUSRam,0,1024*1024);
 
+        ignore_active_channel_write_while_active = section->Get_bool("ignore channel count while active");
+
         unmask_irq = section->Get_bool("pic unmask irq");
         enable_autoamp = section->Get_bool("autoamp");
 
@@ -2309,24 +2328,24 @@ public:
     }
 
     void DOS_Startup() {
-		int portat = 0x200+GUS_BASE;
+		int portat = 0x200 + int(GUS_BASE);
 
         if (!gus_enable) return;
 
 		// ULTRASND=Port,DMA1,DMA2,IRQ1,IRQ2
 		// [GUS port], [GUS DMA (recording)], [GUS DMA (playback)], [GUS IRQ (playback)], [GUS IRQ (MIDI)]
 		ostringstream temp;
-		temp << "SET ULTRASND=" << hex << setw(3) << portat << ","
+		temp << "@SET ULTRASND=" << hex << setw(3) << portat << ","
 		     << dec << (Bitu)myGUS.dma1 << "," << (Bitu)myGUS.dma2 << ","
 		     << (Bitu)myGUS.irq1 << "," << (Bitu)myGUS.irq2 << ends;
 		// Create autoexec.bat lines
 		autoexecline[0].Install(temp.str());
-		autoexecline[1].Install(std::string("SET ULTRADIR=") + ultradir);
+		autoexecline[1].Install(std::string("@SET ULTRADIR=") + ultradir);
 
 		if (gus_type >= GUS_MAX) {
 			/* FIXME: Does the Interwave have a CS4231? */
 			ostringstream temp2;
-			temp2 << "SET ULTRA16=" << hex << setw(3) << (0x30C+GUS_BASE) << ","
+			temp2 << "@SET ULTRA16=" << hex << setw(3) << (0x30C+GUS_BASE) << ","
 				<< "0,0,1,0" << ends; // FIXME What do these numbers mean?
 			autoexecline[2].Install(temp2.str());
 		}

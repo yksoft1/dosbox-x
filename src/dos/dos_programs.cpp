@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -53,6 +53,17 @@ bool Mouse_Vertical = false;
 #define INCL DOSFILEMGR
 #define INCL_DOSERRORS
 #include "os2.h"
+#endif
+
+#if defined(WIN32)
+#ifndef S_ISDIR
+#define S_ISDIR(m) (((m)&S_IFMT)==S_IFDIR)
+#endif
+#endif
+
+#if defined(RISCOS)
+#include <unixlib/local.h>
+#include <limits.h>
 #endif
 
 #if C_DEBUG
@@ -113,7 +124,44 @@ static void MOUSE_ProgramStart(Program * * make) {
 }
 
 void MSCDEX_SetCDInterface(int intNr, int forceCD);
-Bitu ZDRIVE_NUM = 25;
+Bit8u ZDRIVE_NUM = 25;
+
+static const char* UnmountHelper(char umount) {
+    int i_drive;
+    if (umount < '0' || umount > 3+'0')
+        i_drive = toupper(umount) - 'A';
+    else
+        i_drive = umount - '0';
+
+    if (i_drive >= DOS_DRIVES || i_drive < 0)
+        return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
+
+    if (i_drive < MAX_DISK_IMAGES && Drives[i_drive] == NULL && imageDiskList[i_drive] == NULL)
+        return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
+
+    if (i_drive >= MAX_DISK_IMAGES && Drives[i_drive] == NULL)
+        return MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED");
+
+    if (Drives[i_drive]) {
+        switch (DriveManager::UnmountDrive(i_drive)) {
+            case 1: return MSG_Get("PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL");
+            case 2: return MSG_Get("MSCDEX_ERROR_MULTIPLE_CDROMS");
+        }
+        Drives[i_drive] = 0;
+        mem_writeb(Real2Phys(dos.tables.mediaid)+(unsigned int)i_drive*9u,0);
+        if (i_drive == DOS_GetDefaultDrive()) {
+            DOS_SetDrive(ZDRIVE_NUM);
+        }
+
+    }
+
+    if (i_drive < MAX_DISK_IMAGES && imageDiskList[i_drive]) {
+        delete imageDiskList[i_drive];
+        imageDiskList[i_drive] = NULL;
+    }
+
+    return MSG_Get("PROGRAM_MOUNT_UMOUNT_SUCCESS");
+}
 
 class MOUNT : public Program {
 public:
@@ -131,7 +179,7 @@ public:
         for (int d = 0;d < DOS_DRIVES;d++) {
             if (!Drives[d]) continue;
 
-            char root[4] = {(char)('A'+d),':','\\',0};
+            char root[7] = {(char)('A'+d),':','\\','*','.','*',0};
             bool ret = DOS_FindFirst(root,DOS_ATTR_VOLUME);
             if (ret) {
                 dta.GetResult(name,size,date,time,attr);
@@ -173,33 +221,15 @@ public:
             WriteOut(MSG_Get("PROGRAM_CONFIG_SECURE_DISALLOW"));
             return;
         }
+        bool path_relative_to_last_config = false;
+        if (cmd->FindExist("-pr",true)) path_relative_to_last_config = true;
 
         if (cmd->FindExist("-q",false))
             quiet = true;
 
         /* Check for unmounting */
         if (cmd->FindString("-u",umount,false)) {
-            umount[0] = toupper(umount[0]);
-            int i_drive = umount[0]-'A';
-                if (i_drive < DOS_DRIVES && i_drive >= 0 && Drives[i_drive]) {
-                    switch (DriveManager::UnmountDrive(i_drive)) {
-                    case 0:
-                        Drives[i_drive] = 0;
-                        if(i_drive == DOS_GetDefaultDrive()) 
-                            DOS_SetDrive(ZDRIVE_NUM);
-                        if (!quiet)
-                            WriteOut(MSG_Get("PROGRAM_MOUNT_UMOUNT_SUCCESS"),umount[0]);
-                        break;
-                    case 1:
-                        WriteOut(MSG_Get("PROGRAM_MOUNT_UMOUNT_NO_VIRTUAL"));
-                        break;
-                    case 2:
-                        WriteOut(MSG_Get("MSCDEX_ERROR_MULTIPLE_CDROMS"));
-                        break;
-                    }
-                } else {
-                    WriteOut(MSG_Get("PROGRAM_MOUNT_UMOUNT_NOT_MOUNTED"),umount[0]);
-                }
+            WriteOut(UnmountHelper(umount[0]), toupper(umount[0]));
             return;
         }
         
@@ -207,18 +237,18 @@ public:
         /* Only allowing moving it once. It is merely a convenience added for the wine team */
         if (ZDRIVE_NUM == 25 && cmd->FindString("-z", newz,false)) {
             newz[0] = toupper(newz[0]);
-            int i_newz = newz[0] - 'A';
+            int i_newz = (int)newz[0] - (int)'A';
             if (i_newz >= 0 && i_newz < DOS_DRIVES-1 && !Drives[i_newz]) {
-                ZDRIVE_NUM = (unsigned int)i_newz;
+                ZDRIVE_NUM = i_newz;
                 /* remap drives */
                 Drives[i_newz] = Drives[25];
                 Drives[25] = 0;
-                DOS_Shell *fs = static_cast<DOS_Shell *>(first_shell); //dynamic ?              
+                if (!first_shell) return; //Should not be possible
                 /* Update environment */
                 std::string line = "";
                 char ppp[2] = {newz[0],0};
                 std::string tempenv = ppp; tempenv += ":\\";
-                if (fs->GetEnvStr("PATH",line)){
+                if (first_shell->GetEnvStr("PATH",line)){
                     std::string::size_type idx = line.find('=');
                     std::string value = line.substr(idx +1 , std::string::npos);
                     while ( (idx = value.find("Z:\\")) != std::string::npos ||
@@ -227,13 +257,13 @@ public:
                     line = value;
                 }
                 if (!line.size()) line = tempenv;
-                fs->SetEnv("PATH",line.c_str());
+                first_shell->SetEnv("PATH",line.c_str());
                 tempenv += "COMMAND.COM";
-                fs->SetEnv("COMSPEC",tempenv.c_str());
+                first_shell->SetEnv("COMSPEC",tempenv.c_str());
 
                 /* Update batch file if running from Z: (very likely: autoexec) */
-                if(fs->bf) {
-                    std::string &name = fs->bf->filename;
+                if(first_shell->bf) {
+                    std::string &name = first_shell->bf->filename;
                     if(name.length() >2 &&  name[0] == 'Z' && name[1] == ':') name[0] = newz[0];
                 }
                 /* Change the active drive */
@@ -310,34 +340,58 @@ public:
             }
            
             cmd->FindString("-size",str_size,true);
-            char number[20];const char * scan=str_size.c_str();
-            Bitu index=0;Bitu count=0;
+            char number[21] = { 0 }; const char* scan = str_size.c_str();
+            Bitu index = 0; Bitu count = 0;
             /* Parse the str_size string */
-            while (*scan) {
+            while (*scan && index < 20 && count < 4) {
                 if (*scan==',') {
-                    number[index]=0;sizes[count++]=atoi(number);
-                    index=0;
-                } else number[index++]=*scan;
+                    number[index] = 0;
+                    sizes[count++] = atoi(number);
+                    index = 0;
+                } else number[index++] = *scan;
                 scan++;
             }
-            number[index]=0;sizes[count++]=atoi(number);
+            if (count < 4) {
+                number[index] = 0; //always goes correct as index is max 20 at this point.
+                sizes[count] = atoi(number);
+            }
         
             // get the drive letter
             cmd->FindCommand(1,temp_line);
             if ((temp_line.size() > 2) || ((temp_line.size()>1) && (temp_line[1]!=':'))) goto showusage;
-            drive=toupper(temp_line[0]);
-            if (!isalpha(drive)) goto showusage;
+            int i_drive = toupper(temp_line[0]);
+            if (!isalpha(i_drive)) goto showusage;
+            if ((i_drive - 'A') >= DOS_DRIVES || (i_drive - 'A') < 0) goto showusage;
+            drive = static_cast<char>(i_drive);
 
             if (!cmd->FindCommand(2,temp_line)) goto showusage;
             if (!temp_line.size()) goto showusage;
+            if(path_relative_to_last_config && control->configfiles.size() && !Cross::IsPathAbsolute(temp_line)) {
+		        std::string lastconfigdir(control->configfiles[control->configfiles.size()-1]);
+                std::string::size_type pos = lastconfigdir.rfind(CROSS_FILESPLIT);
+                if(pos == std::string::npos) pos = 0; //No directory then erase string
+                lastconfigdir.erase(pos);
+                if (lastconfigdir.length())	temp_line = lastconfigdir + CROSS_FILESPLIT + temp_line;
+            }
             bool is_physfs = temp_line.find(':',((temp_line[0]|0x20) >= 'a' && (temp_line[0]|0x20) <= 'z')?2:0) != std::string::npos;
             struct stat test;
             //Win32 : strip tailing backslashes
             //os2: some special drive check
-            //rest: substiture ~ for home
+            //rest: substitute ~ for home
             bool failed = false;
 
             (void)failed;// MAY BE UNUSED
+
+#if defined (RISCOS)
+            // If the user provided a RISC OS style path, convert it to a Unix style path
+            // TODO: Disable UnixLib's automatic path conversion and use RISC OS style paths internally?
+            if (temp_line.find('$',0) != std::string::npos) {
+                char fname[PATH_MAX];
+                is_physfs = false;
+                __unixify_std(temp_line.c_str(), fname, sizeof(fname), 0);
+		temp_line = fname;
+            }
+#endif
 
 #if defined (WIN32) || defined(OS2)
             /* nothing */
@@ -390,7 +444,7 @@ public:
                 return;
             }
             /* Not a switch so a normal directory/file */
-            if (!is_physfs && !(test.st_mode & S_IFDIR)) {
+            if (!is_physfs && !S_ISDIR(test.st_mode)) {
 #ifdef OS2
                 HFILE cdrom_fd = 0;
                 ULONG ulAction = 0;
@@ -491,7 +545,7 @@ public:
         if (!newdrive) E_Exit("DOS:Can't create drive");
         Drives[drive-'A']=newdrive;
         /* Set the correct media byte in the table */
-        mem_writeb(Real2Phys(dos.tables.mediaid)+((unsigned int)drive-'A')*2u,newdrive->GetMediaByte());
+        mem_writeb(Real2Phys(dos.tables.mediaid)+((unsigned int)drive-'A')*9u,newdrive->GetMediaByte());
         if (!quiet) WriteOut(MSG_Get("PROGRAM_MOUNT_STATUS_2"),drive,newdrive->GetInfo());
         /* check if volume label is given and don't allow it to updated in the future */
         if (cmd->FindString("-label",label,true)) newdrive->SetLabel(label.c_str(),iscdrom,false);
@@ -504,7 +558,7 @@ public:
                 // automatic mount
             } else {
                 label = drive; label += "_DRIVE";
-                newdrive->SetLabel(label.c_str(),iscdrom,true);
+                newdrive->SetLabel(label.c_str(),iscdrom,false);
             }
 #endif
         } else if(type == "floppy") {
@@ -578,13 +632,13 @@ public:
     HostPt GetHostWritePt(Bitu phys_page) {
         return PC98_ITF_ROM+(phys_page&0x7)*MEM_PAGESIZE;
     }
-    void writeb(PhysPt addr,Bitu val){
+    void writeb(PhysPt addr,Bit8u val){
         LOG(LOG_CPU,LOG_ERROR)("Write %x to rom at %x",(int)val,(int)addr);
     }
-    void writew(PhysPt addr,Bitu val){
+    void writew(PhysPt addr,Bit16u val){
         LOG(LOG_CPU,LOG_ERROR)("Write %x to rom at %x",(int)val,(int)addr);
     }
-    void writed(PhysPt addr,Bitu val){
+    void writed(PhysPt addr,Bit32u val){
         LOG(LOG_CPU,LOG_ERROR)("Write %x to rom at %x",(int)val,(int)addr);
     }
 };
@@ -695,8 +749,8 @@ private:
 
             // get file size
             fseek(tmpfile,0L, SEEK_END);
-            *ksize = (ftell(tmpfile) / 1024);
-            *bsize = ftell(tmpfile);
+            *ksize = Bit32u(ftell(tmpfile) / 1024);
+            *bsize = Bit32u(ftell(tmpfile));
             fclose(tmpfile);
 
             tmpfile = ldp->GetSystemFilePtr(fullname, "rb+");
@@ -735,8 +789,8 @@ private:
 //              if(tryload) error = 2;
                 WriteOut(MSG_Get("PROGRAM_BOOT_WRITE_PROTECTED"));
                 fseek(tmpfile,0L, SEEK_END);
-                *ksize = (ftell(tmpfile) / 1024);
-                *bsize = ftell(tmpfile);
+                *ksize = Bit32u(ftell(tmpfile) / 1024);
+                *bsize = Bit32u(ftell(tmpfile));
                 return tmpfile;
             }
             // Give the delayed errormessages from the mounted variant (or from above)
@@ -745,8 +799,8 @@ private:
             return NULL;
         }
         fseek(tmpfile,0L, SEEK_END);
-        *ksize = (ftell(tmpfile) / 1024);
-        *bsize = ftell(tmpfile);
+        *ksize = Bit32u(ftell(tmpfile) / 1024);
+        *bsize = Bit32u(ftell(tmpfile));
         return tmpfile;
     }
 
@@ -775,6 +829,7 @@ public:
      */
     void Run(void) {
         std::string bios;
+        std::string boothax_str;
         bool bios_boot = false;
         bool swaponedrive = false;
         bool force = false;
@@ -794,6 +849,17 @@ public:
 
         if (cmd->FindString("-bios",bios,true))
             bios_boot = true;
+
+        cmd->FindString("-boothax",boothax_str,true);
+
+        if (boothax_str == "msdos") // WARNING: For MS-DOS only, or the real-mode portion of Windows 95/98/ME.
+            boothax = BOOTHAX_MSDOS; // do NOT use while in the graphical portion of Windows 95/98/ME especially a DOS VM.
+        else if (boothax_str == "")
+            boothax = BOOTHAX_NONE;
+        else {
+            WriteOut("Unknown boothax mode");
+            return;
+        }
 
         /* In secure mode don't allow people to boot stuff. 
          * They might try to corrupt the data on it */
@@ -910,12 +976,12 @@ public:
             return;
         }
         while(i<cmd->GetCount()) {
-            if(cmd->FindCommand(i+1, temp_line)) {
+            if(cmd->FindCommand((unsigned int)(i+1), temp_line)) {
                 if((temp_line == "-l") || (temp_line == "-L")) {
                     /* Specifying drive... next argument then is the drive */
                     bootbyDrive = true;
                     i++;
-                    if(cmd->FindCommand(i+1, temp_line)) {
+                    if(cmd->FindCommand((unsigned int)(i+1), temp_line)) {
                         drive=toupper(temp_line[0]);
                         if ((drive != 'A') && (drive != 'C') && (drive != 'D')) {
                             printError();
@@ -933,7 +999,7 @@ public:
                 if((temp_line == "-e") || (temp_line == "-E")) {
                     /* Command mode for PCJr cartridges */
                     i++;
-                    if(cmd->FindCommand(i + 1, temp_line)) {
+                    if(cmd->FindCommand((unsigned int)(i + 1), temp_line)) {
                         for(size_t ct = 0;ct < temp_line.size();ct++) temp_line[ct] = toupper(temp_line[ct]);
                         cart_cmd = temp_line;
                     } else {
@@ -942,6 +1008,10 @@ public:
                     }
                     i++;
                     continue;
+                }
+
+                if (i >= MAX_SWAPPABLE_DISKS) {
+                    return; //TODO give a warning.
                 }
 
                 Bit32u rombytesize=0;
@@ -1222,7 +1292,7 @@ public:
                     fseek(tfile, 0x3000L, SEEK_SET);
                     Bit32u drd=(Bit32u)fread(rombuf, 1, 0xb000, tfile);
                     if (drd==0xb000) {
-                        for(i=0;i<0xb000;i++) phys_writeb(0xf3000+i,rombuf[i]);
+                        for(i=0;i<0xb000;i++) phys_writeb((PhysPt)(0xf3000+i),rombuf[i]);
                     }
                     fclose(tfile);
                 }
@@ -1244,7 +1314,7 @@ public:
                     //fclose(usefile_2); //usefile_2 is in diskSwap structure which should be deleted to close the file
 
                     /* write cartridge data into ROM */
-                    for(i=0;i<rombytesize_2-pcjr_hdr_length;i++) phys_writeb((romseg_pt<<4)+i,rombuf[i]);
+                    for(i=0;i<rombytesize_2-pcjr_hdr_length;i++) phys_writeb((PhysPt)((romseg_pt<<4)+i),rombuf[i]);
                 }
 
                 unsigned int romseg=0;
@@ -1262,7 +1332,7 @@ public:
                 fread(rombuf, 1, rombytesize_1-pcjr_hdr_length, usefile_1);
                 //fclose(usefile_1); //usefile_1 is in diskSwap structure which should be deleted to close the file
                 /* write cartridge data into ROM */
-                for(i=0;i<rombytesize_1-pcjr_hdr_length;i++) phys_writeb((romseg<<4)+i,rombuf[i]);
+                for(i=0;i<rombytesize_1-pcjr_hdr_length;i++) phys_writeb((PhysPt)((romseg<<4)+i),rombuf[i]);
 
                 //Close cardridges
                 for(Bitu dct=0;dct<MAX_SWAPPABLE_DISKS;dct++) {
@@ -1293,7 +1363,7 @@ public:
                         /* run cartridge setup */
                         SegSet16(ds,dos.psp());
                         SegSet16(es,dos.psp());
-                        CALLBACK_RunRealFar(romseg,cfound_at);
+                        CALLBACK_RunRealFar((Bit16u)romseg,(Bit16u)cfound_at);
                     }
                 }
             }
@@ -1331,10 +1401,10 @@ public:
             WriteOut(MSG_Get("PROGRAM_BOOT_BOOT"), drive);
 
             if (IS_PC98_ARCH) {
-                for(i=0;i<bootsize;i++) real_writeb(load_seg, i, bootarea.rawdata[i]);
+                for(i=0;i<bootsize;i++) real_writeb((Bit16u)load_seg, (Bit16u)i, bootarea.rawdata[i]);
             }
             else {
-                for(i=0;i<bootsize;i++) real_writeb(0, (load_seg<<4) + i, bootarea.rawdata[i]);
+                for(i=0;i<bootsize;i++) real_writeb(0, (Bit16u)((load_seg<<4) + i), bootarea.rawdata[i]);
             }
 
             /* debug */
@@ -1363,15 +1433,15 @@ public:
                  * load_seg at 0x1FE0 which on the original 128KB PC-98 puts it at the top of memory
                  *
                  */
-                SegSet16(cs, load_seg);
+                SegSet16(cs, (Bit16u)load_seg);
                 SegSet16(ds, 0x0000);
-                SegSet16(es, load_seg);
+                SegSet16(es, (Bit16u)load_seg);
                 reg_ip = 0;
                 reg_ebx = 0x200;
                 reg_esp = 0xD8;
                 /* set up stack at a safe place */
-                SegSet16(ss, stack_seg);
-                reg_esi = load_seg;
+                SegSet16(ss, (Bit16u)stack_seg);
+                reg_esi = (Bit32u)load_seg;
                 reg_ecx = 0x200;
                 reg_ebp = 0;
                 reg_eax = 0x30;
@@ -1388,7 +1458,7 @@ public:
 
                 /* PC-98 MS-DOS boot sector behavior suggests that the BIOS does a CALL FAR
                  * to the boot sector, and the boot sector can RETF back to the BIOS on failure. */
-                CPU_Push16(BIOS_bootfail_code_offset >> 4); /* segment */
+                CPU_Push16((Bit16u)(BIOS_bootfail_code_offset >> 4)); /* segment */
                 CPU_Push16(BIOS_bootfail_code_offset & 0xF); /* offset */
 
                 /* clear the text layer */
@@ -1420,7 +1490,8 @@ public:
                 Bit8u F2DD_MODE = 0; /* 5CAh (ref. PC-9800 Series Technical Data Book - BIOS 1992 page 233 */
                 /* bits [7:4] = 640KB FD drives 3:0 ??
                  * bits [3:0] = 1MB FD drives 3:0 ?? */
-                Bitu disk_equip = 0,disk_equip_144 = 0,scsi_equip = 0;
+                Bit16u disk_equip = 0, disk_equip_144 = 0;
+                Bit8u scsi_equip = 0;
 
                 /* FIXME: MS-DOS appears to be able to see disk image B: but only
                  *        if the disk format is the same, for some reason.
@@ -1441,11 +1512,11 @@ public:
                     if (imageDiskList[i+2] != NULL) {
                         scsi_equip |= (1u << i);
 
-                        Bitu m = 0x460u + (i * 4u);
+                        Bit16u m = 0x460u + (i * 4u);
 
-                        mem_writeb(m+0,sects);
-                        mem_writeb(m+1,heads);
-                        mem_writew(m+2,(cyls & 0xFFFu) + (ssize == 512u ? 0x1000u : 0u) + (ssize == 1024u ? 0x2000u : 0) + 0x8000u/*NP2:hwsec*/);
+                        mem_writeb(m+0u,sects);
+                        mem_writeb(m+1u,heads);
+                        mem_writew(m+2u,(cyls & 0xFFFu) + (ssize == 512u ? 0x1000u : 0u) + (ssize == 1024u ? 0x2000u : 0) + 0x8000u/*NP2:hwsec*/);
                     }
                 }
 
@@ -1478,11 +1549,11 @@ public:
                 SegSet16(cs, 0);
                 SegSet16(ds, 0);
                 SegSet16(es, 0);
-                reg_ip = load_seg<<4;
-                reg_ebx = load_seg<<4; //Real code probably uses bx to load the image
+                reg_ip = (Bit16u)(load_seg<<4);
+                reg_ebx = (Bit32u)(load_seg<<4); //Real code probably uses bx to load the image
                 reg_esp = 0x100;
                 /* set up stack at a safe place */
-                SegSet16(ss, stack_seg);
+                SegSet16(ss, (Bit16u)stack_seg);
                 reg_esi = 0;
                 reg_ecx = 1;
                 reg_ebp = 0;
@@ -1508,57 +1579,80 @@ static void BOOT_ProgramStart(Program * * make) {
     *make=new BOOT;
 }
 
-class LDGFXROM : public Program {
+class LOADROM : public Program {
 public:
     void Run(void) {
-        if (!(cmd->FindCommand(1, temp_line))) return;
+        if (!(cmd->FindCommand(1, temp_line))) {
+            WriteOut(MSG_Get("PROGRAM_LOADROM_SPECIFY_FILE"));
+            return;
+        }
 
         Bit8u drive;
         char fullname[DOS_PATHLENGTH];
-
         localDrive* ldp=0;
         if (!DOS_MakeName((char *)temp_line.c_str(),fullname,&drive)) return;
 
-        try {       
+        try {
+            /* try to read ROM file into buffer */
             ldp=dynamic_cast<localDrive*>(Drives[drive]);
             if(!ldp) return;
 
             FILE *tmpfile = ldp->GetSystemFilePtr(fullname, "rb");
             if(tmpfile == NULL) {
-                LOG_MSG("BIOS file not accessible.");
+                WriteOut(MSG_Get("PROGRAM_LOADROM_CANT_OPEN"));
                 return;
             }
             fseek(tmpfile, 0L, SEEK_END);
-            if (ftell(tmpfile)>0x10000) {
-                LOG_MSG("BIOS file too large.");
+            if (ftell(tmpfile)>0x8000) {
+                WriteOut(MSG_Get("PROGRAM_LOADROM_TOO_LARGE"));
+                fclose(tmpfile);
                 return;
             }
             fseek(tmpfile, 0L, SEEK_SET);
-
-            PhysPt rom_base=PhysMake(0xc000,0);
-
-            Bit8u vga_buffer[0x10000];
-            Bitu data_written=0;
-            Bitu data_read = (Bitu)fread(vga_buffer, 1, 0x10000, tmpfile);
-            for (Bitu ct=0; ct<data_read; ct++) {
-                phys_writeb(rom_base+(data_written++),vga_buffer[ct]);
-            }
+            Bit8u rom_buffer[0x8000];
+            Bitu data_read = fread(rom_buffer, 1, 0x8000, tmpfile);
             fclose(tmpfile);
 
-            rom_base=PhysMake(0xf000,0);
-            phys_writeb(rom_base+0xf065,0xcf);
+            /* try to identify ROM type */
+            PhysPt rom_base = 0;
+            if (data_read >= 0x4000 && rom_buffer[0] == 0x55 && rom_buffer[1] == 0xaa &&
+                (rom_buffer[3] & 0xfc) == 0xe8 && strncmp((char*)(&rom_buffer[0x1e]), "IBM", 3) == 0) {
+
+                if (!IS_EGAVGA_ARCH) {
+                    WriteOut(MSG_Get("PROGRAM_LOADROM_INCOMPATIBLE"));
+                    return;
+                }
+                rom_base = PhysMake(0xc000, 0); // video BIOS
+            }
+            else if (data_read == 0x8000 && rom_buffer[0] == 0xe9 && rom_buffer[1] == 0x8f &&
+                rom_buffer[2] == 0x7e && strncmp((char*)(&rom_buffer[0x4cd4]), "IBM", 3) == 0) {
+
+                rom_base = PhysMake(0xf600, 0); // BASIC
+            }
+
+            if (rom_base) {
+                /* write buffer into ROM */
+                for (Bitu i=0; i<data_read; i++) phys_writeb((PhysPt)(rom_base + i), rom_buffer[i]);
+
+                if (rom_base == 0xc0000) {
+                    /* initialize video BIOS */
+                    phys_writeb(PhysMake(0xf000, 0xf065), 0xcf);
+                    reg_flags &= ~FLAG_IF;
+                    CALLBACK_RunRealFar(0xc000, 0x0003);
+                    LOG_MSG("Video BIOS ROM loaded and initialized.");
+                }
+                else WriteOut(MSG_Get("PROGRAM_LOADROM_BASIC_LOADED"));
+            }
+            else WriteOut(MSG_Get("PROGRAM_LOADROM_UNRECOGNIZED"));
         }
         catch(...) {
             return;
         }
-
-        reg_flags&=~FLAG_IF;
-        CALLBACK_RunRealFar(0xc000,0x0003);
     }
 };
 
-static void LDGFXROM_ProgramStart(Program * * make) {
-    *make=new LDGFXROM;
+static void LOADROM_ProgramStart(Program * * make) {
+    *make=new LOADROM;
 }
 
 const Bit8u freedos_mbr[] = {
@@ -1633,8 +1727,8 @@ public:
     }
 
     bool StartReadDisk(HANDLE f, OVERLAPPED* o, Bit8u* buffer, Bitu offset, Bitu size) { 
-        o->Offset = offset;
-        if (!ReadFile(f, buffer, size, NULL, o) && 
+        o->Offset = (DWORD)offset;
+        if (!ReadFile(f, buffer, (DWORD)size, NULL, o) &&
             (GetLastError()==ERROR_IO_PENDING)) return true;
         return false;
     }
@@ -1741,8 +1835,8 @@ restart_int:
 
                         if(retries) goto restart_int;
                         const Bit8u badfood[]="IMGMAKE BAD FLOPPY SECTOR \xBA\xAD\xF0\x0D";
-                        for(Bitu z = 0; z < 512/32; z++)
-                            memcpy(&data[512*k+z*32],badfood,32);
+                        for(Bit8u z = 0; z < 512/32; z++)
+                            memcpy(&data[512*k+z*32],badfood,31);
                         WriteOut("\b\b");
                         break;
                     }
@@ -1856,7 +1950,7 @@ restart_int:
         }
 
         Bit8u mediadesc = 0xF8; // media descriptor byte; also used to differ fd and hd
-        Bitu root_ent = 512; // FAT root directory entries: 512 is for harddisks
+        Bit16u root_ent = 512; // FAT root directory entries: 512 is for harddisks
         if(disktype=="fd_160") {
             c = 40; h = 1; s = 8; mediadesc = 0xFE; root_ent = 56; // root_ent?
         } else if(disktype=="fd_180") {
@@ -1931,7 +2025,7 @@ restart_int:
                     printHelp();
                     return;
                 }
-                sectors = (Bitu)(size / 512);
+                sectors = (unsigned int)(size / 512);
 
                 // Now that we finally have the proper size, figure out good CHS values
                 h=2;
@@ -1979,7 +2073,7 @@ restart_int:
         LOG_MSG(MSG_Get("PROGRAM_IMGMAKE_PRINT_CHS"),c,h,s);
 
         // do it again for fixed chs values
-        sectors = (Bitu)(size / 512);
+        sectors = (unsigned int)(size / 512);
 
         // create the image file
         f = fopen64(temp_line.c_str(),"wb+");
@@ -1987,7 +2081,7 @@ restart_int:
             WriteOut(MSG_Get("PROGRAM_IMGMAKE_CANNOT_WRITE"),temp_line.c_str());
             return;
         }
-        if(fseeko64(f,static_cast<unsigned long long>(size - 1ull),SEEK_SET)) {
+        if(fseeko64(f,static_cast<off_t>(size - 1ull),SEEK_SET)) {
             WriteOut(MSG_Get("PROGRAM_IMGMAKE_NOT_ENOUGH_SPACE"),size);
             return;
         }
@@ -2027,7 +2121,7 @@ restart_int:
                 // write partition table
                 fseeko64(f,0,SEEK_SET);
                 fwrite(&sbuf,512,1,f);
-                bootsect_pos = s;
+                bootsect_pos = (Bits)s;
             }
 
             // set boot sector values
@@ -2042,7 +2136,7 @@ restart_int:
             if(mediadesc == 0xF8) {
                 Bitu cval = 1;
                 while((sectors/cval) >= 65525) cval <<= 1;
-                sbuf[0x0d]=cval;
+                sbuf[0x0d]=(Bit8u)cval;
             } else sbuf[0x0d]=sectors/0x1000 + 1; // FAT12 can hold 0x1000 entries TODO
             // TODO small floppys have 2 sectors per cluster?
             // reserverd sectors: 1 ( the boot sector)
@@ -2061,13 +2155,13 @@ restart_int:
             Bitu clusters = (sectors-1)/sbuf[0x0d]; // TODO subtract root dir too maybe
             if(mediadesc == 0xF8) sect_per_fat = (clusters*2)/512+1;
             else sect_per_fat = ((clusters*3)/2)/512+1;
-            host_writew(&sbuf[0x16],sect_per_fat);
+            host_writew(&sbuf[0x16],(Bit16u)sect_per_fat);
             // sectors per track
             host_writew(&sbuf[0x18],s);
             // heads
             host_writew(&sbuf[0x1a],h);
             // hidden sectors
-            host_writed(&sbuf[0x1c],bootsect_pos);
+            host_writed(&sbuf[0x1c],(Bit32u)bootsect_pos);
             // sectors (large disk) - this is the same as partition length in MBR
             if(mediadesc == 0xF8) host_writed(&sbuf[0x20],sectors-s);
             // BIOS drive
@@ -2101,7 +2195,7 @@ restart_int:
             fwrite(&sbuf,512,1,f);
         }
         // write VHD footer if requested, largely copied from RAW2VHD program, no license was included
-        if((mediadesc = 0xF8) && (temp_line.find(".vhd"))) {
+        if((mediadesc == 0xF8) && (temp_line.find(".vhd"))) {
             int i;
             Bit8u footer[512];
             // basic information
@@ -2114,7 +2208,7 @@ restart_int:
 #if defined (_MSC_VER)
             *(Bit32u*)(footer+0x18) = SDL_SwapBE32((__time32_t)vhdtime);
 #else
-            *(Bit32u*)(footer+0x18) = SDL_SwapBE32((long)vhdtime);
+            *(Bit32u*)(footer+0x18) = Bit32u(SDL_SwapBE32((Uint32)vhdtime));
 #endif
             // size and geometry
             *(Bit64u*)(footer+0x30) = *(Bit64u*)(footer+0x28) = SDL_SwapBE64(size);
@@ -2239,7 +2333,7 @@ void LOADFIX::Run(void)
     }
     else {
         Bit16u segment;
-        Bit16u blocks = kb*1024/16;
+        Bit16u blocks = (Bit16u)(kb*1024/16);
         if (DOS_AllocateMemory(&segment,&blocks)) {
             DOS_MCB mcb((Bit16u)(segment-1));
             mcb.SetPSPSeg(0x40);            // use fake segment
@@ -2399,10 +2493,6 @@ public:
             DisplayMount();
             return;
         }
-        if(cmd->FindExist("special",false)) {
-            WriteOut(MSG_Get("PROGRAM_INTRO_SPECIAL"));
-            return;
-        }
 
         if(cmd->FindExist("usage",false)) { DisplayUsage(); return; }
         Bit8u c;Bit16u n=1;
@@ -2420,7 +2510,6 @@ menufirst:
         DisplayIntro();
         CURSOR("BASIC")
         CURSOR("CDROM")
-        CURSOR("SPECIAL")
         CURSOR("USAGE")
         DisplayMenuNone(); // None
         CURSOR("INFO")
@@ -2429,7 +2518,6 @@ menufirst:
 
         if (menuname=="BASIC") goto basic;
         else if (menuname=="CDROM") goto cdrom;
-        else if (menuname=="SPECIAL") goto special;
         else if (menuname=="USAGE") goto usage;
         else if (menuname=="INFO") goto info;
         else if (menuname=="QUIT") goto quit;
@@ -2461,22 +2549,9 @@ cdrom:
         CON_IN(&c);
         do switch (c) {
             case 0x48|0x80: menuname="BASIC"; goto menufirst; // Up
-            case 0x50|0x80: menuname="SPECIAL"; goto menufirst; // Down
-            case 0xD:   // Run
-                WriteOut(MSG_Get("PROGRAM_INTRO_CDROM"));
-                DOS_ReadFile (STDIN,&c,&n);
-                goto menufirst;
-        } while (CON_IN(&c));
-
-special:
-        menuname="SPECIAL";
-        WriteOut(MSG_Get("PROGRAM_INTRO_MENU_SPECIAL_HELP")); 
-        CON_IN(&c);
-        do switch (c) {
-            case 0x48|0x80: menuname="CDROM"; goto menufirst; // Up
             case 0x50|0x80: menuname="USAGE"; goto menufirst; // Down
             case 0xD:   // Run
-                WriteOut(MSG_Get("PROGRAM_INTRO_SPECIAL"));
+                WriteOut(MSG_Get("PROGRAM_INTRO_CDROM"));
                 DOS_ReadFile (STDIN,&c,&n);
                 goto menufirst;
         } while (CON_IN(&c));
@@ -2486,7 +2561,7 @@ usage:
         WriteOut(MSG_Get("PROGRAM_INTRO_MENU_USAGE_HELP")); 
         CON_IN(&c);
         do switch (c) {
-            case 0x48|0x80: menuname="SPECIAL"; goto menufirst; // Up
+            case 0x48|0x80: menuname="CDROM"; goto menufirst; // Down
             case 0x50|0x80: menuname="INFO"; goto menufirst; // Down
             case 0xD:   // Run
                 DisplayUsage();
@@ -2779,11 +2854,12 @@ public:
                 WriteOut_NoParsing(MSG_Get("PROGRAM_IMGMOUNT_SPECIFY_DRIVE"));
                 return;
             }
-            drive=toupper(temp_line[0]);
-            if (!isalpha(drive)) {
+            int i_drive = toupper(temp_line[0]);
+            if (!isalpha(i_drive) || (i_drive - 'A') >= DOS_DRIVES || (i_drive - 'A') < 0) {
                 WriteOut_NoParsing(MSG_Get("PROGRAM_IMGMOUNT_SPECIFY_DRIVE"));
                 return;
             }
+            drive = static_cast<char>(i_drive);
         } else if (fstype=="none") {
             cmd->FindCommand(1,temp_line);
             if ((temp_line.size() > 1) || (!isdigit(temp_line[0]))) {
@@ -3050,7 +3126,7 @@ private:
                     }
                 }
             }
-            if ((test.st_mode & S_IFDIR)) {
+            if (S_ISDIR(test.st_mode)) {
                 WriteOut(MSG_Get("PROGRAM_IMGMOUNT_MOUNT"));
                 return;
             }
@@ -3402,7 +3478,7 @@ private:
                     vhdImage = NULL;
                 }
                 else {
-                    newDrive = new fatDrive(paths[i].c_str(), sizes[0], sizes[1], sizes[2], sizes[3], options);
+                    newDrive = new fatDrive(paths[i].c_str(), (Bit32u)sizes[0], (Bit32u)sizes[1], (Bit32u)sizes[2], (Bit32u)sizes[3], options);
                 }
                 imgDisks.push_back(newDrive);
                 if (!(dynamic_cast<fatDrive*>(newDrive))->created_successfully) {
@@ -3437,7 +3513,7 @@ private:
         imageDiskMemory* dsk = NULL;
         //if chs not specified
         if (sizes[1] == 0) {
-            Bit32u imgSizeK = sizes[0];
+            Bit32u imgSizeK = (Bit32u)sizes[0];
             //default to 1.44mb floppy
             if (forceFloppy && imgSizeK == 0) imgSizeK = 1440;
             //search for floppy geometry that matches specified size in KB
@@ -3486,7 +3562,7 @@ private:
                     WriteOut("Floppy size not recognized\n");
                     return NULL;
                 }
-                dsk = new imageDiskMemory(sizes[3], sizes[2], sizes[1], sizes[0]);
+                dsk = new imageDiskMemory((Bit16u)sizes[3], (Bit16u)sizes[2], (Bit16u)sizes[1], (Bit16u)sizes[0]);
             }
         }
         if (!dsk->active) {
@@ -3564,7 +3640,7 @@ private:
     bool AttachToBiosAndIdeByIndex(imageDisk* image, const unsigned char bios_drive_index, const unsigned char ide_index, const bool ide_slave) {
         if (!AttachToBiosByIndex(image, bios_drive_index)) return false;
         //if hard drive image, and if ide controller is specified
-        if (bios_drive_index >= 2 || bios_drive_index < MAX_DISK_IMAGES) {
+        if (bios_drive_index >= 2 && bios_drive_index < MAX_DISK_IMAGES) {
             IDE_Hard_Disk_Attach((signed char)ide_index, ide_slave, bios_drive_index);
             updateDPT();
         }
@@ -3646,16 +3722,16 @@ private:
         DriveManager::InitializeDrive(drive - 'A');
 
         // Set the correct media byte in the table 
-        mem_writeb(Real2Phys(dos.tables.mediaid) + ((unsigned int)drive - 'A') * 2u, mediaid);
+        mem_writeb(Real2Phys(dos.tables.mediaid) + ((unsigned int)drive - 'A') * 9u, mediaid);
 
         /* Command uses dta so set it to our internal dta */
         RealPt save_dta = dos.dta();
         dos.dta(dos.tables.tempdta);
 
         for (ct = 0; ct < imgDisks.size(); ct++) {
-            DriveManager::CycleAllDisks();
+            DriveManager::CycleDisks(drive - 'A', (ct == (imgDisks.size() - 1)));
 
-            char root[4] = { drive, ':', '\\', 0 };
+            char root[7] = { drive, ':', '\\', '*', '.', '*', 0 };
             DOS_FindFirst(root, DOS_ATTR_VOLUME); // force obtaining the label and saving it in dirCache
         }
         dos.dta(save_dta);
@@ -3820,7 +3896,7 @@ private:
         DriveManager::InitializeDrive(drive - 'A');
 
         // Set the correct media byte in the table 
-        mem_writeb(Real2Phys(dos.tables.mediaid) + ((unsigned int)drive - 'A') * 2u, mediaid);
+        mem_writeb(Real2Phys(dos.tables.mediaid) + ((unsigned int)drive - 'A') * 9u, mediaid);
 
         // If instructed, attach to IDE controller as ATAPI CD-ROM device
         if (ide_index >= 0) IDE_CDROM_Attach(ide_index, ide_slave, drive - 'A');
@@ -3887,7 +3963,7 @@ private:
             sectors = (Bit64u)qcow2_header.size / (Bit64u)sizes[0];
             imagesize = (Bit32u)(qcow2_header.size / 1024L);
             setbuf(newDisk, NULL);
-            newImage = new QCow2Disk(qcow2_header, newDisk, (Bit8u *)fileName, imagesize, sizes[0], (imagesize > 2880));
+            newImage = new QCow2Disk(qcow2_header, newDisk, (Bit8u *)fileName, imagesize, (Bit32u)sizes[0], (imagesize > 2880));
         }
         else {
             char tmp[256];
@@ -3973,7 +4049,7 @@ private:
         LOG(LOG_MISC, LOG_NORMAL)("Mounting image as C/H/S %u/%u/%u with %u bytes/sector",
             (unsigned int)sizes[3], (unsigned int)sizes[2], (unsigned int)sizes[1], (unsigned int)sizes[0]);
 
-        if (imagesize > 2880) newImage->Set_Geometry(sizes[2], sizes[3], sizes[1], sizes[0]);
+        if (imagesize > 2880) newImage->Set_Geometry((Bit32u)sizes[2], (Bit32u)sizes[3], (Bit32u)sizes[1], (Bit32u)sizes[0]);
         if (reserved_cylinders > 0) newImage->Set_Reserved_Cylinders((Bitu)reserved_cylinders);
 
         return newImage;
@@ -4302,13 +4378,11 @@ void DOS_SetupPrograms(void) {
     }
     MSG_Add("PROGRAM_INTRO_MENU_BASIC","Basic mount");
     MSG_Add("PROGRAM_INTRO_MENU_CDROM","CD-ROM support");
-    MSG_Add("PROGRAM_INTRO_MENU_SPECIAL","Special keys");
     MSG_Add("PROGRAM_INTRO_MENU_USAGE","Usage");
     MSG_Add("PROGRAM_INTRO_MENU_INFO","Information");
     MSG_Add("PROGRAM_INTRO_MENU_QUIT","Quit");
     MSG_Add("PROGRAM_INTRO_MENU_BASIC_HELP","\n\033[1m   \033[1m\033[KMOUNT allows you to connect real hardware to DOSBox's emulated PC.\033[0m\n");
     MSG_Add("PROGRAM_INTRO_MENU_CDROM_HELP","\n\033[1m   \033[1m\033[KTo mount your CD-ROM in DOSBox, you have to specify some additional options\n   when mounting the CD-ROM.\033[0m\n");
-    MSG_Add("PROGRAM_INTRO_MENU_SPECIAL_HELP","\n\033[1m   \033[1m\033[KSpecial key combinations used in DOSBox.\033[0m\n");
     MSG_Add("PROGRAM_INTRO_MENU_USAGE_HELP","\n\033[1m   \033[1m\033[KAn overview of the command line options you can give to DOSBox.\033[0m\n");
     MSG_Add("PROGRAM_INTRO_MENU_INFO_HELP","\n\033[1m   \033[1m\033[KHow to get more information about DOSBox.\033[0m\n");
     MSG_Add("PROGRAM_INTRO_MENU_QUIT_HELP","\n\033[1m   \033[1m\033[KExit from Intro.\033[0m\n");
@@ -4475,31 +4549,6 @@ void DOS_SetupPrograms(void) {
         "Replace the \033[33;1m0\033[0m in \033[34;1m-usecd \033[33m0\033[0m with the number reported for your CD-ROM if you type:\n"
         "\033[34;1mmount -cd\033[0m\n"
         );
-    MSG_Add("PROGRAM_INTRO_SPECIAL",
-        "\033[2J\033[32;1mSpecial keys:\033[0m\n"
-        "These are the default keybindings.\n"
-        "They can be changed in the \033[33mkeymapper\033[0m.\n"
-        "\n"
-        "\033[33;1mALT-ENTER\033[0m   : Go full screen and back.\n"
-        "\033[33;1mALT-PAUSE\033[0m   : Pause DOSBox.\n"
-        "\033[33;1mCTRL-1~4\033[0m    : Use normal/full/dynamic/simple core.\n"
-        "\033[33;1mCTRL-=\033[0m      : Maximize CPU cycles.\n"
-        "\033[33;1mALT-F11\033[0m     : Unlock/Lock speed.\n"
-        "\033[33;1mCTRL-F1\033[0m     : Start the \033[33mkeymapper\033[0m.\n"
-        "\033[33;1mCTRL-F4\033[0m     : Update directory cache for all drives! Swap mounted disk-image.\n"
-        "\033[33;1mCTRL-ALT-F5\033[0m : Start/Stop creating a movie of the screen.\n"
-        "\033[33;1mCTRL-F5\033[0m     : Save a screenshot.\n"
-        "\033[33;1mCTRL-F6\033[0m     : Start/Stop recording sound output to a wave file.\n"
-        "\033[33;1mCTRL-ALT-F7\033[0m : Start/Stop recording of OPL commands.\n"
-        "\033[33;1mCTRL-ALT-F8\033[0m : Start/Stop the recording of raw MIDI commands.\n"
-        "\033[33;1mCTRL-F7\033[0m     : Decrease frameskip.\n"
-        "\033[33;1mCTRL-F8\033[0m     : Increase frameskip.\n"
-        "\033[33;1mCTRL-F9\033[0m     : Kill DOSBox.\n"
-        "\033[33;1mCTRL-F10\033[0m    : Capture/Release the mouse.\n"
-        "\033[33;1mCTRL-F11\033[0m    : Slow down emulation (Decrease DOSBox Cycles).\n"
-        "\033[33;1mCTRL-F12\033[0m    : Speed up emulation (Increase DOSBox Cycles).\n"
-        "\033[33;1mALT-F12\033[0m     : Unlock speed (turbo button/fast forward).\n"
-        );
     MSG_Add("PROGRAM_BOOT_NOT_EXIST","Bootdisk file does not exist.  Failing.\n");
     MSG_Add("PROGRAM_BOOT_NOT_OPEN","Cannot open bootdisk file.  Failing.\n");
     MSG_Add("PROGRAM_BOOT_WRITE_PROTECTED","Image file is read-only! Might create problems.\n");
@@ -4520,6 +4569,13 @@ void DOS_SetupPrograms(void) {
     MSG_Add("PROGRAM_BOOT_CART_WO_PCJR","PCjr cartridge found, but machine is not PCjr");
     MSG_Add("PROGRAM_BOOT_CART_LIST_CMDS","Available PCjr cartridge commandos:%s");
     MSG_Add("PROGRAM_BOOT_CART_NO_CMDS","No PCjr cartridge commandos found");
+
+    MSG_Add("PROGRAM_LOADROM_SPECIFY_FILE","Must specify ROM file to load.\n");
+    MSG_Add("PROGRAM_LOADROM_CANT_OPEN","ROM file not accessible.\n");
+    MSG_Add("PROGRAM_LOADROM_TOO_LARGE","ROM file too large.\n");
+    MSG_Add("PROGRAM_LOADROM_INCOMPATIBLE","Video BIOS not supported by machine type.\n");
+    MSG_Add("PROGRAM_LOADROM_UNRECOGNIZED","ROM file not recognized.\n");
+    MSG_Add("PROGRAM_LOADROM_BASIC_LOADED","BASIC ROM loaded.\n");
 
     MSG_Add("VHD_ERROR_OPENING", "Could not open the specified VHD file.\n");
     MSG_Add("VHD_INVALID_DATA", "The specified VHD file is corrupt and cannot be opened.\n");
@@ -4653,7 +4709,7 @@ void DOS_SetupPrograms(void) {
     PROGRAMS_MakeFile("BOOT.COM",BOOT_ProgramStart);
 
     if (!IS_PC98_ARCH)
-        PROGRAMS_MakeFile("LDGFXROM.COM", LDGFXROM_ProgramStart);
+        PROGRAMS_MakeFile("LOADROM.COM", LOADROM_ProgramStart);
 
     PROGRAMS_MakeFile("IMGMAKE.COM", IMGMAKE_ProgramStart);
     PROGRAMS_MakeFile("IMGMOUNT.COM", IMGMOUNT_ProgramStart);

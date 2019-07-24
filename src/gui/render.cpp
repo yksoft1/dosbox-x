@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -38,11 +38,14 @@
 #include <emmintrin.h>
 #endif
 
-Render_t render;
-Bitu last_gfx_flags = 0;
-ScalerLineHandler_t RENDER_DrawLine;
+Render_t                                render;
+Bitu                                    last_gfx_flags = 0;
+ScalerLineHandler_t                     RENDER_DrawLine;
 
-void RENDER_CallBack( GFX_CallBackFunctions_t function );
+uint32_t                                GFX_palette32bpp[256] = {0};
+
+unsigned int                            GFX_GetBShift();
+void                                    RENDER_CallBack( GFX_CallBackFunctions_t function );
 
 static void Check_Palette(void) {
     /* Clean up any previous changed palette data */
@@ -54,46 +57,42 @@ static void Check_Palette(void) {
         return;
     Bitu i;
     switch (render.scale.outMode) {
-    case scalerMode8:
-        GFX_SetPalette(render.pal.first,render.pal.last-render.pal.first+1,(GFX_PalEntry *)&render.pal.rgb[render.pal.first]);
-        break;
-    case scalerMode15:
-    case scalerMode16:
-        for (i=render.pal.first;i<=render.pal.last;i++) {
-            Bit8u r=render.pal.rgb[i].red;
-            Bit8u g=render.pal.rgb[i].green;
-            Bit8u b=render.pal.rgb[i].blue;
-            Bit16u newPal = GFX_GetRGB(r,g,b);
-            if (newPal != render.pal.lut.b16[i]) {
-                render.pal.changed = true;
-                render.pal.modified[i] = 1;
-                render.pal.lut.b16[i] = newPal;
+        case scalerMode8:
+            GFX_SetPalette(render.pal.first,render.pal.last-render.pal.first+1,(GFX_PalEntry *)&render.pal.rgb[render.pal.first]);
+            break;
+        case scalerMode15:
+        case scalerMode16:
+            for (i=render.pal.first;i<=render.pal.last;i++) {
+                Bit8u r=render.pal.rgb[i].red;
+                Bit8u g=render.pal.rgb[i].green;
+                Bit8u b=render.pal.rgb[i].blue;
+                Bit16u newPal = (Bit16u)GFX_GetRGB(r,g,b);
+                if (newPal != render.pal.lut.b16[i]) {
+                    render.pal.changed = true;
+                    render.pal.modified[i] = 1;
+                    render.pal.lut.b16[i] = newPal;
+                }
             }
-        }
-        break;
-    case scalerMode32:
-    default:
-        for (i=render.pal.first;i<=render.pal.last;i++) {
-            Bit8u r=render.pal.rgb[i].red;
-            Bit8u g=render.pal.rgb[i].green;
-            Bit8u b=render.pal.rgb[i].blue;
-            Bit32u newPal = GFX_GetRGB(r,g,b);
-            if (newPal != render.pal.lut.b32[i]) {
-                render.pal.changed = true;
-                render.pal.modified[i] = 1;
-                render.pal.lut.b32[i] = newPal;
+            break;
+        case scalerMode32:
+        default:
+            for (i=render.pal.first;i<=render.pal.last;i++) {
+                Bit8u r=render.pal.rgb[i].red;
+                Bit8u g=render.pal.rgb[i].green;
+                Bit8u b=render.pal.rgb[i].blue;
+                Bit32u newPal = (Bit32u)GFX_GetRGB(r,g,b);
+                if (newPal != render.pal.lut.b32[i]) {
+                    render.pal.changed = true;
+                    render.pal.modified[i] = 1;
+                    render.pal.lut.b32[i] = newPal;
+                }
             }
-        }
-        break;
+            break;
     }
     /* Setup pal index to startup values */
     render.pal.first=256;
     render.pal.last=0;
 }
-
-uint32_t GFX_palette32bpp[256] = {0};
-
-unsigned int GFX_GetBShift();
 
 void RENDER_SetPal(Bit8u entry,Bit8u red,Bit8u green,Bit8u blue) {
     if (GFX_GetBShift() == 0) {
@@ -125,8 +124,8 @@ static void RENDER_EmptyLineHandler(const void * src) {
 # define sse2_available (1) /* SSE2 is always available on x86_64 */
 #else
 # ifdef __SSE__
-extern bool				sse1_available;
-extern bool				sse2_available;
+extern bool             sse1_available;
+extern bool             sse2_available;
 # endif
 #endif
 /*END HACK*/
@@ -189,12 +188,12 @@ static unsigned int RENDER_scaler_countdown = 0;
 static const unsigned int RENDER_scaler_countdown_init = 12;
 
 static INLINE void cn_ScalerAddLines( Bitu changed, Bitu count ) {
-	if ((Scaler_ChangedLineIndex & 1) == changed ) {
-		Scaler_ChangedLines[Scaler_ChangedLineIndex] += count;
-	} else {
-		Scaler_ChangedLines[++Scaler_ChangedLineIndex] = count;
-	}
-	render.scale.outWrite += render.scale.outPitch * count;
+    if ((Scaler_ChangedLineIndex & 1) == changed ) {
+        Scaler_ChangedLines[Scaler_ChangedLineIndex] += count;
+    } else {
+        Scaler_ChangedLines[++Scaler_ChangedLineIndex] = count;
+    }
+    render.scale.outWrite += render.scale.outPitch * count;
 }
 
 static void RENDER_DrawLine_countdown(const void * s);
@@ -386,7 +385,7 @@ static Bitu MakeAspectTable(Bitu skip,Bitu height,double scaley,Bitu miny) {
             Bitu templines = (Bitu)lines;
             lines -= templines;
             linesadded += templines;
-            Scaler_Aspect[i] = templines;
+            Scaler_Aspect[i] = (Bit8u)templines;
         } else {
             Scaler_Aspect[i] = 0;
         }
@@ -502,18 +501,42 @@ void RENDER_Reset( void ) {
             else if (render.scale.size == 3)
                 simpleBlock = &ScaleScan3x;
             break;
+        case scalerOpGray:
+            if (render.scale.size == 1){
+			        simpleBlock = &ScaleGrayNormal;
+            }else if (render.scale.size == 2){
+			        simpleBlock = &ScaleGray2x;
+            }
+        break;
         default:
             break;
         }
 #endif
     } else if (dblw && !render.scale.hardware) {
+      if(scalerOpGray == render.scale.op){
+        simpleBlock = &ScaleGrayDw;
+      }else{
         simpleBlock = &ScaleNormalDw;
+      }
     } else if (dblh && !render.scale.hardware) {
-        simpleBlock = &ScaleNormalDh;
+		//Check whether tv2x and scan2x is selected
+		if(scalerOpGray == render.scale.op){
+			simpleBlock = &ScaleGrayDh;
+    }else if(scalerOpTV == render.scale.op){
+			simpleBlock = &ScaleTVDh;
+        }else if(scalerOpScan == render.scale.op){
+			simpleBlock = &ScaleScanDh;
+        }else{
+			simpleBlock = &ScaleNormalDh;
+		}
     } else  {
 forcenormal:
         complexBlock = 0;
-        simpleBlock = &ScaleNormal1x;
+        if(scalerOpGray==render.scale.op){
+          simpleBlock = &ScaleGrayNormal;
+        }else{
+          simpleBlock = &ScaleNormal1x;
+        }
     }
     if (complexBlock) {
 #if RENDER_USE_ADVANCED_SCALERS>1
@@ -610,7 +633,7 @@ forcenormal:
             } else if(dblw)
             gfx_scalew *= 4;
         }
-        height = MakeAspectTable(skip, render.src.height, yscale, yscale );
+        height = MakeAspectTable(skip, render.src.height, (double)yscale, yscale );
     } else {
         // Print a warning when hardware scalers are selected, hopefully the first
         // video mode will not have dblh or dblw or AR will be wrong
@@ -623,11 +646,11 @@ forcenormal:
             height = MakeAspectTable( skip, render.src.height, gfx_scaleh, yscale );
         } else {
             gfx_flags &= ~GFX_CAN_RANDOM;       //Hardware surface when possible
-            height = MakeAspectTable( skip, render.src.height, yscale, yscale);
+            height = MakeAspectTable( skip, render.src.height, (double)yscale, yscale);
         }
     }
 /* update the aspect ratio */
-    sdl.srcAspect.x = render.src.width * (render.src.dblw ? 2 : 1);
+    sdl.srcAspect.x = (int)(render.src.width * (render.src.dblw ? 2 : 1));
     sdl.srcAspect.y = (int)floor((render.src.height * (render.src.dblh ? 2 : 1) * render.src.ratio) + 0.5);
     sdl.srcAspect.xToY = (double)sdl.srcAspect.x / sdl.srcAspect.y;
     sdl.srcAspect.yToX = (double)sdl.srcAspect.y / sdl.srcAspect.x;
@@ -757,7 +780,7 @@ void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps,double scrn_ratio)
     LOG_MSG("pixratio %1.3f, dw %s, dh %s",ratio,dblw?"true":"false",dblh?"true":"false");
 
     if ( ratio > 1.0 ) {
-        double target = height * ratio + 0.1;
+        double target = height * ratio + 0.025;
         ratio = target / height;
     } else {
         //This would alter the width of the screen, we don't care about rounding errors here
@@ -898,7 +921,7 @@ void RENDER_UpdateFromScalerSetting(void) {
 #endif
 
     bool p_forced = render.scale.forced;
-    unsigned int p_size = render.scale.size;
+    unsigned int p_size = (unsigned int)(render.scale.size);
     bool p_hardware = render.scale.hardware;
     unsigned int p_op = render.scale.op;
 
@@ -928,6 +951,8 @@ void RENDER_UpdateFromScalerSetting(void) {
     else if (scaler == "rgb3x"){ render.scale.op = scalerOpRGB; render.scale.size = 3; render.scale.hardware=false; }
     else if (scaler == "scan2x"){ render.scale.op = scalerOpScan; render.scale.size = 2; render.scale.hardware=false; }
     else if (scaler == "scan3x"){ render.scale.op = scalerOpScan; render.scale.size = 3; render.scale.hardware=false; }
+    else if (scaler == "gray"){ render.scale.op = scalerOpGray; render.scale.size = 1; render.scale.hardware=false; }
+    else if (scaler == "gray2x"){ render.scale.op = scalerOpGray; render.scale.size = 2; render.scale.hardware=false; }
 #endif
     else if (scaler == "hardware_none") { render.scale.op = scalerOpNormal; render.scale.size = 1; render.scale.hardware=true; }
     else if (scaler == "hardware2x") { render.scale.op = scalerOpNormal; render.scale.size = 4; render.scale.hardware=true; }
@@ -968,6 +993,26 @@ void RENDER_Init() {
     vga.draw.doublescan_set=section->Get_bool("doublescan");
     vga.draw.char9_set=section->Get_bool("char9");
 
+	//Set monochrome mode color and brightness
+	vga.draw.monochrome_pal=0;
+	vga.draw.monochrome_bright=1;
+  Prop_multival* prop = section->Get_multival("monochrome_pal");
+  std::string s_bright = prop->GetSection()->Get_string("bright");
+  std::string s_color = prop->GetSection()->Get_string("color");
+  LOG_MSG("monopal: %s, %s", s_color.c_str(), s_bright.c_str());
+	if("bright"==s_bright){
+		vga.draw.monochrome_bright=0;
+	}
+	if("green"==s_color){
+		vga.draw.monochrome_pal=0;
+	}else if("amber"==s_color){
+		vga.draw.monochrome_pal=1;
+	}else if("gray"==s_color){
+		vga.draw.monochrome_pal=2;
+	}else if("white"==s_color){
+		vga.draw.monochrome_pal=3;
+	}
+
     //For restarting the renderer.
     static bool running = false;
     int aspect = render.aspect;
@@ -1006,13 +1051,16 @@ void RENDER_Init() {
     std::string cline;
     std::string scaler;
     //Check for commandline paramters and parse them through the configclass so they get checked against allowed values
-    if (control->cmdline->FindString("-scaler",cline,false)) {
+    if (control->cmdline->FindString("-scaler",cline,true)) {
         section->HandleInputline(std::string("scaler=") + cline);
-    } else if (control->cmdline->FindString("-forcescaler",cline,false)) {
+    } else if (control->cmdline->FindString("-forcescaler",cline,true)) {
         section->HandleInputline(std::string("scaler=") + cline + " forced");
     }
 
     RENDER_UpdateFromScalerSetting();
+
+    vga_alt_new_mode = control->opt_alt_vga_render || section->Get_bool("alt render");
+    if (vga_alt_new_mode) LOG_MSG("Alternative VGA render engine not yet fully implemented!");
 
     render.autofit=section->Get_bool("autofit");
 

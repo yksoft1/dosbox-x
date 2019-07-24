@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 #include <string>
@@ -37,7 +37,6 @@ void DOSBox_SetMenu(void);
 void DOSBox_NoMenu(void);
 void DOSBox_RefreshMenu(void);
 void ToggleMenu(bool pressed);
-void D3D_PS(void);
 void DOSBox_CheckOS(int &id, int &major, int &minor);
 void MountDrive(char drive, const char drive2[DOS_PATHLENGTH]);
 void MountDrive_2(char drive, const char drive2[DOS_PATHLENGTH], std::string drive_type);
@@ -45,10 +44,6 @@ void MENU_Check_Drive(HMENU handle, int cdrom, int floppy, int local, int image,
 bool MENU_SetBool(std::string secname, std::string value);
 void MENU_swapstereo(bool enabled);
 void* GetSetSDLValue(int isget, std::string target, void* setval);
-void Go_Boot(const char boot_drive[_MAX_DRIVE]);
-void Go_Boot2(const char boot_drive[_MAX_DRIVE]);
-void OpenFileDialog(char * path_arg);
-void OpenFileDialog_Img(char drive);
 void GFX_SetTitle(Bit32s cycles, Bits frameskip, Bits timing, bool paused);
 void change_output(int output);
 void res_input(bool type, const char * res);
@@ -111,7 +106,7 @@ void DOSBox_NoMenu(void);
 # define DOSBOXMENU_TYPE    DOSBOXMENU_SDLDRAW
 #elif defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
 # define DOSBOXMENU_TYPE    DOSBOXMENU_HMENU
-#elif defined(MACOSX) && !defined(C_SDL2)
+#elif defined(MACOSX)
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NSMENU
 #elif defined(C_SDL2) /* SDL 2.x only */
 # define DOSBOXMENU_TYPE    DOSBOXMENU_SDLDRAW
@@ -119,6 +114,11 @@ void DOSBox_NoMenu(void);
 # define DOSBOXMENU_TYPE    DOSBOXMENU_SDLDRAW
 #else
 # define DOSBOXMENU_TYPE    DOSBOXMENU_NULL
+#endif
+
+/* Whether or not the menu exists, and is NOT drawn by ourself (Windows and Mac OS X) */
+#if DOSBOXMENU_TYPE == DOSBOXMENU_HMENU || DOSBOXMENU_TYPE == DOSBOXMENU_NSMENU
+# define DOSBOXMENU_EXTERNALLY_MANAGED
 #endif
 
 void GUI_Shortcut(int select);
@@ -246,6 +246,8 @@ class DOSBoxMenu {
                 bool                    needRedraw = false;
                 bool                    itemHilight = false;
                 bool                    itemVisible = false;
+                bool                    itemHoverDrawn = false;
+                bool                    itemHilightDrawn = false;
                 bool                    borderTop = false;
             public:
                 void                    removeFocus(DOSBoxMenu &menu);
@@ -266,12 +268,12 @@ class DOSBoxMenu {
                 }
 #endif
             protected:
-                item&                   allocate(const item_handle_t id,const enum item_type_t type,const std::string &name);
+                item&                   allocate(const DOSBoxMenu::item_handle_t id, const enum item_type_t new_type, const std::string& new_name);
                 void                    deallocate(void);
             public:
                 inline bool checkResetRedraw(void) {
 #if DOSBOXMENU_TYPE == DOSBOXMENU_SDLDRAW
-					bool r = needRedraw;
+					bool r = needRedraw || (itemHilight != itemHilightDrawn) || (itemHover != itemHoverDrawn);
                     needRedraw = false;
                     return r;
 #else
@@ -493,7 +495,8 @@ class DOSBoxMenu {
         static constexpr size_t         menuBarHeightBase = (16 + 1);
         size_t                          menuBarHeight = menuBarHeightBase;
     public:
-        size_t                          screenWidth = 320;
+        size_t                          screenWidth = 640;
+        size_t                          screenHeight = 400;
     public:
         static constexpr size_t         fontCharWidthBase = 8;
         static constexpr size_t         fontCharHeightBase = 16;
@@ -514,6 +517,8 @@ class DOSBoxMenu {
 };
 
 extern DOSBoxMenu mainMenu;
+
+void DOSBox_SetMenu(DOSBoxMenu &altMenu);
 
 #endif /* MENU_DOSBOXMENU_H */
 

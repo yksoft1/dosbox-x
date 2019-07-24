@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2013  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -92,7 +92,8 @@ public:
 		opt_resetmapper = false;
 		opt_startmapper = false;
         opt_fastbioslogo = false;
-		opt_date_host_forced = false;
+        opt_alt_vga_render = false;
+        opt_date_host_forced = false;
 		opt_disable_numlock_check = false;
 		opt_disable_dpi_awareness = false;
         opt_time_limit = -1;
@@ -121,6 +122,7 @@ public:
 	bool opt_disable_dpi_awareness;
 	bool opt_disable_numlock_check;
 	bool opt_date_host_forced;
+    bool opt_alt_vga_render;
     bool opt_fastbioslogo;
 	bool opt_break_start;
 	bool opt_erasemapper;

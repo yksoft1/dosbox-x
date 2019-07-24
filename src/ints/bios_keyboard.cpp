@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2002-2015  The DOSBox Team
+ *  Copyright (C) 2002-2019  The DOSBox Team
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,7 +13,7 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA.
  */
 
 
@@ -594,7 +594,7 @@ extern bool pc98_force_ibm_layout;
  * NFER         0x5100      0xA100      0xB100  0x5100  0x5100  0xA100
  * GRPH         --          --          --      --      --      --
  * TAB          0x0F09      0x0F09      0x0F09  0x0F09  0x0F09  0x0F09
- * - / 口       --          --          --      --      0x33DB  0x33DB      Kana+CTRL = 0x331F
+ * - / 口       --          0x335F      0x331F  --      0x33DB  0x33DB      Kana+CTRL = 0x331F
  */
 static Bitu IRQ1_Handler_PC98(void) {
     unsigned char sc_8251,status;
@@ -647,6 +647,9 @@ static Bitu IRQ1_Handler_PC98(void) {
                 c &= ~b;
 
             mem_writeb(o,c);
+
+            /* mirror CTRL+GRAPH+KANA+CAPS+SHIFT at 0x53A which is returned by INT 18h AH=2 */
+            if (o == 0x538) mem_writeb(0x53A,c);
         }
 
         /* NOTES:
@@ -1146,6 +1149,14 @@ static Bitu IRQ1_Handler_PC98(void) {
                         add_key(scan_add + '/');
                 }
                 break;
+            case 0x33: //  _ / Ro
+                if (pressed) {
+                    if (modflags & 1) /* shift */
+                        add_key(scan_add + '_');
+                    else
+                        { /*nothing*/ }
+                }
+                break;
             case 0x34: // <space>
                 if (pressed) {
                     add_key(scan_add + ' ');
@@ -1238,6 +1249,21 @@ static Bitu IRQ1_Handler_PC98(void) {
                 }
                 break;
 
+            case 0x52: // VF1           vf･1    ???     ???     ???     ???
+            case 0x53: // VF2           vf･2    ???     ???     ???     ???
+            case 0x54: // VF3           vf･3    ???     ???     ???     ???
+            case 0x55: // VF4           vf･4    ???     ???     ???     ???
+            case 0x56: // VF5           vf･5    ???     ???     ???     ???
+                if (pressed) {
+                    if (modflags & 0x10) /* CTRL */
+                        add_key(scan_add + 0x8000); /* 0xD2-0xD6 */
+                    else if (modflags & 1) /* SHIFT */
+                        add_key(scan_add + 0x7000); /* 0xC2-0xC6 */
+                    else
+                        add_key(scan_add + 0x0000); /* 0x52-0x56 */
+                }
+                break;
+
             case 0x60: // STOP
                 // does not pass it on
                 break;
@@ -1269,6 +1295,9 @@ static Bitu IRQ1_Handler_PC98(void) {
                 break;
 
             case 0x72: // kana. do nothing
+                break;
+
+            case 0x73: // graph. do nothing
                 break;
 
             case 0x74: // left/right ctrl. do nothing
