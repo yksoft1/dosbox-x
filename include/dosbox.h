@@ -200,4 +200,65 @@ extern Bit32u guest_msdos_LoL;
 extern Bit16u guest_msdos_mcb_chain;
 extern int boothax;
 
+/* C++11 user-defined literal, to help with byte units */
+typedef unsigned long long bytecount_t;
+
+static inline constexpr bytecount_t operator "" _bytes(const bytecount_t x) {
+    return x;
+}
+
+static inline constexpr bytecount_t operator "" _parabytes(const bytecount_t x) { /* AKA bytes per segment increment in real mode */
+    return x << bytecount_t(4u);
+}
+
+static inline constexpr bytecount_t operator "" _kibibytes(const bytecount_t x) {
+    return x << bytecount_t(10u);
+}
+
+static inline constexpr bytecount_t operator "" _pagebytes(const bytecount_t x) { /* bytes per 4KB page in protected mode */
+    return x << bytecount_t(12u);
+}
+
+static inline constexpr bytecount_t operator "" _mibibytes(const bytecount_t x) {
+    return x << bytecount_t(20u);
+}
+
+static inline constexpr bytecount_t operator "" _gibibytes(const bytecount_t x) {
+    return x << bytecount_t(30u);
+}
+
+static inline constexpr bytecount_t operator "" _tebibytes(const bytecount_t x) {
+    return x << bytecount_t(40u);
+}
+
+/* and the same, for variables */
+
+static inline constexpr bytecount_t _bytes(const bytecount_t x) {
+    return x;
+}
+
+static inline constexpr bytecount_t _parabytes(const bytecount_t x) { /* AKA bytes per segment increment in real mode */
+    return x << bytecount_t(4u);
+}
+
+static inline constexpr bytecount_t _kibibytes(const bytecount_t x) {
+    return x << bytecount_t(10u);
+}
+
+static inline constexpr bytecount_t _pagebytes(const bytecount_t x) { /* bytes per 4KB page in protected mode */
+    return x << bytecount_t(12u);
+}
+
+static inline constexpr bytecount_t _mibibytes(const bytecount_t x) {
+    return x << bytecount_t(20u);
+}
+
+static inline constexpr bytecount_t _gibibytes(const bytecount_t x) {
+    return x << bytecount_t(30u);
+}
+
+static inline constexpr bytecount_t _tebibytes(const bytecount_t x) {
+    return x << bytecount_t(40u);
+}
+
 #endif /* DOSBOX_DOSBOX_H */
