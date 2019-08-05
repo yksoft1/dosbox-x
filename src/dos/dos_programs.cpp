@@ -278,7 +278,7 @@ public:
             WriteOut(MSG_Get("PROGRAM_MOUNT_CDROMS_FOUND"),num);
             for (int i=0; i<num; i++) {
                 WriteOut("%2d. %s\n",i,SDL_CDName(i));
-            };
+            }
 #endif
             return;
         }
@@ -511,7 +511,7 @@ public:
                     case 4  :   WriteOut(MSG_Get("MSCDEX_TOO_MANY_DRIVES"));        break;
                     case 5  :   WriteOut(MSG_Get("MSCDEX_LIMITED_SUPPORT"));        break;
                     default :   WriteOut(MSG_Get("MSCDEX_UNKNOWN_ERROR"));          break;
-                };
+                }
                 if (error && error!=5) {
                     delete newdrive;
                     return;
@@ -645,6 +645,7 @@ public:
 
 PC98ITFPageHandler          mem_itf_rom;
 
+bool FDC_AssignINT13Disk(unsigned char drv);
 void MEM_RegisterHandler(Bitu phys_page,PageHandler * handler,Bitu page_range);
 void MEM_ResetPageHandler_Unmapped(Bitu phys_page, Bitu pages);
 bool MEM_map_ROM_physmem(Bitu start,Bitu end);
@@ -694,7 +695,7 @@ void pc98_43d_write(Bitu port,Bitu val,Bitu iolen) {
         default:
             LOG_MSG("PC-98 43Dh BIOS bank switching write: 0x%02x unknown value",(unsigned int)val);
             break;
-    };
+    }
 }
 
 /*! \brief          BOOT.COM utility to boot a floppy or hard disk device.
@@ -1192,7 +1193,7 @@ public:
             if (imageDiskList[drive - 65]->Read_Sector(0, 0, 1, (Bit8u *)&bootarea) != 0) {
                 WriteOut("Error reading drive");
                 return;
-            };
+            }
         }
 
         Bitu pcjr_hdr_length = 0;
@@ -1410,10 +1411,22 @@ public:
             /* debug */
             LOG_MSG("Booting guest OS stack_seg=0x%04x load_seg=0x%04x\n",(int)stack_seg,(int)load_seg);
             RunningProgram = "Guest OS";
- 
-            /* WARNING: PC-98 mode does not allocate DMA channel 2 for the floppy! */
+
+            if (drive == 'A' || drive == 'B') {
+                FDC_AssignINT13Disk(drive - 'A');
+                if (!IS_PC98_ARCH) incrementFDD();
+            }
+
+            /* NTS: IBM PC and PC-98 both use DMA channel 2 for the floppy, though according to
+             *      Neko Project II source code, DMA 3 is used for the double density drives (but we don't emulate that yet) */
             /* create appearance of floppy drive DMA usage (Demon's Forge) */
-            if (!IS_TANDY_ARCH && !IS_PC98_ARCH && floppysize!=0) GetDMAChannel(2)->tcount=true;
+            if (IS_PC98_ARCH) {
+                GetDMAChannel(2)->tcount=true;
+                GetDMAChannel(3)->tcount=true;
+            }
+            else {
+                if (!IS_TANDY_ARCH && floppysize!=0) GetDMAChannel(2)->tcount=true;
+            }
 
             /* standard method */
             if (IS_PC98_ARCH) {
