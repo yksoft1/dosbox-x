@@ -44,26 +44,26 @@ struct PIT_Block {
         Bit16u          cycle = 0;          // cycle (Mode 3: 0 or 1)
     };
 
-	Bitu cntr;      /* counter value written to 40h-42h as the interval. may take effect immediately (after port 43h) or after count expires */
-    Bitu cntr_cur;  /* current counter value in effect */
-	double delay;   /* interval (in ms) between one full count cycle */
-	double start;   /* time base (in ms) that cycle started at */
-    double now;     /* current time (in ms) */
+    Bitu cntr = 0;          /* counter value written to 40h-42h as the interval. may take effect immediately (after port 43h) or after count expires */
+    Bitu cntr_cur = 0;      /* current counter value in effect */
+    double delay = 0;       /* interval (in ms) between one full count cycle */
+    double start = 0;       /* time base (in ms) that cycle started at */
+    double now = 0;         /* current time (in ms) */
 
-	Bit16u read_latch;      /* counter value, latched for read back */
-	Bit16u write_latch;     /* counter value, written by host */
+    Bit16u read_latch = 0;  /* counter value, latched for read back */
+    Bit16u write_latch = 0; /* counter value, written by host */
 
-	Bit8u mode;             /* 8254 mode (mode 0 through 5 inclusive) */
-	Bit8u read_state;       /* 0=read MSB, switch to LSB, 1=LSB only, 2=MSB only, 3=read LSB, switch to MSB, latch next value */
-	Bit8u write_state;      /* 0=write MSB, switch to LSB, 1=LSB only, 2=MSB only, 3=write MSB, switch to LSB, accept value */
+    Bit8u mode = 0;         /* 8254 mode (mode 0 through 5 inclusive) */
+    Bit8u read_state = 0;   /* 0=read MSB, switch to LSB, 1=LSB only, 2=MSB only, 3=read LSB, switch to MSB, latch next value */
+    Bit8u write_state = 0;  /* 0=write MSB, switch to LSB, 1=LSB only, 2=MSB only, 3=write MSB, switch to LSB, accept value */
     Bit8u cycle_base = 0;
 
-	bool bcd;               /* BCD mode */
-	bool go_read_latch;     /* reading should latch another value */
-	bool new_mode;          /* a new mode has been written to port 43h for this timer */
-	bool counterstatus_set; /* set by status_latch(), when using 8254 command to latch multiple counters */
-	bool counting;          /* is counting (?) */
-	bool update_count;      /* update count on completion */
+    bool bcd = false;               /* BCD mode */
+    bool go_read_latch = false;     /* reading should latch another value */
+    bool new_mode = false;          /* a new mode has been written to port 43h for this timer */
+    bool counterstatus_set = false; /* set by status_latch(), when using 8254 command to latch multiple counters */
+    bool counting = false;          /* is counting (?) */
+    bool update_count = false;      /* update count on completion */
 
     bool gate = true;       /* gate signal (IN) */
     bool output = true;     /* output signal (OUT) */
@@ -392,6 +392,15 @@ void speaker_pit_update(void) {
     pit[speaker_pit].track_time(PIC_FullIndex());
 }
 
+void PCSPEAKER_UpdateType(void);
+
+bool TIMER2_ClockGateEnabled(void) {
+    /* PC speaker emulation should treat "new mode" as if the clock gate is disabled.
+     * On real hardware, mode 3 does not cycle if you write a control word but then
+     * do not write a counter value. */
+    return !pit[IS_PC98_ARCH ? 1 : 2].new_mode;
+}
+
 static void write_latch(Bitu port,Bitu val,Bitu /*iolen*/) {
 //LOG(LOG_PIT,LOG_ERROR)("port %X write:%X state:%X",port,val,pit[port-0x40].write_state);
 
@@ -475,6 +484,7 @@ static void write_latch(Bitu port,Bitu val,Bitu /*iolen*/) {
         p->reset_count_at(PIC_FullIndex());
         p->latch_next_counter();
 
+		p->new_mode=false;
 		switch (counter) {
 		case 0x00:			/* Timer hooked to IRQ 0 */
             PIC_RemoveEvents(PIT0_Event);
@@ -502,7 +512,6 @@ static void write_latch(Bitu port,Bitu val,Bitu /*iolen*/) {
         default:
 			LOG(LOG_PIT,LOG_ERROR)("PIT:Illegal timer selected for writing");
 		}
-		p->new_mode=false;
     }
     else { /* write state == 0 */
         /* If a new count is written to the Counter, it will be
@@ -632,8 +641,11 @@ static void write_p43(Bitu /*port*/,Bitu val,Bitu /*iolen*/) {
 			}
 			pit[latch].new_mode = true;
 			if (latch == (IS_PC98_ARCH ? 1 : 2)) {
-				// notify pc speaker code that the control word was written
-				PCSPEAKER_SetPITControl(mode);
+				// notify pc speaker code that the control word was written.
+                // until a counter value is written, the PC speaker should
+                // treat the timer as if the clock gate were disabled.
+                PCSPEAKER_UpdateType();
+                PCSPEAKER_SetPITControl(mode);
 			}
 		}
 		break;

@@ -611,7 +611,7 @@ static void DOSBOX_UnlockSpeed( bool pressed ) {
 
 void DOSBOX_UnlockSpeed2( bool pressed ) {
     if (pressed) {
-        ticksLocked =! ticksLocked;
+        ticksLocked = !ticksLocked;
         DOSBOX_UnlockSpeed(ticksLocked?true:false);
 
         /* make sure the menu item keeps up with our state */
@@ -2207,7 +2207,7 @@ void DOSBOX_SetupConfigSections(void) {
         "To emulate Adlib, set sbtype=none and oplmode=opl2. To emulate a Game Blaster, set\n"
         "sbtype=none and oplmode=cms");
 
-    Pbool = secprop->Add_bool("adlib force timer overflow on detect",Property::Changeable::WhenIdle,true);
+    Pbool = secprop->Add_bool("adlib force timer overflow on detect",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, Adlib/OPL emulation will signal 'overflow' on timers after 50 I/O reads.\n"
             "This is a temporary hack to work around timing bugs noted in DOSBox-X. Certain\n"
             "games (Wolfenstein 3D) poll the Adlib status port a fixed number of times assuming\n"
@@ -3199,7 +3199,7 @@ int utf8_encode(char **ptr,char *fence,uint32_t code) {
             *p++ = (char)(0x80 | ((code >> 6) & 0x3F));
             *p++ = (char)(0x80 | (code & 0x3F));
             break;
-    };
+    }
 
     *ptr = p;
     return 0;
@@ -3268,7 +3268,7 @@ int utf8_decode(const char **ptr,const char *fence) {
             c = (unsigned char)(*p++); if ((c&0xC0) != 0x80) return UTF8ERR_INVALID;
             ret |= c&0x3F;
             break;
-    };
+    }
 
     *ptr = p;
     return ret;

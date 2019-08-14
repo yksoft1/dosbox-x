@@ -1,10 +1,23 @@
 0.82.21 (next)
+  - PC speaker emulation now takes into consideration
+    the case when the 8254 timer has been given a control
+    word without a counter value, in which case no sound
+    is to be emitted until a control word is written.
+    This fixes "Titus the Fox: To Marrakech and Back"
+    when the game fails to detect Adlib (OPL2) hardware.
+  - Adlib polling hack no longer needed.
   - Floppy controller emulation fixed to support sector
     sizes other than 512 bytes per sector.
   - Floppy controller fixed to always set "seek completed"
     status bit after seek/calibrate, not just when the
     head hits track 0 (programming mistake).
   - PC-98 40-column text mode is now supported.
+  - Integrated commits from mainline (Allofich)
+    - In the mapper, display disabled items or events
+    with no binding in grey. 
+    - Implemented BIOS beep sound for ASCII character 7
+    - Return failure for INT 13 format calls if the
+    drive is inactive.
 0.82.20
   - Dynamic core IMUL instruction mistake fixed,
     signed multiply works properly again.

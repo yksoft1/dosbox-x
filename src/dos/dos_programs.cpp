@@ -721,7 +721,7 @@ public:
 public:
     /*! \brief      Array of disk images to add to floppy swaplist
      */
-    imageDisk *newDiskSwap[MAX_SWAPPABLE_DISKS];
+    imageDisk* newDiskSwap[MAX_SWAPPABLE_DISKS] = {};
 
 private:
 
@@ -2828,9 +2828,7 @@ public:
         cmd->FindString("-ide",ideattach,true);
 
         if (ideattach == "auto") {
-            if (type == "floppy") {
-            }
-            else {
+            if (type != "floppy") {
                 IDE_Auto(ide_index,ide_slave);
             }
                 
