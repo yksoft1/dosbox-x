@@ -1,4 +1,92 @@
 0.82.21 (next)
+  - FAT driver now assigns current date/time when
+    creating directories.
+  - Increased the DTA segment size of the DOS FAT driver
+    to fix problems with directory searches corrupting
+    adjacent memory.
+  - Disk Parameter Block linked list now terminates
+    with next pointer at FFFF:FFFF instead of 0000:0000
+    to match general DOS pattern and satisfy some
+    PC-98 games that enumerate the list.
+  - INT AH=52h List of Lists now points to the Disk
+    Parameter Block as well, which allows some PC-98
+    games that enumerate the list to work.
+  - Video parameter list and table at BIOS DATA AREA
+    40:A8 added to MCGA mode, to match real PS/2 MCGA
+    hardware.
+  - FAT driver now updates the Disk Parameter
+    Block when activated, and provides as much
+    from the FAT filesystem as possible. It is now
+    possible to run Microsoft MS-DOS 6.22
+    SCANDISK.EXE on a drive letter attached from
+    a disk image.
+  - Disk Parameter Block is now the proper full
+    size. The limited 9 bytes/block hackery has
+    been removed.
+  - Added INT 25h/INT 26h emulation for FAT drives
+    mounted with IMGMOUNT.
+  - Fake disk paramter table fixed to indicate one
+    reserved sector.
+  - Fixed INT 25h/INT 26h to return an error rather than
+    silently fail with success. Emulation of these calls
+    exist currently only as stubs and, according to
+    source comments, as a workaround for MicroProse
+    installers. For disk diagnostic software like
+    Microsoft ScanDisk it is better to signal an error
+    until INT 25h/INT 26h are fully implemented.
+  - Added dosbox.conf option to control whether INT 10h
+    VESA BIOS function AX=4F00h (Get SVGA information)
+    zeros the entire 256-byte or 512-byte structure or
+    not. Turning the option off (no zeroing) allows
+    "Get Saddam!" to run with SVGA and VESA BIOS
+    extensions enabled without crashing. The developer
+    calls INT AX=4F00h but does not provide enough
+    storage space for the full 256 byte structure,
+    only enough for the base structure defined by VESA.
+  - INT 2Fh updated to explicitly mention SMARTDRV or
+    DBLSPACE if values of AX are known to match their
+    API.
+  - VESA BIOS modelist now includes S3 OEM video modes
+    as documented by the RBIL, and needed by Line Wars II.
+  - OpenGL output now clears 3 frames instead of 2 after
+    mode change to deal with nVidia hardware that
+    reportedly triple buffers OpenGL rendering in
+    Windows.
+  - INT 21h fixed to always enable the A20 gate through
+    HIMEM.SYS if dosbox.conf indicates a configuration where
+    XMS is enabled, the HMA is enabled, and DOS is loaded
+    high (DOS=HIGH), which is the default configuration
+    for DOSBox-X.
+  - XMS emulation fixed not to allow conventional memory
+    block addresses (source or dest) if it extends past
+    the 1MB+64KB-16 range normally accessible from real
+    mode, as per Microsoft XMS test program.
+  - XMS emulation fixed to disallow XMS block move/copy
+    with an odd length byte count, per Microsoft XMS
+    specification.
+  - XMS emulation no longer allows freeing a XMS block
+    handle that is still locked, as per Microsoft XMS
+    specification and testing software.
+  - Enhance existing INT 68h fix for "PopCorn" by adding
+    a dosbox.conf option to always keep INT 68h NULL,
+    so that it's possible to run the game in machine
+    configurations other than CGA.
+  - EGA/VGA: Fix "dynamic parameter save area" pointer,
+    to make sure it's initialized to zero properly.
+    This is needed to run "Get Saddam!" in VGA mode
+    without crashing.
+  - INT 10h AH=12h BL=10h no longer responds in
+    machine=mcga mode, which allows Thexder to run in
+    256-color mode properly when emulating MCGA.
+  - Added code to silence the PC speaker, if it was left
+    on at reset, at BIOS POST.
+  - Added pause at BIOS POST (after reset), with
+    dosbox.conf option to control, so that screen contents
+    at reset can be seen.
+  - Writes to unmapped 0xE0000-0xE7FFF in PC-98 mode no
+    longer print a "write to ROM" warning. PC-98 games
+    and software like to zero that region whether or not
+    the 4th bitplane is enabled.
   - PC speaker emulation now takes into consideration
     the case when the 8254 timer has been given a control
     word without a counter value, in which case no sound

@@ -174,11 +174,18 @@ VideoModeBlock ModeList_VGA[]={
 { 0x191  ,M_LIN32  ,320 ,400 ,40 ,50 ,8 ,8  ,1 ,0xA0000 ,0x10000, 50 ,449 ,40 ,400 ,0 },
 { 0x192  ,M_LIN32  ,320 ,480 ,40 ,60 ,8 ,8  ,1 ,0xA0000 ,0x10000, 50 ,525 ,40 ,480 ,0 },
 
-// S3 specific modes
+// S3 specific modes (OEM modes). See also [http://www.ctyme.com/intr/rb-0275.htm]
+{ 0x201  ,M_LIN8    ,640 ,480, 80,30 ,8 ,16 ,1 ,0xA0000 ,0x10000,100 ,525 ,80 ,480 , _VGA_PIXEL_DOUBLE },
+{ 0x202  ,M_LIN4    ,800 ,600,100,37 ,8 ,16 ,1 ,0xA0000 ,0x10000,132 ,628 ,100,600 ,0	},
+{ 0x203  ,M_LIN8    ,800 ,600,100,37 ,8 ,16 ,1 ,0xA0000 ,0x10000,132 ,628 ,100,600 ,0	}, // Line Wars II, S3 accelerated 800x600
+{ 0x204  ,M_LIN4    ,1024,768,128,48 ,8 ,16 ,1 ,0xA0000 ,0x10000,168 ,806 ,128,768 ,0	},
+{ 0x205  ,M_LIN8    ,1024,768,128,48 ,8 ,16 ,1 ,0xA0000 ,0x10000,168 ,806 ,128,768 ,0	},
+{ 0x206  ,M_LIN4    ,1280,960,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,212 ,1024,160,960 ,0	}, // TODO VERIFY THIS
 { 0x207  ,M_LIN8	,1152,864,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,182 ,948 ,144,864 ,0	},
+{ 0x208  ,M_LIN4    ,1280,1024,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,212 ,1066,160,1024,0	},
 { 0x209  ,M_LIN15	,1152,864,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,364 ,948 ,288,864 ,0	},
 { 0x20A  ,M_LIN16	,1152,864,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,364 ,948 ,288,864 ,0	},
-{ 0x20B  ,M_LIN32	,1152, 864,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,182 ,948 ,144,864 ,0	},
+{ 0x20B  ,M_LIN32	,1152,864,160,64 ,8 ,16 ,1 ,0xA0000 ,0x10000,182 ,948 ,144,864 ,0	},
 { 0x213  ,M_LIN32   ,640 ,400,80 ,25 ,8 ,16 ,1 ,0xA0000 ,0x10000,100 ,449 ,80 ,400 ,0	},
 
 // Some custom modes
@@ -836,18 +843,18 @@ bool INT10_SetVideoMode_OTHER(Bit16u mode,bool clearmem) {
 		if (machine==MCH_HERC || machine==MCH_MDA) scanline=14;
 		else scanline=8;
 		break;
-	case M_CGA2: // graphics mode: even/odd banks interleaved
+    case M_CGA2: // graphics mode: even/odd banks interleaved
         if (machine == MCH_MCGA && CurMode->mode >= 0x11)
-    		scanline=1; // as seen on real hardware, modes 0x11 and 0x13 have max scanline register == 0x00
+            scanline = 1; // as seen on real hardware, modes 0x11 and 0x13 have max scanline register == 0x00
         else
-    		scanline=2;
-		break;
-	case M_VGA: // MCGA
+            scanline = 2;
+        break;
+    case M_VGA: // MCGA
         if (machine == MCH_MCGA)
-    		scanline=1; // as seen on real hardware, modes 0x11 and 0x13 have max scanline register == 0x00
+            scanline = 1; // as seen on real hardware, modes 0x11 and 0x13 have max scanline register == 0x00
         else
-    		scanline=2;
-		break;
+            scanline = 2;
+        break;
 	case M_CGA4:
 		if (CurMode->mode!=0xa) scanline=2;
 		else scanline=4;
@@ -1481,7 +1488,7 @@ bool INT10_SetVideoMode(Bit16u mode) {
     if (IS_EGA_ARCH && vga.mem.memsize < 0x20000)
         mode_control &= ~0x20; // address wrap bit 13
 
-	IO_Write(crtc_base,0x17);IO_Write(crtc_base+1u,mode_control);
+    IO_Write(crtc_base, 0x17); IO_Write(crtc_base + 1u, mode_control);
 	/* Renable write protection */
 	IO_Write(crtc_base,0x11);
 	IO_Write(crtc_base+1u,IO_Read(crtc_base+1u)|0x80);
@@ -1538,12 +1545,12 @@ bool INT10_SetVideoMode(Bit16u mode) {
 	case M_LIN24:
 	case M_LIN32:
     case M_PACKED4:
-		gfx_data[0x5]|=0x40;		//256 color mode
+        gfx_data[0x5] |= 0x40;		//256 color mode
         if (int10_vesa_map_as_128kb)
-    		gfx_data[0x6]|=0x01;	//graphics mode at 0xa000-bffff
+            gfx_data[0x6] |= 0x01;	//graphics mode at 0xa000-bffff
         else
-    		gfx_data[0x6]|=0x05;	//graphics mode at 0xa000-affff
-		break;
+            gfx_data[0x6] |= 0x05;	//graphics mode at 0xa000-affff
+        break;
 	case M_VGA:
 		gfx_data[0x5]|=0x40;		//256 color mode
 		gfx_data[0x6]|=0x05;		//graphics mode at 0xa000-affff

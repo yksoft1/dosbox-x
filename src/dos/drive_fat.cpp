@@ -29,6 +29,7 @@
 #include "bios.h"
 #include "bios_disk.h"
 #include "qcow2_disk.h"
+#include "bitop.h"
 
 #include <algorithm>
 
@@ -778,7 +779,7 @@ fatDrive::fatDrive(const char *sysFilename, Bit32u bytesector, Bit32u cylsector,
 	Bit32u filesize;
 	
 	if(imgDTASeg == 0) {
-		imgDTASeg = DOS_GetMemory(2,"imgDTASeg");
+		imgDTASeg = DOS_GetMemory(4,"imgDTASeg");
 		imgDTAPtr = RealMake(imgDTASeg, 0);
 		imgDTA    = new DOS_DTA(imgDTAPtr);
 	}
@@ -848,7 +849,7 @@ fatDrive::fatDrive(imageDisk *sourceLoadedDisk, std::vector<std::string> &option
 	created_successfully = true;
 	
 	if(imgDTASeg == 0) {
-		imgDTASeg = DOS_GetMemory(2,"imgDTASeg");
+		imgDTASeg = DOS_GetMemory(4,"imgDTASeg");
 		imgDTAPtr = RealMake(imgDTASeg, 0);
 		imgDTA    = new DOS_DTA(imgDTAPtr);
 	}
@@ -906,6 +907,27 @@ Bit8u fatDrive::Write_AbsoluteSector(Bit32u sectnum, void * data) {
 
 Bit32u fatDrive::getSectSize(void) {
     return sector_size;
+}
+
+void fatDrive::UpdateDPB(unsigned char dos_drive) {
+    PhysPt ptr = DOS_Get_DPB(dos_drive);
+    if (ptr != PhysPt(0)) {
+        mem_writew(ptr+0x02,bootbuffer.bytespersector);             // +2 = bytes per sector
+        mem_writeb(ptr+0x04,bootbuffer.sectorspercluster - 1);      // +4 = highest sector within a cluster
+        mem_writeb(ptr+0x05,bitop::log2(bootbuffer.sectorspercluster));// +5 = shift count to convert clusters to sectors
+        mem_writew(ptr+0x06,bootbuffer.reservedsectors);            // +6 = number of reserved sectors at start of partition
+        mem_writeb(ptr+0x08,bootbuffer.fatcopies);                  // +8 = number of FATs (file allocation tables)
+        mem_writew(ptr+0x09,bootbuffer.rootdirentries);             // +9 = number of root directory entries
+        mem_writew(ptr+0x0B,(uint16_t)(firstDataSector-partSectOff));// +11 = number of first sector containing user data
+        mem_writew(ptr+0x0D,(uint16_t)CountOfClusters + 1);         // +13 = highest cluster number
+        mem_writew(ptr+0x0F,(uint16_t)bootbuffer.sectorsperfat);    // +15 = sectors per FAT
+        mem_writew(ptr+0x11,(uint16_t)(firstRootDirSect-partSectOff));// +17 = sector number of first directory sector
+        mem_writed(ptr+0x13,0);                                     // +19 = address of device driver header (NOT IMPLEMENTED)
+        mem_writeb(ptr+0x17,GetMediaByte());                        // +23 = media ID byte
+        mem_writeb(ptr+0x18,0x00);                                  // +24 = disk accessed
+        mem_writew(ptr+0x1F,0xFFFF);                                // +31 = number of free clusters or 0xFFFF if unknown
+        // other fields, not implemented
+    }
 }
 
 void fatDrive::fatDriveInit(const char *sysFilename, Bit32u bytesector, Bit32u cylsector, Bit32u headscyl, Bit32u cylinders, Bit64u filesize, std::vector<std::string> &options) {
@@ -1511,6 +1533,22 @@ char* trimString(char* str) {
 	return removeTrailingSpaces(removeLeadingSpaces(str));
 }
 
+Bit32u fatDrive::GetSectorCount(void) {
+    return (loadedDisk->heads * loadedDisk->sectors * loadedDisk->cylinders) - partSectOff;
+}
+
+Bit32u fatDrive::GetSectorSize(void) {
+    return getSectorSize();
+}
+
+Bit8u fatDrive::Read_AbsoluteSector_INT25(Bit32u sectnum, void * data) {
+    return readSector(sectnum+partSectOff,data);
+}
+
+Bit8u fatDrive::Write_AbsoluteSector_INT25(Bit32u sectnum, void * data) {
+    return writeSector(sectnum+partSectOff,data);
+}
+
 bool fatDrive::FindNextInternal(Bit32u dirClustNumber, DOS_DTA &dta, direntry *foundEntry) {
 	direntry sectbuf[MAX_DIRENTS_PER_SECTOR]; /* 16 directory entries per 512 byte sector */
 	Bit32u logentsector; /* Logical entry sector */
@@ -1772,7 +1810,8 @@ bool fatDrive::MakeDir(const char *dir) {
 	Bit32u dummyClust, dirClust;
 	direntry tmpentry;
 	char dirName[DOS_NAMELENGTH_ASCII];
-	char pathName[11];
+    char pathName[11];
+    Bit16u ct,cd;
 
 	/* Can we even get the name of the directory itself? */
 	if(!getEntryName(dir, &dirName[0])) return false;
@@ -1791,14 +1830,18 @@ bool fatDrive::MakeDir(const char *dir) {
 
 	/* Can we find the base directory? */
 	if(!getDirClustNum(dir, &dirClust, true)) return false;
-	
+
+    time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd,::time(NULL));
+
 	/* Add the new directory to the base directory */
 	memset(&tmpentry,0, sizeof(direntry));
 	memcpy(&tmpentry.entryname, &pathName[0], 11);
 	tmpentry.loFirstClust = (Bit16u)(dummyClust & 0xffff);
 	tmpentry.hiFirstClust = (Bit16u)(dummyClust >> 16);
 	tmpentry.attrib = DOS_ATTR_DIRECTORY;
-	addDirectoryEntry(dirClust, tmpentry);
+    tmpentry.modTime = ct;
+    tmpentry.modDate = cd;
+    addDirectoryEntry(dirClust, tmpentry);
 
 	/* Add the [.] and [..] entries to our new directory*/
 	/* [.] entry */
@@ -1807,6 +1850,8 @@ bool fatDrive::MakeDir(const char *dir) {
 	tmpentry.loFirstClust = (Bit16u)(dummyClust & 0xffff);
 	tmpentry.hiFirstClust = (Bit16u)(dummyClust >> 16);
 	tmpentry.attrib = DOS_ATTR_DIRECTORY;
+    tmpentry.modTime = ct;
+    tmpentry.modDate = cd;
 	addDirectoryEntry(dummyClust, tmpentry);
 
 	/* [..] entry */
@@ -1815,6 +1860,8 @@ bool fatDrive::MakeDir(const char *dir) {
 	tmpentry.loFirstClust = (Bit16u)(dirClust & 0xffff);
 	tmpentry.hiFirstClust = (Bit16u)(dirClust >> 16);
 	tmpentry.attrib = DOS_ATTR_DIRECTORY;
+    tmpentry.modTime = ct;
+    tmpentry.modDate = cd;
 	addDirectoryEntry(dummyClust, tmpentry);
 
 	return true;

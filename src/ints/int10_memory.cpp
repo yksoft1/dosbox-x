@@ -59,9 +59,9 @@ void INT10_LoadFont(PhysPt font,bool reload,Bit16u count,Bitu offset,Bitu map,Bi
 	if (IS_VGA_ARCH || (IS_EGA_ARCH && vga.mem.memsize >= 0x20000))
         m64k=0x02;
     else
-        m64k=0x00;
+        m64k = 0x00;
 
-	PhysPt ftwhere=PhysMake(0xa000,map_offset[map & 0x7]+(Bit16u)(offset*32));
+    PhysPt ftwhere = PhysMake(0xa000, map_offset[map & 0x7] + (Bit16u)(offset * 32));
 	Bit16u base=real_readw(BIOSMEM_SEG,BIOSMEM_CRTC_ADDRESS);
 	bool mono=(base==VGAREG_MDA_CRTC_ADDRESS);
 	
@@ -190,6 +190,36 @@ void INT10_SetupRomMemory(void) {
                 phys_writeb((PhysPt)base+i,int10_font_16[i]);
 
             int10.rom.font_16 = RealMake((Bit16u)(base >> 4u),(Bit16u)(base & 0xF));
+
+            // MCGA has the pointer at 40:A8 (BIOSMEM_VS_POINTER), confirmed on real hardware.
+            // It points into the BIOS, because MCGA systems do not have a BIOS at C000:0000
+            Bitu vptr = ROMBIOS_GetMemory((Bitu)(0x600),"MCGA video save pointer and structs",1,0u);
+            Bitu vptrseg = vptr >> 4;
+            Bitu vptroff = vptr & 0xF;
+            vptr -= vptroff;
+            Bitu vptroff_limit = vptroff + 0x600;
+
+            int10.rom.video_parameter_table=RealMake(vptrseg,vptroff);
+            vptroff+=INT10_SetupVideoParameterTable(vptr+vptroff);
+
+            // The dynamic save area should be in RAM, it cannot exist in ROM
+            int10.rom.video_dynamic_save_area=0;
+
+            int10.rom.video_save_pointers=RealMake(vptrseg,vptroff);
+            phys_writed(vptr+vptroff,int10.rom.video_parameter_table);
+            vptroff+=4;
+            phys_writed(vptr+vptroff,int10.rom.video_dynamic_save_area);		// dynamic save area pointer
+            vptroff+=4;
+            phys_writed(vptr+vptroff,0);		// alphanumeric character set override
+            vptroff+=4;
+            phys_writed(vptr+vptroff,0);		// graphics character set override
+            vptroff+=4;
+            phys_writed(vptr+vptroff,0);		// secondary save pointer table
+            vptroff+=4;
+            phys_writed(vptr+vptroff,0); vptroff+=4;
+            phys_writed(vptr+vptroff,0); vptroff+=4;
+
+            if (vptroff > vptroff_limit) E_Exit("MCGA ptr overrun");
         }
 
 		return;
@@ -327,10 +357,13 @@ void INT10_SetupRomMemory(void) {
 			phys_writed(rom_base+int10.rom.used,0);		int10.rom.used+=4;
 		}
 
+        // The dynamic save area should be in RAM, it cannot exist in ROM
+        int10.rom.video_dynamic_save_area=0;
+
 		int10.rom.video_save_pointers=RealMake(0xC000,int10.rom.used);
 		phys_writed(rom_base+int10.rom.used,int10.rom.video_parameter_table);
 		int10.rom.used+=4;
-		phys_writed(rom_base+int10.rom.used,0);		// dynamic save area pointer
+		phys_writed(rom_base+int10.rom.used,int10.rom.video_dynamic_save_area);		// dynamic save area pointer
 		int10.rom.used+=4;
 		phys_writed(rom_base+int10.rom.used,0);		// alphanumeric character set override
 		int10.rom.used+=4;

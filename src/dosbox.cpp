@@ -1376,6 +1376,14 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool = secprop->Add_bool("isa memory hole at 512kb",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, emulate an ISA memory hole at the 512KB to 640KB area (0x80000-0x9FFFF).");
 
+    Pint = secprop->Add_int("reboot delay", Property::Changeable::WhenIdle,-1);
+    Pint->SetMinMax(-1,10000);
+    Pint->Set_help(
+        "Reboot delay. How long to pause at BIOS POST after reboot in milliseconds.\n"
+        "This option is provided so that it is possible to see what the guest application\n"
+        "or OS might have written to the screen before resetting the system. A value of\n"
+        "-1 means to use a reasonable default.");
+
     Pint = secprop->Add_int("memalias", Property::Changeable::WhenIdle,0);
     Pint->SetMinMax(0,32);
     Pint->Set_help(
@@ -1596,6 +1604,16 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("If set, and space is available, allow conventional memory to extend past 640KB.\n"
             "For example, if machine=cga, conventional memory can extend out to 0xB800 and provide up to 736KB of RAM.\n"
             "This allows you to emulate PC/XT style memory extensions.");
+
+    Pbool = secprop->Add_bool("vesa zero buffer on get information",Property::Changeable::Always,true);
+    Pbool->Set_help("This setting affects VESA BIOS function INT 10h AX=4F00h. If set, the VESA BIOS will zero the\n"
+                    "256-byte buffer defined by the standard at ES:DI, then fill in the structure. If clear, only\n"
+                    "the structure members will be filled in, and memory outside the initial 20-32 bytes will remain\n"
+                    "unmodified. This setting is ON by default. Some very early 1990s DOS games that support VESA\n"
+                    "BIOS standards may need this setting turned OFF if the programmer did not provide enough space\n"
+                    "for the entire 256 byte structure and the game crashes if it detects VESA BIOS extensions.\n"
+                    "Needed for:\n"
+                    "  GETSADAM.EXE");
 
     /* should be set to zero unless for very specific demos:
      *  - "Melvindale" by MFX (1996): Set this to 2, the nightmarish visual rendering code appears to draw 2 scanlines
@@ -2817,6 +2835,12 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("If ems=false, leave interrupt vector 67h zeroed out (default true).\n"
             "This is a workaround for games or demos that try to detect EMS by whether or not INT 67h is 0000:0000 rather than a proper test.\n"
             "This option also affects whether INT 67h is zeroed when booting a guest OS");
+
+    Pbool = secprop->Add_bool("zero unused int 68h",Property::Changeable::OnlyAtStart,false);
+    Pbool->Set_help("Leave INT 68h zero at startup.\n"
+            "Set this to true for certain games that use INT 68h in unusual ways that require a zero value.\n"
+            "Note that the vector is left at zero anyway when machine=cga.\n"
+            "This is needed to properly run 1988 game 'PopCorn'.");
 
     /* FIXME: The vm86 monitor in src/ints/ems.cpp is not very stable! Option is default OFF until stabilized! */
     Pbool = secprop->Add_bool("emm386 startup active",Property::Changeable::OnlyAtStart,false);

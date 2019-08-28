@@ -101,6 +101,8 @@ bool int15_wait_force_unmask_irq = false;
 
 int unhandled_irq_method = UNHANDLED_IRQ_SIMPLE;
 
+unsigned int reset_post_delay = 0;
+
 Bit16u biosConfigSeg=0;
 
 Bitu BIOS_DEFAULT_IRQ0_LOCATION = ~0u;       // (RealMake(0xf000,0xfea5))
@@ -6890,6 +6892,8 @@ static Bitu Default_IRQ_Handler_Cooperative_Slave_Pic(void) {
     return CBRET_NONE;
 }
 
+static int bios_post_counter = 0;
+
 class BIOS:public Module_base{
 private:
     static Bitu cb_bios_post__func(void) {
@@ -6904,6 +6908,37 @@ private:
         DEBUG_StopLog();
 # endif
 #endif
+
+        {
+            Section_prop * section=static_cast<Section_prop *>(control->GetSection("dosbox"));
+            int val = section->Get_int("reboot delay");
+
+            if (val < 0)
+                val = IS_PC98_ARCH ? 1000 : 500;
+
+            reset_post_delay = (unsigned int)val;
+        }
+
+        if (bios_post_counter != 0 && reset_post_delay != 0) {
+            /* reboot delay, in case the guest OS/application had something to day before hitting the "reset" signal */
+            Bit32u lasttick=GetTicks();
+            while ((GetTicks()-lasttick) < reset_post_delay) {
+                void CALLBACK_Idle(void);
+                CALLBACK_Idle();
+            }
+        }
+
+        if (bios_post_counter != 0) {
+            /* turn off the PC speaker if the guest left it on at reset */
+            if (IS_PC98_ARCH) {
+                IO_Write(0x37,0x07);
+            }
+            else {
+                IO_Write(0x61,IO_Read(0x61) & (~3u));
+            }
+        }
+
+        bios_post_counter++;
 
         if (bios_first_init) {
             /* clear the first 1KB-32KB */
@@ -7434,9 +7469,17 @@ private:
             PIC_SetIRQMask(0,true); /* PC-98 keeps the timer off unless INT 1Ch is called to set a timer interval */
         }
 
+        bool null_68h = false;
+
+        {
+            Section_prop * section=static_cast<Section_prop *>(control->GetSection("dos"));
+
+            null_68h = section->Get_bool("zero unused int 68h");
+        }
+
         real_writed(0,0x66*4,CALLBACK_RealPointer(call_default));   //war2d
         real_writed(0,0x67*4,CALLBACK_RealPointer(call_default));
-        if (machine==MCH_CGA) real_writed(0,0x68*4,0);              //Popcorn
+        if (machine==MCH_CGA || null_68h) real_writed(0,0x68*4,0);  //Popcorn
         real_writed(0,0x5c*4,CALLBACK_RealPointer(call_default));   //Network stuff
         //real_writed(0,0xf*4,0); some games don't like it
 
