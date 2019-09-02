@@ -315,8 +315,6 @@ unsigned int Linux_GetKeyboardLayout(void) {
 }
 
 void UpdateWindowDimensions_Linux(void) {
-    bool GFX_IsFullscreen();
-
     SDL_SysWMinfo wminfo;
     memset(&wminfo,0,sizeof(wminfo));
     SDL_VERSION(&wminfo.version);
@@ -526,6 +524,10 @@ static bool Linux_TryXRandrGetDPI(ScreenSizeInfo &info,Display *display,Window w
         XRRFreeScreenResources(xr_screen);
         xr_screen = NULL;
     }
+#else
+    (void)info;    //UNUSED
+    (void)display; //UNUSED
+    (void)window;  //UNUSED
 # endif
 
     return result;

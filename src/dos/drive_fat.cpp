@@ -49,6 +49,7 @@ public:
 	bool Seek(Bit32u * pos,Bit32u type);
 	bool Close();
 	Bit16u GetInformation(void);
+    void Flush(void);
 	bool UpdateDateTimeFromHost(void);   
 	Bit32u GetSeekPos(void);
 public:
@@ -117,6 +118,39 @@ fatFile::fatFile(const char* /*name*/, Bit32u startCluster, Bit32u fileLen, fatD
 	if(filelength > 0) {
 		Seek(&seekto, DOS_SEEK_SET);
 	}
+}
+
+void fatFile::Flush(void) {
+#if 0//UNTESTED: THIS MAY CAUSE FURTHER PROBLEMS
+    // FIXME: Copy-pasta from Close
+	if (loadedSector) {
+        myDrive->writeSector(currentSector, sectorBuffer);
+        loadedSector = false;
+    }
+#endif
+
+    if (modified || newtime) {
+        direntry tmpentry;
+
+        myDrive->directoryBrowse(dirCluster, &tmpentry, (Bit32s)dirIndex);
+
+        if (newtime) {
+            tmpentry.modTime = time;
+            tmpentry.modDate = date;
+        }
+        else {
+            Bit16u ct,cd;
+
+            time_t_to_DOS_DateTime(/*&*/ct,/*&*/cd,::time(NULL));
+
+            tmpentry.modTime = ct;
+            tmpentry.modDate = cd;
+        }
+
+        myDrive->directoryChange(dirCluster, &tmpentry, (Bit32s)dirIndex);
+        modified = false;
+        newtime = false;
+    }
 }
 
 bool fatFile::Read(Bit8u * data, Bit16u *size) {
@@ -809,7 +843,11 @@ fatDrive::fatDrive(const char *sysFilename, Bit32u bytesector, Bit32u cylsector,
 	else{
 		fseeko64(diskfile, 0L, SEEK_SET);
         assert(sizeof(bootbuffer.bootcode) >= 256);
-        fread(bootbuffer.bootcode,256,1,diskfile); // look for magic signatures
+        size_t readResult = fread(bootbuffer.bootcode,256,1,diskfile); // look for magic signatures
+        if (readResult != 1) {
+            LOG(LOG_IO, LOG_ERROR) ("Reading error in fatDrive constructor\n");
+            return;
+        }
 
         const char *ext = strrchr(sysFilename,'.');
 
