@@ -350,6 +350,8 @@ public:
     inline void SetPt(const Bit16u seg) { pt=PhysMake(seg,0);}
     inline void SetPt(const Bit16u seg, const Bit16u off) { pt=PhysMake(seg,off);}
     inline void SetPt(const RealPt addr) { pt=Real2Phys(addr);}
+    inline PhysPt GetPtPhys(void) const { return pt; }
+    inline void SetPtPhys(const PhysPt _pt) { pt=_pt; }
 protected:
 	PhysPt pt;
 };
@@ -545,6 +547,7 @@ public:
 	void	SetDirIDCluster(Bit16u entry)	{ sSave(sDTA,dirCluster,entry); };
 	Bit16u	GetDirID(void)				{ return (Bit16u)sGet(sDTA,dirID); };
 	Bit16u	GetDirIDCluster(void)		{ return (Bit16u)sGet(sDTA,dirCluster); };
+    Bit8u   GetAttr(void)               { return (Bit8u)sGet(sDTA,sattr); }
 private:
 	#ifdef _MSC_VER
 	#pragma pack(1)
@@ -575,6 +578,7 @@ public:
 	void SetName(Bit8u _drive,char * _fname,char * _ext);
 	void SetSizeDateTime(Bit32u _size,Bit16u _date,Bit16u _time);
 	void GetSizeDateTime(Bit32u & _size,Bit16u & _date,Bit16u & _time);
+    void GetVolumeName(char * fillname);
 	void GetName(char * fillname);
 	void FileOpen(Bit8u _fhandle);
 	void FileClose(Bit8u & _fhandle);
