@@ -3309,6 +3309,7 @@ static Bitu INT18_PC98_Handler(void) {
             reg_al = mem_readb(0x53C);
             break;
         // TODO: "Edge" is using INT 18h AH=06h, what is that?
+        //       (Something to do with the buffer [https://ia801305.us.archive.org/8/items/PC9800TechnicalDataBookBIOS1992/PC-9800TechnicalDataBook_BIOS_1992_text.pdf])
         //       Neko Project is also unaware of such a call.
         case 0x0C: /* text layer enable */
             pc98_gdc[GDC_MASTER].force_fifo_complete();
@@ -3432,7 +3433,7 @@ static Bitu INT18_PC98_Handler(void) {
                 unsigned char b597 = mem_readb(0x597);
                 unsigned char tstat = mem_readb(0x53C);
                 unsigned char b54C = mem_readb(0x54C);
-                unsigned char ret = 0x00;
+                unsigned char ret = 0x05; // according to NP2
 
                 // assume the same as AH=42h
                 while (!(IO_ReadB(0x60) & 0x20/*vertical retrace*/)) {
@@ -3493,7 +3494,7 @@ static Bitu INT18_PC98_Handler(void) {
                         // according to Neko Project II, this case is ignored.
                         // this is confirmed on real hardware as well.
                         LOG_MSG("PC-98 INT 18h AH=30h attempt to set 640x480 mode with 24KHz hsync which is not supported by the platform");
-                        ret = 1;
+                        ret = 0;
                     }
                 }
                 else { // 640x400 or 640x200
@@ -3505,6 +3506,7 @@ static Bitu INT18_PC98_Handler(void) {
                     //       port and a default setting of 70Hz / 31KHz 640x400.
                     if ((reg_al & 0x0C) < 0x08) { /* bits [3:2] == 0x */
                         LOG_MSG("PC-98 INT 18h AH=30h attempt to set 15KHz hsync which is not yet supported");
+                        ret = 0;
                     }
                     else {
                         if ((reg_al ^ (((b54C & 0x20) ? 3 : 2) << 2)) & 0x0C) { /* change in bits [3:2] */
@@ -3588,7 +3590,11 @@ static Bitu INT18_PC98_Handler(void) {
                 pc98_update_text_lineheight_from_bda();
                 pc98_update_text_layer_lineheight_from_bda();
 
-                reg_ah = ret;
+                // according to real hardware (PC-9821Lt2), AH=5 on success (same as NP2)
+                // or AH is unchanged on failure and AL=1 and BH=1 (NOT the same as NP2)
+                if (ret == 0x05) reg_ah = ret;
+                reg_al = (ret == 0x05) ? 0x00 : 0x01; // according to NP2
+                reg_bh = (ret == 0x05) ? 0x00 : 0x01; // according to NP2
             }
             break;
         case 0x31: /* Return display mode and status */
@@ -4666,6 +4672,8 @@ static Bitu INT1C_PC98_Handler(void) {
     return CBRET_NONE;
 }
 
+// NTS: According to this PDF, chapter 5, INT 1Dh has additional functions on "High Resolution" PC-98 systems.
+//      [https://ia801305.us.archive.org/8/items/PC9800TechnicalDataBookBIOS1992/PC-9800TechnicalDataBook_BIOS_1992_text.pdf]
 static Bitu INT1D_PC98_Handler(void) {
     LOG_MSG("PC-98 INT 1Dh unknown call AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X",
         reg_ax,
@@ -5184,18 +5192,81 @@ static Bitu INTF2_PC98_Handler(void) {
     return CBRET_NONE;
 }
 
+// for more information see [https://ia801305.us.archive.org/8/items/PC9800TechnicalDataBookBIOS1992/PC-9800TechnicalDataBook_BIOS_1992_text.pdf]
 static Bitu PC98_BIOS_LIO(void) {
-    /* on entry, AL (from our BIOS code) is set to the call number that lead here */
-    LOG_MSG("PC-98 BIOS LIO graphics call 0x%02x with AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X",
-        reg_al,
-        reg_ax,
-        reg_bx,
-        reg_cx,
-        reg_dx,
-        reg_si,
-        reg_di,
-        SegValue(ds),
-        SegValue(es));
+    const char *call_name = "?";
+
+    switch (reg_al) {
+        case 0xA0: // GINIT
+            call_name = "GINIT";
+            goto unknown;
+        case 0xA1: // GSCREEN
+            call_name = "GSCREEN";
+            goto unknown;
+        case 0xA2: // GVIEW
+            call_name = "GVIEW";
+            goto unknown;
+        case 0xA3: // GCOLOR1
+            call_name = "GCOLOR1";
+            goto unknown;
+        case 0xA4: // GCOLOR2
+            call_name = "GCOLOR2";
+            goto unknown;
+        case 0xA5: // GCLS
+            call_name = "GCLS";
+            goto unknown;
+        case 0xA6: // GPSET
+            call_name = "GPSET";
+            goto unknown;
+        case 0xA7: // GLINE
+            call_name = "GLINE";
+            goto unknown;
+        case 0xA8: // GCIRCLE
+            call_name = "GCIRCLE";
+            goto unknown;
+        case 0xA9: // GPAINT1
+            call_name = "GPAINT1";
+            goto unknown;
+        case 0xAA: // GPAINT2
+            call_name = "GPAINT2";
+            goto unknown;
+        case 0xAB: // GGET
+            call_name = "GGET";
+            goto unknown;
+        case 0xAC: // GPUT1
+            call_name = "GPUT1";
+            goto unknown;
+        case 0xAD: // GPUT2
+            call_name = "GPUT2";
+            goto unknown;
+        case 0xAE: // GROLL
+            call_name = "GROLL";
+            goto unknown;
+        case 0xAF: // GPOINT2
+            call_name = "GPOINT2";
+            goto unknown;
+        case 0xCE: // GCOPY
+            call_name = "GCOPY";
+            goto unknown;
+        case 0x00: // GRAPH BIO
+            call_name = "GRAPH BIO";
+            goto unknown;
+        default:
+        unknown:
+            /* on entry, AL (from our BIOS code) is set to the call number that lead here */
+                LOG_MSG("PC-98 BIOS LIO graphics call 0x%02x '%s' with AX=%04X BX=%04X CX=%04X DX=%04X SI=%04X DI=%04X DS=%04X ES=%04X",
+                        reg_al,
+                        call_name,
+                        reg_ax,
+                        reg_bx,
+                        reg_cx,
+                        reg_dx,
+                        reg_si,
+                        reg_di,
+                        SegValue(ds),
+                        SegValue(es));
+                break;
+    };
 
     // from Yksoft1's patch
     reg_ah = 0;
@@ -7420,6 +7491,7 @@ private:
                 RealSetVec(ct+(IS_PC98_ARCH ? 0x10 : 0x70),BIOS_DEFAULT_IRQ815_DEF_LOCATION);
 
             // LIO graphics interface (number of entry points, unknown WORD value and offset into the segment).
+            // For more information see Chapter 6 of this PDF [https://ia801305.us.archive.org/8/items/PC9800TechnicalDataBookBIOS1992/PC-9800TechnicalDataBook_BIOS_1992_text.pdf]
             {
                 callback_pc98_lio.Install(&PC98_BIOS_LIO,CB_IRET,"LIO graphics library");
 

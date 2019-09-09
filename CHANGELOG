@@ -1,4 +1,24 @@
 0.82.22 (next)
+  - cascade interrupt ignore in service setting now
+    accepts true, false, and auto. "auto" is now the
+    default, and will choose true or false depending
+    on machine type for correct emulation either way.
+    It should no longer be necessary to add
+    "cascade interrupt ignore in service=true" to
+    your dosbox.conf every time you want to run a
+    PC-98 game properly.
+  - PC-98 FM board emulation will now load SOUND.ROM
+    into segment CC00h if available, if FM board
+    emulation is enabled.
+  - PC-98 INT 18h AH=30h updated to return AH=05h
+    AL=00h BH=00h if success, AH=00h AL=01h BH=01h
+    if failure. This is needed to get Puyo Puyo 2
+    to work, which for some reason fails if a call
+    to set 15KHz mode works.
+  - PC-98 LIO and SOUND BIOS entry points, while
+    still not implemented, have been updated to
+    print the name of the call according to an
+    online reference.
   - DOS FCB rename now supports renaming the
     volume label as MS-DOS does.
   - Fixed bug that prevented proper DOS FCB rename
