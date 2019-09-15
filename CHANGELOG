@@ -1,4 +1,9 @@
 0.82.22 (next)
+  - Debugger "SM" command now accepts segment:offset
+    syntax for memory location to write.
+  - Fixed INT 21h AH=65h bug that returns DBCS table
+    for AH=4h that should return filename uppercase
+    table.
   - Configuration GUI property settings are now
     shown in a single column wide list with scrolling.
   - In the configuration GUI, help dialogs will now
@@ -52,6 +57,13 @@
   - LABEL reimplemented to imitate MS-DOS behavior
     with regard to how it handles the command line.
   - File I/O checking and cleanup (Allofich)
+  - Integrated commits from mainline (Allofich)
+    - Handle errant IRQs as a real BIOS does. Also
+    remove r3263 workaround, as it's no longer
+    needed.
+    - Fix flag behavior of several shift/rotate
+    instructions, cause exceptions and fix
+    potential 'pop ss' problems
 0.82.21
   - Reduced title bar size of the Configuration GUI.
   - Fixed sizing and positions of some Help menu dialog
