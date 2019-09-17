@@ -103,6 +103,7 @@ int unhandled_irq_method = UNHANDLED_IRQ_SIMPLE;
 
 unsigned int reset_post_delay = 0;
 
+Bitu call_irq_default = 0;
 Bit16u biosConfigSeg=0;
 
 Bitu BIOS_DEFAULT_IRQ0_LOCATION = ~0u;       // (RealMake(0xf000,0xfea5))
@@ -7019,8 +7020,8 @@ private:
             /* reboot delay, in case the guest OS/application had something to day before hitting the "reset" signal */
             Bit32u lasttick=GetTicks();
             while ((GetTicks()-lasttick) < reset_post_delay) {
-                void CALLBACK_Idle(void);
-                CALLBACK_Idle();
+                void CALLBACK_IdleNoInts(void);
+                CALLBACK_IdleNoInts();
             }
         }
 
@@ -7571,7 +7572,8 @@ private:
         }
 
         /* Default IRQ handler */
-        Bitu call_irq_default = CALLBACK_Allocate();
+        if (call_irq_default == 0)
+            call_irq_default = CALLBACK_Allocate();
         CALLBACK_Setup(call_irq_default, &Default_IRQ_Handler, CB_IRET, "irq default");
         RealSetVec(0x0b, CALLBACK_RealPointer(call_irq_default)); // IRQ 3
         RealSetVec(0x0c, CALLBACK_RealPointer(call_irq_default)); // IRQ 4
@@ -8761,7 +8763,9 @@ public:
         cb_bios_startup_screen.Install(&cb_bios_startup_screen__func,CB_RETF,"BIOS Startup screen");
         cb_bios_boot.Install(&cb_bios_boot__func,CB_RETF,"BIOS BOOT");
         cb_bios_bootfail.Install(&cb_bios_bootfail__func,CB_RETF,"BIOS BOOT FAIL");
-        cb_pc98_rombasic.Install(&cb_pc98_entry__func,CB_RETF,"N88 ROM BASIC");
+
+        if (IS_PC98_ARCH)
+            cb_pc98_rombasic.Install(&cb_pc98_entry__func,CB_RETF,"N88 ROM BASIC");
 
         // Compatible POST routine location: jump to the callback
         {

@@ -1,4 +1,18 @@
 0.82.22 (next)
+  - Fixed mistake that placed N88 ROM BASIC stub
+    (something specific to PC-98) in memory even
+    in IBM PC/XT/AT emulation mode.
+  - Fixed some callback slot leaks that can cause
+    DOSBox-X to run out of callback slots if you
+    reset the guest system too much.
+  - Fixed invalid callback and errant interrupt
+    handling during BIOS reset delay that happens
+    if you use the keyboard shortcut to trigger
+    system reset.
+  - XMS emulation resets global enable and local
+    enable state on XMS emulation startup to fix
+    crashes related to inability to control A20 gate
+    after system reset or DOS kernel restart.
   - Debugger "SM" command now accepts segment:offset
     syntax for memory location to write.
   - Fixed INT 21h AH=65h bug that returns DBCS table
