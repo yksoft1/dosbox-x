@@ -2942,13 +2942,16 @@ static void VGA_VerticalTimer(Bitu /*val*/) {
         VGA_DisplayStartLatch(0);
         break;
     case MCH_VGA:
-    case MCH_PC98:
         PIC_AddEvent(VGA_DisplayStartLatch, (float)vga.draw.delay.vrstart);
         PIC_AddEvent(VGA_PanningLatch, (float)vga.draw.delay.vrend);
         // EGA: 82c435 datasheet: interrupt happens at display end
         // VGA: checked with scope; however disabled by default by jumper on VGA boards
         // add a little amount of time to make sure the last drawpart has already fired
         PIC_AddEvent(VGA_VertInterrupt,(float)(vga.draw.delay.vdend + 0.005));
+        break;
+    case MCH_PC98:
+        PIC_AddEvent(VGA_PanningLatch, (float)vga.draw.delay.vrend);
+        PIC_AddEvent(VGA_VertInterrupt,(float)(vga.draw.delay.vrstart + 0.0001));
         break;
     case MCH_EGA:
         PIC_AddEvent(VGA_DisplayStartLatch, (float)vga.draw.delay.vrend);
@@ -3572,6 +3575,19 @@ void VGA_SetupDrawing(Bitu /*val*/) {
 
         htotal = vga.other.htotal + 1u;
         hdend = vga.other.hdend;
+
+        if (machine == MCH_MCGA) {
+            // it seems MCGA follows the EGA/VGA model of encoding active display
+            // as N - 1 rather than CGA/MDA model of N.
+            //
+            // TODO: Verify this on real hardware. Some code in DOSLIB hw/vga2/test5.c
+            //       attempts to set active display width which can confirm this.
+            //
+            //       This is so far based on CRTC register dumps from real MCGA hardware
+            //       for each mode.
+            hdend++;
+        }
+
         hbstart = hdend;
         hbend = htotal;
         hrstart = vga.other.hsyncp;
@@ -3623,9 +3639,7 @@ void VGA_SetupDrawing(Bitu /*val*/) {
             break;
         case MCH_MCGA:
             clock = 25175000 / 2 / 8;//FIXME: Guess. Verify
-            if (vga.mode != M_TANDY2) {
-                if (!(vga.tandy.mode_control & 1)) clock /= 2;
-            }
+            if (!(vga.tandy.mode_control & 1)) clock /= 2;
             oscclock = clock * 2 * 8;
             break;
         case MCH_MDA:

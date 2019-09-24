@@ -155,6 +155,8 @@ bool osx_detect_nstouchbar(void);
 void osx_init_touchbar(void);
 #endif
 
+void ShutDownMemHandles(Section * sec);
+
 SDL_Block sdl;
 Bitu frames = 0;
 
@@ -6297,6 +6299,9 @@ bool VM_Boot_DOSBox_Kernel() {
     }
 
     if (dos_kernel_disabled) {
+        /* in case of reboot */
+        Init_MemHandles();
+
         DispatchVMEvent(VM_EVENT_DOS_BOOT); // <- just starting the DOS kernel now
 
         /* DOS kernel init */
@@ -8252,6 +8257,9 @@ fresh_boot:
             XMS_DoShutDown();
             /* and the DOS API in general */
             DOS_DoShutDown();
+
+            /* mem handles too */
+            ShutDownMemHandles(NULL);
 
             /* set the "disable DOS kernel" flag so other parts of this program
              * do not attempt to manipulate now-defunct parts of the kernel
