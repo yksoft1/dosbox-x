@@ -1,4 +1,27 @@
-0.82.22 (next)
+0.82.23 (next)
+  - Added 'skip encoding unchanged frames' option to
+    dosbox.conf. If set, AVI video capture will skip
+    video frame compression if the frame has not changed
+    from the previous frame. Option is off by default
+    at this time in case it causes any issues with users
+    and their video editing software.
+0.82.22
+  - Added Normal2x render scalers so that 'force scaler'
+    for 1x2 or 2x1 scalefactors works and you can scale
+    up 320x200/640x200 VGA modes and 640x200 CGA modes
+    by 2x.
+  - Main window titlebar now reflects whether or
+    not the debugger interface is active.
+  - Debugger interface now flushes terminal input
+    upon entering the debugger, so that keyboard
+    input prior to entering the debugger is ignored.
+  - Debugger mapper shortcut and menu item are now
+    a toggle. Selecting once will enter the debugger
+    and selecting again will resume emulation.
+  - cycles=max now displays cycle percentage correctly
+    instead of showing e.g. 100 cyc/ms
+  - (Allofich) Note and ignore INT 33, AX=53C1 call
+    for the Logitech CyberMan.
   - Fixed odd code addition that disabled (through
     the configuration) XMS, EMS, and UMB when
     booting a guest OS. This fixes a problem where
@@ -98,6 +121,9 @@
     - Fix flag behavior of several shift/rotate
     instructions, cause exceptions and fix
     potential 'pop ss' problems
+    - Add support for Print Screen key and
+    interrupt. In-game screenshot feature
+    of Descent and Descent 2 now works.
 0.82.21
   - Reduced title bar size of the Configuration GUI.
   - Fixed sizing and positions of some Help menu dialog

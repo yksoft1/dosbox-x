@@ -685,6 +685,10 @@ void GFX_SetIcon(void)
 #endif
 }
 
+#if C_DEBUG
+bool IsDebuggerActive(void);
+#endif
+
 extern std::string dosbox_title;
 
 void GFX_SetTitle(Bit32s cycles,Bits frameskip,Bits timing,bool paused){
@@ -703,9 +707,16 @@ void GFX_SetTitle(Bit32s cycles,Bits frameskip,Bits timing,bool paused){
 //  if (timing != -1) internal_timing = timing;
 //  if (frameskip != -1) internal_frameskip = frameskip;
 
-    sprintf(title,"%s%sDOSBox-X %s, %d cyc/ms",
-        dosbox_title.c_str(),dosbox_title.empty()?"":": ",
-        VERSION,(int)internal_cycles);
+    if (CPU_CycleAutoAdjust) {
+        sprintf(title,"%s%sDOSBox-X %s, %d%%",
+            dosbox_title.c_str(),dosbox_title.empty()?"":": ",
+            VERSION,(int)internal_cycles);
+    }
+    else {
+        sprintf(title,"%s%sDOSBox-X %s, %d cyc/ms",
+            dosbox_title.c_str(),dosbox_title.empty()?"":": ",
+            VERSION,(int)internal_cycles);
+    }
 
     {
         const char *what = (titlebar != NULL && *titlebar != 0) ? titlebar : RunningProgram;
@@ -730,6 +741,9 @@ void GFX_SetTitle(Bit32s cycles,Bits frameskip,Bits timing,bool paused){
     }
 
     if (paused) strcat(title," PAUSED");
+#if C_DEBUG
+    if (IsDebuggerActive()) strcat(title," DEBUGGER");
+#endif
 #if defined(C_SDL2)
     SDL_SetWindowTitle(sdl.window,title);
 #else
@@ -755,6 +769,10 @@ static void KillSwitch(bool pressed) {
 #endif
     warn_on_mem_write = true;
     throw 1;
+}
+
+void DoKillSwitch(void) {
+    KillSwitch(true);
 }
 
 void BlankDisplay(void) {
@@ -8308,8 +8326,8 @@ fresh_boot:
             if (boot_debug_break) {
                 boot_debug_break = false;
 
-                void DEBUG_Enable(bool pressed);
-                DEBUG_Enable(true);
+                Bitu DEBUG_EnableDebugger(void);
+                DEBUG_EnableDebugger();
             }
 #endif
 
@@ -8364,8 +8382,8 @@ fresh_boot:
             if (boot_debug_break) {
                 boot_debug_break = false;
 
-                void DEBUG_Enable(bool pressed);
-                DEBUG_Enable(true);
+                Bitu DEBUG_EnableDebugger(void);
+                DEBUG_EnableDebugger();
             }
 #endif
 

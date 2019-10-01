@@ -344,6 +344,10 @@ void RENDER_EndUpdate( bool abort ) {
         pitch = render.scale.cachePitch;
         if (render.frameskip.max)
             fps /= 1+render.frameskip.max;
+
+        if (Scaler_ChangedLineIndex == 0)
+            flags |= CAPTURE_FLAG_NOCHANGE;
+
         CAPTURE_AddImage( render.src.width, render.src.height, render.src.bpp, pitch,
             flags, fps, (Bit8u *)&scalerSourceCache, (Bit8u*)&render.pal.rgb );
     }
@@ -426,7 +430,7 @@ void RENDER_Reset( void ) {
         }
     }
 
-    if ((dblh && dblw) || (render.scale.forced && !dblh && !dblw)) {
+    if ((dblh && dblw) || (render.scale.forced && dblh == dblw/*this branch works best with equal scaling in both directions*/)) {
         /* Initialize always working defaults */
         if (render.scale.size == 2)
             simpleBlock = &ScaleNormal2x;
@@ -516,7 +520,10 @@ void RENDER_Reset( void ) {
       if(scalerOpGray == render.scale.op){
         simpleBlock = &ScaleGrayDw;
       }else{
-        simpleBlock = &ScaleNormalDw;
+          if (render.scale.forced && render.scale.size >= 2)
+              simpleBlock = &ScaleNormal2xDw;
+          else
+              simpleBlock = &ScaleNormalDw;
       }
     } else if (dblh && !render.scale.hardware) {
 		//Check whether tv2x and scan2x is selected
@@ -527,8 +534,11 @@ void RENDER_Reset( void ) {
         }else if(scalerOpScan == render.scale.op){
 			simpleBlock = &ScaleScanDh;
         }else{
-			simpleBlock = &ScaleNormalDh;
-		}
+            if (render.scale.forced && render.scale.size >= 2)
+                simpleBlock = &ScaleNormal2xDh;
+            else
+                simpleBlock = &ScaleNormalDh;
+        }
     } else  {
 forcenormal:
         complexBlock = 0;
