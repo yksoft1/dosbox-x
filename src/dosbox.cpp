@@ -1559,8 +1559,7 @@ void DOSBOX_SetupConfigSections(void) {
     /* Default changed to 0x04 for "Blues Brothers" at Allofich's request [https://github.com/joncampbell123/dosbox-x/issues/1273] */
     Phex = secprop->Add_hex("vga 3da undefined bits",Property::Changeable::WhenIdle,0x04);
     Phex->Set_help("VGA status port 3BA/3DAh only defines bits 0 and 3. This setting allows you to assign a bit pattern to the undefined bits.\n"
-                   "The purpose of this hack is to deal with demos that read and handle port 3DAh in ways that might crash if all are zero.\n"
-                   "By default, this value is zero.");
+                   "The purpose of this hack is to deal with demos that read and handle port 3DAh in ways that might crash if all are zero.");
 
     Pbool = secprop->Add_bool("unmask timer on int 10 setmode",Property::Changeable::OnlyAtStart,false);
     Pbool->Set_help("If set, INT 10h will unmask IRQ 0 (timer) when setting video modes.");
@@ -2487,8 +2486,8 @@ void DOSBOX_SetupConfigSections(void) {
 
     /* added for "baoxiao-sanguozhi" which for some reason uses both port 61h bit 4 (DRAM refresh) and PIT timer 2 (PC speaker)
      * for game timing IN ADDITION TO the BIOS timer counter in the BIOS data area. Game does not set bit 0 itself, so if the
-     * bit wasn't set, the game will hang when asking for a name. Setting this option to "true" tells the BIOS to start the system
-     * with that bit set so games like that can run. [https://github.com/joncampbell123/dosbox-x/issues/1274].
+     * bit wasn't set, the game will hang when asking for a password. Setting this option to "true" tells the BIOS to start the
+     * system with that bit set so games like that can run. [https://github.com/joncampbell123/dosbox-x/issues/1274].
      *
      * Note that setting clock gate enable will not make audible sound through the PC speaker unless bit 1 (output gate enable)
      * is also set. Setting bits [1:0] = to 01 is a way to cycle PIT timer 2 without making audible noise. */

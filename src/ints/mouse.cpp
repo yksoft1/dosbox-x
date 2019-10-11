@@ -885,10 +885,17 @@ void Mouse_AfterNewVideoMode(bool setmode) {
     mouse.first_range_sety = false;
     mouse.gran_x = (Bit16s)0xffff;
     mouse.gran_y = (Bit16s)0xffff;
-    mouse.min_x = 0;
-    mouse.max_x = 639;
-    mouse.min_y = 0;
-    mouse.max_y = 479;
+
+    /* If new video mode is SVGA and this is NOT a mouse driver reset, then do not reset min/max.
+     * This is needed for "down-by-the-laituri-peli" (some sort of Finnish band tour simulation?)
+     * which sets the min/max range and THEN sets up 640x480 256-color mode through the VESA BIOS.
+     * Without this fix, the cursor is constrained to the upper left hand quadrant of the screen. */
+    if (!setmode || mode <= 0x13/*non-SVGA*/) {
+        mouse.min_x = 0;
+        mouse.max_x = 639;
+        mouse.min_y = 0;
+        mouse.max_y = 479;
+    }
 
     if (machine == MCH_HERC) {
         // DeluxePaint II again...
@@ -946,15 +953,21 @@ void Mouse_AfterNewVideoMode(bool setmode) {
     default:
         LOG(LOG_MOUSE,LOG_ERROR)("Unhandled videomode %X on reset",mode);
         mouse.inhibit_draw = true;
-        if (CurMode != NULL) {
-            mouse.first_range_setx = true;
-            mouse.first_range_sety = true;
-            mouse.max_x = CurMode->swidth - 1;
-            mouse.max_y = CurMode->sheight - 1;
-        }
-        else {
-            mouse.max_x = 639;
-            mouse.max_y = 479;
+        /* If new video mode is SVGA and this is NOT a mouse driver reset, then do not reset min/max.
+         * This is needed for "down-by-the-laituri-peli" (some sort of Finnish band tour simulation?)
+         * which sets the min/max range and THEN sets up 640x480 256-color mode through the VESA BIOS.
+         * Without this fix, the cursor is constrained to the upper left hand quadrant of the screen. */
+        if (!setmode) {
+            if (CurMode != NULL) {
+                mouse.first_range_setx = true;
+                mouse.first_range_sety = true;
+                mouse.max_x = CurMode->swidth - 1;
+                mouse.max_y = CurMode->sheight - 1;
+            }
+            else {
+                mouse.max_x = 639;
+                mouse.max_y = 479;
+            }
         }
         break;
     }
@@ -1105,11 +1118,24 @@ static Bitu INT33_Handler(void) {
              *      and then set a mouse range of x=0-1279 and y=0-479. Using the FIRST range
              *      set after mode set is the only way to make sure mouse pointer integration
              *      tracks the guest pointer properly. */
-            if (mouse.first_range_setx) {
+            if (mouse.first_range_setx || mouse.buttons == 0) {
                 if (mouse.min_x == 0 && mouse.max_x > 0) {
                     // most games redefine the range so they can use a saner range matching the screen
-                    mouse.max_screen_x = mouse.max_x;
-                    LOG(LOG_MOUSE, LOG_NORMAL)("Define Horizontal range min:%d max:%d defines the bounds of the screen", min, max);
+
+                    // Apply sanity rounding.
+                    //
+                    // Daggerfall: Sets max to 310 instead of 320, probably to prevent drawing the cursor
+                    //             partially offscreen. */
+                    Bit16s nval = mouse.max_x;
+                    if (nval >= ((Bit16s)CurMode->swidth - 32) && nval <= ((Bit16s)CurMode->swidth + 32))
+                        nval = (Bit16s)CurMode->swidth;
+                    else if (nval >= (((Bit16s)CurMode->swidth - 32) * 2) && nval <= (((Bit16s)CurMode->swidth + 32) * 2))
+                        nval = (Bit16s)CurMode->swidth * 2;
+
+                    if (mouse.max_screen_x != nval) {
+                        mouse.max_screen_x = nval;
+                        LOG(LOG_MOUSE, LOG_NORMAL)("Define Horizontal range min:%d max:%d defines the bounds of the screen", min, max);
+                    }
                 }
                 mouse.first_range_setx = false;
             }
@@ -1140,11 +1166,24 @@ static Bitu INT33_Handler(void) {
              *      and then set a mouse range of x=0-1279 and y=0-479. Using the FIRST range
              *      set after mode set is the only way to make sure mouse pointer integration
              *      tracks the guest pointer properly. */
-            if (mouse.first_range_sety) {
+            if (mouse.first_range_sety || mouse.buttons == 0) {
                 if (mouse.min_y == 0 && mouse.max_y > 0) {
                     // most games redefine the range so they can use a saner range matching the screen
-                    mouse.max_screen_y = mouse.max_y;
-                    LOG(LOG_MOUSE, LOG_NORMAL)("Define Vertical range min:%d max:%d defines the bounds of the screen", min, max);
+
+                    // Apply sanity rounding.
+                    //
+                    // Daggerfall: Sets max to 310 instead of 320, probably to prevent drawing the cursor
+                    //             partially offscreen. */
+                    Bit16s nval = mouse.max_y;
+                    if (nval >= ((Bit16s)CurMode->sheight - 32) && nval <= ((Bit16s)CurMode->sheight + 32))
+                        nval = (Bit16s)CurMode->sheight;
+                    else if (nval >= (((Bit16s)CurMode->sheight - 32) * 2) && nval <= (((Bit16s)CurMode->sheight + 32) * 2))
+                        nval = (Bit16s)CurMode->sheight * 2;
+
+                    if (mouse.max_screen_y != nval) {
+                        mouse.max_screen_y = nval;
+                        LOG(LOG_MOUSE, LOG_NORMAL)("Define Vertical range min:%d max:%d defines the bounds of the screen", min, max);
+                    }
                 }
                 mouse.first_range_sety = false;
             }

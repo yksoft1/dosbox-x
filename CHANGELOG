@@ -1,4 +1,26 @@
 0.82.23 (next)
+  - Added PC-98 INT 1Bh AH=03h SCSI BIOS command, which
+    allows FreeDOS98 to boot.
+  - INT 33h emulation fixed not to reset mouse min/max
+    range if the new video mode is a VESA BIOS SVGA
+    mode (not a standard VGA mode). Some games seem to
+    define the mouse min/max range AND THEN set the
+    VESA BIOS mode, not the other way around.
+  - INT 33h define range functions now apply rounding
+    to the max range if the range is close to the
+    dimensions of the screen, for games like Daggerfall
+    that set the cursor maximum range to values close to,
+    but not exactly, the dimensions of the VGA screen.
+  - INT 33h define range functions updated to accept max
+    ranges for mapping host to guest if set just after
+    video modeset or if those INT 33h functions are called
+    when no mouse buttons are down.
+  - INT 10h AH=4Fh AL=08h (Set DAC width) now correctly
+    set AL=4Fh to indicate the call is supported.
+  - VGA DAC palette writes are now ALWAYS masked to 6-bit
+    unless 8-BIT DAC mode is ON and enabled. This fixes
+    palette problems with Amulets and Armor.
+  - VGA DAC 6/8-bit palette management code simplified
   - Added dosbox.conf option to instruct DOSBox-X to leave
     the PC speaker clock gate enabled if set, for games
     that use that PIT output as a time source. Setting

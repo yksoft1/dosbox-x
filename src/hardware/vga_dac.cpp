@@ -54,10 +54,10 @@ Note:  Each read or write of this register will cycle through first the
 enum {DAC_READ,DAC_WRITE};
 
 static void VGA_DAC_SendColor( Bitu index, Bitu src ) {
-    /* NTS: Don't forget red/green/blue are 6-bit RGB not 8-bit RGB */
-    const Bit8u red = vga.dac.rgb[src].red;
-    const Bit8u green = vga.dac.rgb[src].green;
-    const Bit8u blue = vga.dac.rgb[src].blue;
+    const Bit8u dacshift = vga_8bit_dac ? 0u : 2u;
+    const Bit8u red = vga.dac.rgb[src].red << dacshift;
+    const Bit8u green = vga.dac.rgb[src].green << dacshift;
+    const Bit8u blue = vga.dac.rgb[src].blue << dacshift;
 
     /* FIXME: CGA composite mode calls RENDER_SetPal itself, which conflicts with this code */
     if (vga.mode == M_CGA16)
@@ -65,54 +65,28 @@ static void VGA_DAC_SendColor( Bitu index, Bitu src ) {
 
     /* FIXME: Can someone behind the GCC project explain how (unsigned int) OR (unsigned int) somehow becomes (signed int)?? */
 
-    if (vga_8bit_dac) {
-        if (GFX_bpp >= 24) /* FIXME: Assumes 8:8:8. What happens when desktops start using the 10:10:10 format? */
-            vga.dac.xlat32[index] =
-                (uint32_t)(blue << (GFX_Bshift)) |
-                (uint32_t)(green << (GFX_Gshift)) |
-                (uint32_t)(red<< (GFX_Rshift)) |
-                (uint32_t)GFX_Amask;
-        else {
-            /* FIXME: Assumes 5:6:5. I need to test against 5:5:5 format sometime. Perhaps I could dig out some older VGA cards and XFree86 drivers that support that format? */
-            vga.dac.xlat16[index] =
-                (uint16_t)(((blue&0xffu)>>3u)<<GFX_Bshift) |
-                (uint16_t)(((green&0xffu)>>2u)<<GFX_Gshift) |
-                (uint16_t)(((red&0xffu)>>3u)<<GFX_Rshift) |
-                (uint16_t)GFX_Amask;
-
-            /* PC-98 mode always renders 32bpp, therefore needs this fix */
-            if (GFX_Bshift == 0)
-                vga.dac.xlat32[index] = (uint32_t)(blue << 0U) | (uint32_t)(green << 8U) | (uint32_t)(red << 16U);
-            else
-                vga.dac.xlat32[index] = (uint32_t)(blue << 16U) | (uint32_t)(green << 8U) | (uint32_t)(red << 0U);
-        }
-
-        RENDER_SetPal( (Bit8u)index, red, green, blue );
-    }
+    if (GFX_bpp >= 24) /* FIXME: Assumes 8:8:8. What happens when desktops start using the 10:10:10 format? */
+        vga.dac.xlat32[index] =
+            (uint32_t)((blue&0xffu) << (GFX_Bshift)) |
+            (uint32_t)((green&0xffu) << (GFX_Gshift)) |
+            (uint32_t)((red&0xffu) << (GFX_Rshift)) |
+            (uint32_t)GFX_Amask;
     else {
-        if (GFX_bpp >= 24) /* FIXME: Assumes 8:8:8. What happens when desktops start using the 10:10:10 format? */
-            vga.dac.xlat32[index] =
-                (uint32_t)(blue << (2u + GFX_Bshift)) |
-                (uint32_t)(green << (2u + GFX_Gshift)) |
-                (uint32_t)(red<<(2u + GFX_Rshift)) |
-                (uint32_t)GFX_Amask;
-        else {
-            /* FIXME: Assumes 5:6:5. I need to test against 5:5:5 format sometime. Perhaps I could dig out some older VGA cards and XFree86 drivers that support that format? */
-            vga.dac.xlat16[index] =
-                (uint16_t)(((blue&0x3fu)>>1u)<<GFX_Bshift) |
-                (uint16_t)((green&0x3fu)<<GFX_Gshift) |
-                (uint16_t)(((red&0x3fu)>>1u)<<GFX_Rshift) |
-                (uint16_t)GFX_Amask;
+        /* FIXME: Assumes 5:6:5. I need to test against 5:5:5 format sometime. Perhaps I could dig out some older VGA cards and XFree86 drivers that support that format? */
+        vga.dac.xlat16[index] =
+            (uint16_t)(((blue&0xffu)>>3u)<<GFX_Bshift) |
+            (uint16_t)(((green&0xffu)>>2u)<<GFX_Gshift) |
+            (uint16_t)(((red&0xffu)>>3u)<<GFX_Rshift) |
+            (uint16_t)GFX_Amask;
 
-            /* PC-98 mode always renders 32bpp, therefore needs this fix */
-            if (GFX_Bshift == 0)
-                vga.dac.xlat32[index] = (uint32_t)(blue << 2U) | (uint32_t)(green << 10U) | (uint32_t)(red << 18U);
-            else
-                vga.dac.xlat32[index] = (uint32_t)(blue << 18U) | (uint32_t)(green << 10U) | (uint32_t)(red << 2U);
-        }
-
-        RENDER_SetPal( (Bit8u)index, (red << 2u) | ( red >> 4u ), (green << 2u) | ( green >> 4u ), (blue << 2u) | ( blue >> 4u ) );
+        /* PC-98 mode always renders 32bpp, therefore needs this fix */
+        if (GFX_Bshift == 0)
+            vga.dac.xlat32[index] = (uint32_t)(blue << 0U) | (uint32_t)(green << 8U) | (uint32_t)(red << 16U);
+        else
+            vga.dac.xlat32[index] = (uint32_t)(blue << 16U) | (uint32_t)(green << 8U) | (uint32_t)(red << 0U);
     }
+
+    RENDER_SetPal( (Bit8u)index, red, green, blue );
 }
 
 void VGA_DAC_UpdateColor( Bitu index ) {
@@ -245,7 +219,11 @@ void write_p3c9(Bitu port,Bitu val,Bitu iolen) {
     (void)port;//UNUSED
     vga.dac.hidac_counter=0;
 
-    if (!enable_vga_8bit_dac)
+    // allow the full 8 bit ONLY if 8-bit DAC emulation is enabled AND 8-bit DAC mode is on.
+    // masking to 6 bits is REQUIRED for some games like "Amulets and Armor", where apparently
+    // the use of signed char with palette values can cause "overbright" effects if it can
+    // read back the full 8 bits.
+    if (!vga_8bit_dac)
         val&=0x3f;
 
     if (vga.dac.pel_index < 3) {
