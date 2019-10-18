@@ -729,7 +729,6 @@ private:
         bool tryload = (*error)?true:false;
         *error = 0;
         Bit8u drive;
-        FILE *tmpfile;
         char fullname[DOS_PATHLENGTH];
 
         localDrive* ldp=0;
@@ -739,7 +738,7 @@ private:
             ldp=dynamic_cast<localDrive*>(Drives[drive]);
             if(!ldp) return NULL;
 
-            tmpfile = ldp->GetSystemFilePtr(fullname, "rb");
+            FILE *tmpfile = ldp->GetSystemFilePtr(fullname, "rb");
             if(tmpfile == NULL) {
                 if (!tryload) *error=1;
                 return NULL;
@@ -815,6 +814,7 @@ public:
     void Run(void) {
         std::string bios;
         std::string boothax_str;
+        bool pc98_640x200 = true;
         bool bios_boot = false;
         bool swaponedrive = false;
         bool force = false;
@@ -828,6 +828,12 @@ public:
 
         if (cmd->FindExist("-swap-one-drive",true))
             swaponedrive = true;
+
+        // debugging options
+        if (cmd->FindExist("-pc98-640x200",true))
+            pc98_640x200 = true;
+        if (cmd->FindExist("-pc98-640x400",true))
+            pc98_640x200 = false;
 
         if (cmd->FindExist("-force",true))
             force = true;
@@ -1154,7 +1160,7 @@ public:
         bool pc98_sect128 = false;
         unsigned int bootsize = imageDiskList[drive-65]->getSectSize();
 
-        if (!has_read && IS_PC98_ARCH) {
+        if (!has_read && IS_PC98_ARCH && drive < 'C') {
             /* this may be one of those odd FDD images where track 0, head 0 is all 128-byte sectors
              * and the rest of the disk is 256-byte sectors. */
             if (imageDiskList[drive - 65]->Read_Sector(0, 0, 1, (Bit8u *)&bootarea, 128) == 0 &&
@@ -1168,7 +1174,7 @@ public:
             }
         }
 
-        if (!has_read && IS_PC98_ARCH) {
+        if (!has_read && IS_PC98_ARCH && drive < 'C') {
             /* another nonstandard one with track 0 having 256 bytes/sector while the rest have 1024 bytes/sector */
             if (imageDiskList[drive - 65]->Read_Sector(0, 0, 1, (Bit8u *)&bootarea,       256) == 0 &&
                 imageDiskList[drive - 65]->Read_Sector(0, 0, 2, (Bit8u *)&bootarea + 256, 256) == 0 &&
@@ -1483,10 +1489,11 @@ public:
                 reg_eax = 0x30;
                 reg_edx = 0x1;
 
-                /* Guess: If the boot sector is smaller than 512 bytes/sector, the PC-98 BIOS
-                 *        probably sets the graphics layer to 640x200. Some games (Ys) do not
-                 *        set but assume instead that is the mode of the graphics layer */
-                if (pc98_sect128) {
+                /* It seems 640x200 8-color digital mode is the state of the graphics hardware when the
+                 * BIOS boots the OS, and some games like Ys II assume the hardware is in this state.
+                 *
+                 * If I am wrong, you can pass --pc98-640x400 as a command line option to disable this. */
+                if (pc98_640x200) {
                     reg_eax = 0x4200;   // setup 640x200 graphics
                     reg_ecx = 0x8000;   // lower
                     CALLBACK_RunRealInt(0x18);
@@ -2118,11 +2125,13 @@ restart_int:
         }
         if(fseeko64(f,static_cast<off_t>(size - 1ull),SEEK_SET)) {
             WriteOut(MSG_Get("PROGRAM_IMGMAKE_NOT_ENOUGH_SPACE"),size);
+            fclose(f);
             return;
         }
         Bit8u bufferbyte=0;
         if(fwrite(&bufferbyte,1,1,f)!=1) {
             WriteOut(MSG_Get("PROGRAM_IMGMAKE_NOT_ENOUGH_SPACE"),size);
+            fclose(f);
             return;
         }
 
@@ -2634,10 +2643,10 @@ quit:
 };
 
 bool ElTorito_ChecksumRecord(unsigned char *entry/*32 bytes*/) {
-    unsigned int word,chk=0,i;
+    unsigned int chk=0,i;
 
     for (i=0;i < 16;i++) {
-        word = ((unsigned int)entry[0]) + ((unsigned int)entry[1] << 8);
+        unsigned int word = ((unsigned int)entry[0]) + ((unsigned int)entry[1] << 8);
         chk += word;
         entry += 2;
     }
@@ -3504,8 +3513,8 @@ private:
                 }
             }
 
-            DOS_Drive* newDrive = NULL;
             if (!errorMessage) {
+                DOS_Drive* newDrive = NULL;
                 if (vhdImage) {
                     newDrive = new fatDrive(vhdImage, options);
                     vhdImage = NULL;

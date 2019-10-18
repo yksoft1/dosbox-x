@@ -1382,7 +1382,7 @@ void MenuShadeRect(int x,int y,int w,int h) {
             x = 0;
         }
         if (y < 0) {
-            y += h;
+            h += y;
             y = 0;
         }
         if ((x+w) > sdl.surface->w)
@@ -1469,7 +1469,7 @@ void MenuDrawRect(int x,int y,int w,int h,Bitu color) {
             x = 0;
         }
         if (y < 0) {
-            y += h;
+            h += y;
             y = 0;
         }
         if ((x+w) > sdl.surface->w)

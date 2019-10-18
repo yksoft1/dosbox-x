@@ -81,7 +81,7 @@ public:
 		Bit16u  wReserved;
 		Bit8u	driveLetter;
 		Bit8u	numSubUnits;
-	} GCC_ATTRIBUTE(packed) TDeviceHeader;
+    } GCC_ATTRIBUTE(packed) TDeviceHeader = {};
 	#ifdef _MSC_VER
 	#pragma pack()
 	#endif
@@ -671,7 +671,6 @@ bool CMscdex::GetDirectoryEntry(Bit16u drive, bool copyFlag, PhysPt pathname, Ph
 	char	searchName[256];
 	char	entryName[256];
 	bool	foundComplete = false;
-	bool	foundName;
 	bool	nextPart = true;
 	char*	useName = 0;
     Bit8u   entryLength, nameLength;
@@ -700,12 +699,11 @@ bool CMscdex::GetDirectoryEntry(Bit16u drive, bool copyFlag, PhysPt pathname, Ph
 	// get directory position
 	Bit32u dirEntrySector	= mem_readd(defBuffer+offset+2);
 	Bits dirSize		= (Bit32s)mem_readd(defBuffer+offset+10);
-	Bit16u index;
 	while (dirSize>0) {
-		index = 0;
+		Bit16u index = 0;
 		if (!ReadSectors(GetSubUnit(drive),false,dirEntrySector,1,defBuffer)) return false;
 		// Get string part
-		foundName	= false;
+		bool foundName = false;
 		if (nextPart) {
 			if (searchPos) { 
 				useName = searchPos; 

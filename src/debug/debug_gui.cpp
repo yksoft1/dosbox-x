@@ -614,14 +614,14 @@ void DEBUG_ShowMsg(char const* format,...) {
     /* remove newlines if present */
     while (len > 0 && buf[len-1] == '\n') buf[--len] = 0;
 
-	if (do_LOG_stderr || debuglog == NULL)
-		stderrlog = true;
-
 #if C_DEBUG
 	if (dbg.win_out != NULL)
 		stderrlog = false;
     else
         stderrlog = true;
+#else
+	if (do_LOG_stderr || debuglog == NULL)
+		stderrlog = true;
 #endif
 
 	if (debuglog != NULL) {
@@ -674,15 +674,13 @@ void DEBUG_ShowMsg(char const* format,...) {
 
     if (IsDebuggerActive() && debugPageStopAt > 0) {
         if (++debugPageCounter >= debugPageStopAt) {
-            int key;
-
             debugPageCounter = 0;
             DEBUG_RefreshPage(0);
             DEBUG_DrawInput();
 
             /* pause, wait for input */
             do {
-                key = getch();
+                int key = getch();
                 if (key > 0) {
                     if (key == ' ' || key == 0x0A) {
                         /* continue */

@@ -895,19 +895,29 @@ void VGA_Reset(Section*) {
      *        various motherboard chipsets known to "steal"
      *        off the top of system RAM, like Intel and
      *        Chips & Tech VGA implementations? */
-    vga.mem.memsize  = _MB_bytes(section->Get_int("vmemsize"));
-    vga.mem.memsize += _KB_bytes(section->Get_int("vmemsizekb"));
-    vga.mem.memsize  = (vga.mem.memsize + 0xFFFu) & (~0xFFFu);
-    /* mainline compatible: vmemsize == 0 means 512KB */
-    if (vga.mem.memsize == 0) vga.mem.memsize = _KB_bytes(512);
+    {
+        int sz_m = section->Get_int("vmemsize");
+        int sz_k = section->Get_int("vmemsizekb");
 
-    /* round up to the nearest power of 2 (TODO: Any video hardware that uses non-power-of-2 sizes?).
-     * A lot of DOSBox's VGA emulation code assumes power-of-2 VRAM sizes especially when wrapping
-     * memory addresses with (a & (vmemsize - 1)) type code. */
-    if (!is_power_of_2(vga.mem.memsize)) {
-        Bitu i = int_log2(vga.mem.memsize) + 1u;
-        vga.mem.memsize = 1u << i;
-        LOG(LOG_VGA,LOG_WARN)("VGA RAM size requested is not a power of 2, rounding up to %uKB",vga.mem.memsize>>10);
+        if (sz_m >= 0) {
+            vga.mem.memsize  = _MB_bytes((unsigned int)sz_m);
+            vga.mem.memsize += _KB_bytes((unsigned int)sz_k);
+            vga.mem.memsize  = (vga.mem.memsize + 0xFFFu) & (~0xFFFu);
+            /* mainline compatible: vmemsize == 0 means 512KB */
+            if (vga.mem.memsize == 0) vga.mem.memsize = _KB_bytes(512);
+
+            /* round up to the nearest power of 2 (TODO: Any video hardware that uses non-power-of-2 sizes?).
+             * A lot of DOSBox's VGA emulation code assumes power-of-2 VRAM sizes especially when wrapping
+             * memory addresses with (a & (vmemsize - 1)) type code. */
+            if (!is_power_of_2(vga.mem.memsize)) {
+                Bitu i = int_log2(vga.mem.memsize) + 1u;
+                vga.mem.memsize = 1u << i;
+                LOG(LOG_VGA,LOG_WARN)("VGA RAM size requested is not a power of 2, rounding up to %uKB",vga.mem.memsize>>10);
+            }
+        }
+        else {
+            vga.mem.memsize = 0; /* machine-specific code will choose below */
+        }
     }
 
     /* sanity check according to adapter type.
@@ -929,7 +939,8 @@ void VGA_Reset(Section*) {
             break;
         case MCH_EGA:
                  // EGA cards supported either 64KB, 128KB or 256KB.
-                 if (vga.mem.memsize <= _KB_bytes(64))  vga.mem.memsize = _KB_bytes(64);
+                 if (vga.mem.memsize == 0)              vga.mem.memsize = _KB_bytes(256);//default
+            else if (vga.mem.memsize <= _KB_bytes(64))  vga.mem.memsize = _KB_bytes(64);
             else if (vga.mem.memsize <= _KB_bytes(128)) vga.mem.memsize = _KB_bytes(128);
             else                                        vga.mem.memsize = _KB_bytes(256);
             break;
@@ -938,7 +949,9 @@ void VGA_Reset(Section*) {
             //       How does that work exactly, especially when 640x480 requires about 37KB per plane?
             //       Did these cards have some means to chain two bitplanes odd/even in the same way
             //       tha EGA did it?
-            if (vga.mem.memsize < _KB_bytes(256)) vga.mem.memsize = _KB_bytes(256);
+            if (vga.mem.memsize != 0 || svgaCard == SVGA_None) {
+                if (vga.mem.memsize < _KB_bytes(256)) vga.mem.memsize = _KB_bytes(256);
+            }
             break;
         case MCH_AMSTRAD:
             if (vga.mem.memsize < _KB_bytes(64)) vga.mem.memsize = _KB_bytes(64); /* FIXME: Right? */
@@ -1354,6 +1367,7 @@ extern uint8_t                     pc98_pal_analog[256*3]; /* G R B    0x0..0xF 
 extern uint8_t                     pc98_pal_digital[8];    /* G R B    0x0..0x7 */
 
 void pc98_update_palette(void);
+void UpdateCGAFromSaveState(void);
 
 void VGA_LoadState(Section *sec) {
     (void)sec;//UNUSED
@@ -1401,6 +1415,17 @@ void VGA_LoadState(Section *sec) {
             }
         }
 
+        {
+            ZIPFileEntry *ent = savestate_zip.get_entry("cgareg.txt");
+            if (ent != NULL) {
+                zip_nv_pair_map nv(*ent);
+                vga.tandy.mode_control =        (unsigned char)nv.get_ulong("cga.mode_control");
+                vga.tandy.color_select =        (unsigned char)nv.get_ulong("cga.color_select");
+            }
+        }
+
+        UpdateCGAFromSaveState();
+
         for (unsigned int i=0;i < 0x10;i++)
             VGA_ATTR_SetPalette(i,vga.attr.palette[i]);
 
@@ -1445,6 +1470,18 @@ void VGA_SaveState(Section *sec) {
                     tmp[c*3 + 2] = vga.dac.rgb[c].blue;
                 }
                 ent->write(tmp, 256 * 3);
+            }
+        }
+
+        {
+            char tmp[512],*w=tmp;
+
+            ZIPFileEntry *ent = savestate_zip.new_entry("cgareg.txt");
+            if (ent != NULL) {
+                w += sprintf(w,"cga.mode_control=0x%x\n",(unsigned int)vga.tandy.mode_control);
+                w += sprintf(w,"cga.color_select=0x%x\n",(unsigned int)vga.tandy.color_select);
+                assert(w < (tmp + sizeof(tmp)));
+                ent->write(tmp, (size_t)(w - tmp));
             }
         }
     }

@@ -1,4 +1,23 @@
 0.82.23 (next)
+  - BIOS bootup screen now shows correct text for CPU
+    type instead of "? CPU" when cputype=auto.
+  - PC-98 256-color mode fixed to ignore doublescan
+    and 200-line bits of the GDC to match real hardware
+    behavior. This fixes display problems with
+    "Alone in the Dark"
+  - BOOT command will now always set 640x200 8-color
+    graphics mode when booting PC-98 disk images,
+    to match the apparent behavior of real hardware.
+  - PC-98 hardware apparently allows writing port 6Ah
+    to jump directly to 256-color mode from 8-color
+    mode, update DOSBox-X emulation to allow it.
+    This fixes the PC-9821 port of "Alone in the Dark".
+  - Slow CGA memory access handler now wraps to 16KB
+    correctly, and resolves a segfault that can happen
+    if the last 16KB is accessed by the guest if
+    vmemsizekb=16.
+  - vmemsize default is now -1, which means to pick a
+    video memory size automatically.
   - Added PC-98 INT 1Bh AH=03h SCSI BIOS command, which
     allows FreeDOS98 to boot.
   - INT 33h emulation fixed not to reset mouse min/max

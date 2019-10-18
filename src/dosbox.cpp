@@ -300,11 +300,10 @@ extern bool DOSBox_Paused();
 
 static Bitu Normal_Loop(void) {
     bool saved_allow = dosbox_allow_nonrecursive_page_fault;
-    Bit32u ticksNew;
     Bits ret;
 
     if (!menu.hidecycles || menu.showrt) { /* sdlmain.cpp/render.cpp doesn't even maintain the frames count when hiding cycles! */
-        ticksNew = GetTicks();
+        Bit32u ticksNew = GetTicks();
         if (ticksNew >= Ticks) {
             Bit32u interval = ticksNew - ticksLastFramecounter;
             double rtnow = PIC_FullIndex();
@@ -480,11 +479,10 @@ void increaseticks() { //Make it return ticksRemain and set it in the function a
         Bit32s ratio = (Bit32s)((ticksScheduled * (CPU_CyclePercUsed * 90 * 1024 / 100 / 100)) / ticksDone);
         Bit32s new_cmax = (Bit32s)CPU_CycleMax;
         Bit64s cproc = (Bit64s)CPU_CycleMax * (Bit64s)ticksScheduled;
-        double ratioremoved = 0.0; //increase scope for logging
         if (cproc > 0) {
             /* ignore the cycles added due to the IO delay code in order
                to have smoother auto cycle adjustments */
-            ratioremoved = (double)CPU_IODelayRemoved / (double)cproc;
+            double ratioremoved = (double)CPU_IODelayRemoved / (double)cproc;
             if (ratioremoved < 1.0) {
                 double ratio_not_removed = 1 - ratioremoved;
                 ratio = (Bit32s)((double)ratio * ratio_not_removed);
@@ -1149,13 +1147,14 @@ void DOSBOX_SetupConfigSections(void) {
             "will do nothing but cause a significant drop in frame rate which is probably not\n"
             "what you want. Recommended values -1, 0 to 2000.");
 
-    Pint = secprop->Add_int("vmemsize", Property::Changeable::WhenIdle,2);
-    Pint->SetMinMax(0,8);
+    Pint = secprop->Add_int("vmemsize", Property::Changeable::WhenIdle,-1);
+    Pint->SetMinMax(-1,8);
     Pint->Set_help(
         "Amount of video memory in megabytes.\n"
         "  The maximum resolution and color depth the svga_s3 will be able to display\n"
         "  is determined by this value.\n "
-        "  0: 512k (800x600  at 256 colors)\n"
+        " -1: auto (vmemsizekb is ignored)\n"
+        "  0: 512k (800x600  at 256 colors) if vmemsizekb=0\n"
         "  1: 1024x768  at 256 colors or 800x600  at 64k colors\n"
         "  2: 1600x1200 at 256 colors or 1024x768 at 64k colors or 640x480 at 16M colors\n"
         "  4: 1600x1200 at 64k colors or 1024x768 at 16M colors\n"
@@ -1959,7 +1958,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pmulti_remain->SetValue("auto",/*init*/true);
     Pstring->Set_values(cyclest);
 
-    Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::Always,"");
+    Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::Always,"");
 
     Pint = secprop->Add_int("cycleup",Property::Changeable::Always,10);
     Pint->SetMinMax(1,1000000);
@@ -2627,7 +2626,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring = Pmulti_remain->GetSection()->Add_string("type",Property::Changeable::WhenIdle,"dummy");
     Pmulti_remain->SetValue("dummy",/*init*/true);
     Pstring->Set_values(serials);
-    Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
+    Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
     Pmulti_remain->Set_help(
         "set type of device connected to com port.\n"
         "Can be disabled, dummy, modem, nullmodem, directserial.\n"
@@ -2645,21 +2644,21 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring = Pmulti_remain->GetSection()->Add_string("type",Property::Changeable::WhenIdle,"dummy");
     Pmulti_remain->SetValue("dummy",/*init*/true);
     Pstring->Set_values(serials);
-    Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
+    Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
     Pmulti_remain->Set_help("see serial1");
 
     Pmulti_remain = secprop->Add_multiremain("serial3",Property::Changeable::WhenIdle," ");
     Pstring = Pmulti_remain->GetSection()->Add_string("type",Property::Changeable::WhenIdle,"disabled");
     Pmulti_remain->SetValue("disabled",/*init*/true);
     Pstring->Set_values(serials);
-    Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
+    Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
     Pmulti_remain->Set_help("see serial1");
 
     Pmulti_remain = secprop->Add_multiremain("serial4",Property::Changeable::WhenIdle," ");
     Pstring = Pmulti_remain->GetSection()->Add_string("type",Property::Changeable::WhenIdle,"disabled");
     Pmulti_remain->SetValue("disabled",/*init*/true);
     Pstring->Set_values(serials);
-    Pstring = Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
+    Pmulti_remain->GetSection()->Add_string("parameters",Property::Changeable::WhenIdle,"");
     Pmulti_remain->Set_help("see serial1");
 
 #if C_PRINTER
@@ -3148,7 +3147,7 @@ void DOSBOX_SetupConfigSections(void) {
                 "         Setting the IRQ to one already occupied by another device or IDE controller will trigger \"resource conflict\" errors in Windows 95.\n"
                 "         Using IRQ 9, 12, 13, or IRQ 2-7 may cause problems with MS-DOS CD-ROM drivers.");
 
-        Phex = secprop->Add_hex("io",Property::Changeable::WhenIdle,0/*use IDE default*/);
+        secprop->Add_hex("io",Property::Changeable::WhenIdle,0/*use IDE default*/);
         if (i == 0) Pint->Set_help("Base I/O port for IDE controller. Set to 0 for default.\n"
                 "WARNING: Setting the I/O port to non-standard values will not work unless the guest OS is using the ISA PnP BIOS to detect the IDE controller.\n"
                 "         Using any port other than 1F0, 170, 1E8 or 168 can prevent MS-DOS CD-ROM drivers from detecting the IDE controller.");
