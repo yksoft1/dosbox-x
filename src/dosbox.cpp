@@ -2558,8 +2558,8 @@ void DOSBOX_SetupConfigSections(void) {
 		const auto count = sticks[i];
 		for (auto j = 0; j < count; j++)
 		{
-			const auto joy = std::to_string(i + 1);
-			const auto stick = std::to_string(j + 1);
+			const auto joy = my_to_string(i + 1);
+			const auto stick = my_to_string(j + 1);
 			const auto name = "joy" + joy + "deadzone" + stick;
 			const auto help = "deadzone for joystick " + joy + " thumbstick " + stick + ".";
 			Pdouble = secprop->Add_double(name, Property::Changeable::WhenIdle, 0.25);
@@ -2572,8 +2572,8 @@ void DOSBOX_SetupConfigSections(void) {
 		const auto count = sticks[i];
 		for (auto j = 0; j < count; j++)
 		{
-			const auto joy = std::to_string(i + 1);
-			const auto stick = std::to_string(j + 1);
+			const auto joy = my_to_string(i + 1);
+			const auto stick = my_to_string(j + 1);
 			const auto name = "joy" + joy + "response" + stick;
 			const auto help = "response for joystick " + joy + " thumbstick " + stick + ".";
 			Pdouble = secprop->Add_double(name, Property::Changeable::WhenIdle, 1.0);
@@ -2588,8 +2588,8 @@ void DOSBOX_SetupConfigSections(void) {
 	{
 		for (auto j = 0; j < axes; j++)
 		{
-			const auto joy = std::to_string(i + 1);
-			const auto axis = std::to_string(j);
+			const auto joy = my_to_string(i + 1);
+			const auto axis = my_to_string(j);
 			const auto propname = "joy" + joy + "axis" + axis;
 			Pint = secprop->Add_int(propname, Property::Changeable::WhenIdle, j);
 			Pint->SetMinMax(0, axes - 1);
@@ -2607,8 +2607,8 @@ void DOSBOX_SetupConfigSections(void) {
 		{
 			for (auto k = 0; k < directions; k++)
 			{
-				const auto joy = std::to_string(i + 1);
-				const auto axis = std::to_string(j);
+				const auto joy = my_to_string(i + 1);
+				const auto axis = my_to_string(j);
 				const auto dir = k == 0 ? "-" : "+";
 				const auto name = "joy" + joy + "deadzone" + axis + dir;
 				Pdouble = secprop->Add_double(name, Property::Changeable::WhenIdle, 0.6);

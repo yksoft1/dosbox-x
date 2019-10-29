@@ -238,6 +238,7 @@ OBJS3	=	$(DBX_PATH)\src\hardware\mame\fmopl.obj \
 			$(DBX_PATH)\src\hardware\serialport\seriallog.obj \
 			$(DBX_PATH)\src\hardware\serialport\serialmouse.obj \
 			$(DBX_PATH)\src\hardware\serialport\serialport.obj \
+			$(DBX_PATH)\src\hardware\serialport\serialfile.obj \
 			$(DBX_PATH)\src\hardware\serialport\softmodem.obj \
 			$(DBX_PATH)\src\hardware\snd_pc98\cbus\board86.obj \
 			$(DBX_PATH)\src\hardware\snd_pc98\cbus\board26k.obj \

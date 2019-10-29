@@ -435,4 +435,15 @@ public:
 	/* Returns true if succesful.*/
 	virtual bool Change_Config(Section* /*newconfig*/) {return false;} ;
 };
+
+#include <sstream>
+
+template<typename T>
+std::string my_to_string(const T& value)
+{
+    std::ostringstream oss;
+    oss << value;
+    return oss.str();
+}
+
 #endif

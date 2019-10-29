@@ -1077,7 +1077,7 @@ public:
     {
         auto section = control->GetSection("mapper");
         auto prop = static_cast<Section_prop*>(section);
-        auto name = "joy" + std::to_string(joystick + 1) + "deadzone" + std::to_string(axis) + (positive ? "+" : "-");
+        auto name = "joy" + my_to_string(joystick + 1) + "deadzone" + my_to_string(axis) + (positive ? "+" : "-");
         auto value = prop->Get_double(name);
         auto deadzone = static_cast<int>(value * 32767.0);
         return deadzone;
@@ -1456,7 +1456,7 @@ private:
     {
         auto section = control->GetSection("joystick");
         auto prop = static_cast<Section_prop*>(section);
-        auto name = "joy" + std::to_string(joystick + 1) + "deadzone" + std::to_string(thumbStick + 1);
+        auto name = "joy" + my_to_string(joystick + 1) + "deadzone" + my_to_string(thumbStick + 1);
         auto deadzone = static_cast<float>(prop->Get_double(name));
         return deadzone;
     }
@@ -1465,7 +1465,7 @@ private:
     {
         auto section = control->GetSection("joystick");
         auto prop = static_cast<Section_prop*>(section);
-        auto name = "joy" + std::to_string(joystick + 1) + "response" + std::to_string(thumbStick + 1);
+        auto name = "joy" + my_to_string(joystick + 1) + "response" + my_to_string(thumbStick + 1);
         auto response = static_cast<float>(prop->Get_double(name));
         return response;
     }

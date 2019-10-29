@@ -269,7 +269,7 @@ void JOYSTICK_Init() {
 		{
 			for (auto j = 0; j < axes; j++)
 			{
-				auto propname = "joy" + std::to_string(i + 1) + "axis" + std::to_string(j);
+				auto propname = "joy" + my_to_string(i + 1) + "axis" + my_to_string(j);
 				auto axis = section->Get_int(propname);
 				if (i == 0)
 				{
