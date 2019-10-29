@@ -821,7 +821,7 @@ void DOS_Shell::CMD_DIR(char * args) {
 		std::reverse(results.begin(), results.end());
 	}
 
-	for (std::vector<DtaResult>::iterator iter = results.begin(); iter != results.end(); iter++) {
+	for (std::vector<DtaResult>::iterator iter = results.begin(); iter != results.end(); ++iter) {
 
 		char * name = iter->name;
 		Bit32u size = iter->size;
@@ -903,7 +903,7 @@ void DOS_Shell::CMD_DIR(char * args) {
 struct copysource {
 	std::string filename;
 	bool concat;
-	copysource(std::string filein,bool concatin):
+	copysource(std::string& filein,bool concatin):
 		filename(filein),concat(concatin){ };
 	copysource():filename(""),concat(false){ };
 };
@@ -911,7 +911,7 @@ struct copysource {
 
 void DOS_Shell::CMD_COPY(char * args) {
 	HELP("COPY");
-	static char defaulttarget[] = ".";
+	static std::string defaulttarget = ".";
 	StripSpaces(args);
 	/* Command uses dta so set it to our internal dta */
 	RealPt save_dta=dos.dta();
@@ -964,7 +964,8 @@ void DOS_Shell::CMD_COPY(char * args) {
 						strcat(source_x,"\\*.*");
 				}
 			}
-			sources.push_back(copysource(source_x,(plus)?true:false));
+            std::string source_xString = std::string(source_x);
+			sources.push_back(copysource(source_xString,(plus)?true:false));
 			source_p = plus;
 		} while(source_p && *source_p);
 	}
@@ -1785,7 +1786,7 @@ void DOS_Shell::CMD_VOL(char *args){
 	return;
 }
 
-void SetVal(const std::string secname, std::string preval, const std::string val);
+void SetVal(const std::string& secname, const std::string& preval, const std::string& val);
 static void delayed_press(Bitu key) { KEYBOARD_AddKey((KBD_KEYS)key,true); }
 static void delayed_release(Bitu key) { KEYBOARD_AddKey((KBD_KEYS)key,false); }
 static void delayed_sdlpress(Bitu core) {

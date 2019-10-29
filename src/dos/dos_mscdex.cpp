@@ -99,7 +99,7 @@ public:
 	bool		GetUPC				(Bit8u subUnit, Bit8u& attr, char* upc);
 
 	void		InitNewMedia		(Bit8u subUnit);
-	bool		PlayAudioSector		(Bit8u subUnit, Bit32u start, Bit32u length);
+	bool		PlayAudioSector		(Bit8u subUnit, Bit32u sector, Bit32u length);
 	bool		PlayAudioMSF		(Bit8u subUnit, Bit32u start, Bit32u length);
 	bool		StopAudio			(Bit8u subUnit);
 	bool		GetAudioStatus		(Bit8u subUnit, bool& playing, bool& pause, TMSF& start, TMSF& end);
@@ -112,15 +112,15 @@ public:
 	void		ReplaceDrive		(CDROM_Interface* newCdrom, Bit8u subUnit);
 	void		GetDrives			(PhysPt data);
 	void		GetDriverInfo		(PhysPt data);
-	bool		GetVolumeName		(Bit8u subUnit, char* name);
+	bool		GetVolumeName		(Bit8u subUnit, char* data);
 	bool		GetFileName			(Bit16u drive, Bit16u pos, PhysPt data);
 	bool		GetDirectoryEntry	(Bit16u drive, bool copyFlag, PhysPt pathname, PhysPt buffer, Bit16u& error);
 	bool		ReadVTOC			(Bit16u drive, Bit16u volume, PhysPt data, Bit16u& offset, Bit16u& error);
 	bool		ReadSectors			(Bit16u drive, Bit32u sector, Bit16u num, PhysPt data);
 	bool		ReadSectors			(Bit8u subUnit, bool raw, Bit32u sector, Bit16u num, PhysPt data);
-	bool		ReadSectorsMSF		(Bit8u subUnit, bool raw, Bit32u sector, Bit16u num, PhysPt data);
+	bool		ReadSectorsMSF		(Bit8u subUnit, bool raw, Bit32u start, Bit16u num, PhysPt data);
 	bool		SendDriverRequest	(Bit16u drive, PhysPt data);
-	bool		IsValidDrive		(Bit16u drive);
+	bool		IsValidDrive		(Bit16u _drive);
 	bool		GetCDInfo			(Bit8u subUnit, Bit8u& tr1, Bit8u& tr2, TMSF& leadOut);
 	Bit32u		GetVolumeSize		(Bit8u subUnit);
 	bool		GetTrackInfo		(Bit8u subUnit, Bit8u track, Bit8u& attr, TMSF& start);
@@ -176,7 +176,7 @@ CMscdex::CMscdex(void) {
 CMscdex::~CMscdex(void) {
 	defaultBufSeg = 0;
 	for (Bit16u i=0; i<GetNumDrives(); i++) {
-		delete (cdrom)[i];
+		delete cdrom[i];
 		cdrom[i] = 0;
 	}
 }
@@ -211,7 +211,7 @@ int CMscdex::RemoveDrive(Bit16u _drive)
 	}
 
 	if (idx == MSCDEX_MAX_DRIVES || (idx!=0 && idx!=GetNumDrives()-1)) return 0;
-	delete (cdrom)[idx];
+	delete cdrom[idx];
 	if (idx==0) {
 		for (Bit16u i=0; i<GetNumDrives(); i++) {
 			if (i == MSCDEX_MAX_DRIVES-1) {

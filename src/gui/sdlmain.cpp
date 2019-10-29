@@ -85,6 +85,10 @@ void GFX_OpenGLRedrawScreen(void);
 #include "zipfile.h"
 #include "shell.h"
 
+#if defined(LINUX) && defined(HAVE_ALSA)
+# include <alsa/asoundlib.h>
+#endif
+
 #if defined(WIN32) && !defined(HX_DOS)
 # include <shobjidl.h>
 #endif
@@ -1394,7 +1398,7 @@ void MenuShadeRect(int x,int y,int w,int h) {
 
         if (sdl.surface->format->BitsPerPixel == 32) {
             unsigned char *scan;
-            uint32_t *row,mask;
+            uint32_t mask;
 
             mask = ((sdl.surface->format->Rmask >> 2) & sdl.surface->format->Rmask) |
                 ((sdl.surface->format->Gmask >> 2) & sdl.surface->format->Gmask) |
@@ -1406,14 +1410,14 @@ void MenuShadeRect(int x,int y,int w,int h) {
             scan += y * sdl.surface->pitch;
             scan += x * 4;
             while (h-- > 0) {
-                row = (uint32_t*)scan;
+                uint32_t *row = (uint32_t*)scan;
                 scan += sdl.surface->pitch;
                 for (unsigned int c=0;c < (unsigned int)w;c++) row[c] = (row[c] >> 2) & mask;
             }
         }
         else if (sdl.surface->format->BitsPerPixel == 16) {
             unsigned char *scan;
-            uint16_t *row,mask;
+            uint16_t mask;
 
             mask = ((sdl.surface->format->Rmask >> 2) & sdl.surface->format->Rmask) |
                 ((sdl.surface->format->Gmask >> 2) & sdl.surface->format->Gmask) |
@@ -1425,7 +1429,7 @@ void MenuShadeRect(int x,int y,int w,int h) {
             scan += y * sdl.surface->pitch;
             scan += x * 2;
             while (h-- > 0) {
-                row = (uint16_t*)scan;
+                uint16_t *row = (uint16_t*)scan;
                 scan += sdl.surface->pitch;
                 for (unsigned int c=0;c < (unsigned int)w;c++) row[c] = (row[c] >> 2) & mask;
             }
@@ -1481,7 +1485,6 @@ void MenuDrawRect(int x,int y,int w,int h,Bitu color) {
 
         if (sdl.surface->format->BitsPerPixel == 32) {
             unsigned char *scan;
-            uint32_t *row;
 
             assert(sdl.surface->pixels != NULL);
 
@@ -1489,14 +1492,13 @@ void MenuDrawRect(int x,int y,int w,int h,Bitu color) {
             scan += y * sdl.surface->pitch;
             scan += x * 4;
             while (h-- > 0) {
-                row = (uint32_t*)scan;
+                uint32_t *row = (uint32_t*)scan;
                 scan += sdl.surface->pitch;
                 for (unsigned int c=0;c < (unsigned int)w;c++) row[c] = (uint32_t)color;
             }
         }
         else if (sdl.surface->format->BitsPerPixel == 16) {
             unsigned char *scan;
-            uint16_t *row;
 
             assert(sdl.surface->pixels != NULL);
 
@@ -1504,7 +1506,7 @@ void MenuDrawRect(int x,int y,int w,int h,Bitu color) {
             scan += y * sdl.surface->pitch;
             scan += x * 2;
             while (h-- > 0) {
-                row = (uint16_t*)scan;
+                uint16_t *row = (uint16_t*)scan;
                 scan += sdl.surface->pitch;
                 for (unsigned int c=0;c < (unsigned int)w;c++) row[c] = (uint16_t)color;
             }
@@ -2410,8 +2412,9 @@ void res_init(void) {
 
 void res_input(bool type, const char * res) {
     Section* sec = control->GetSection("sdl");
-    char win_res[11];
+
     if(sec) {
+        char win_res[11];
         strcpy(win_res,res);
         if(type) {
             std::string tmp("windowresolution="); tmp.append(win_res);
@@ -3232,13 +3235,13 @@ static void GUI_StartUp() {
   #endif
 #endif
 
-    int width=1024;
-    int height=768;
     if (!sdl.desktop.full.width) {
+        int width=1024;
         sdl.desktop.full.width_auto = true;
         sdl.desktop.full.width=width;
     }
     if (!sdl.desktop.full.height) {
+        int height=768;
         sdl.desktop.full.height_auto = true;
         sdl.desktop.full.height=height;
     }
@@ -4230,8 +4233,6 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                             break;
                         case SDL_MOUSEMOTION:
                             {
-                                bool noRedrawNew = false,noRedrawOld = false;
-
                                 sel_item = DOSBoxMenu::unassigned_item_handle;
 
                                 auto search = popup_stack.end();
@@ -4256,6 +4257,8 @@ static void HandleMouseButton(SDL_MouseButtonEvent * button) {
                                  *  search = iterator just past the item's level (to remove items if changing) */
 
                                 if (mainMenu.menuUserHoverAt != sel_item) {
+                                    bool noRedrawNew = false,noRedrawOld = false;
+
                                     if (mainMenu.menuUserHoverAt != DOSBoxMenu::unassigned_item_handle) {
                                         mainMenu.get_item(mainMenu.menuUserHoverAt).setHover(mainMenu,false);
                                         if (mainMenu.get_item(mainMenu.menuUserHoverAt).get_type() == DOSBoxMenu::item_type_id)
@@ -4533,7 +4536,7 @@ bool GFX_IsFullscreen(void) {
     return sdl.desktop.fullscreen;
 }
 
-void* GetSetSDLValue(int isget, std::string target, void* setval) {
+void* GetSetSDLValue(int isget, std::string& target, void* setval) {
     if (target == "wait_on_error") {
         if (isget) return (void*) sdl.wait_on_error;
         else sdl.wait_on_error = setval;
@@ -6935,8 +6938,9 @@ bool autolock_mouse_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * co
 bool doublebuf_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
-    SetVal("sdl", "fulldouble", (GetSetSDLValue(1, "desktop.doublebuf", 0)) ? "false" : "true"); res_init();
-    mainMenu.get_item("doublebuf").check(!!GetSetSDLValue(1, "desktop.doublebuf", 0)).refresh_item(mainMenu);
+    std::string doubleBufString = std::string("desktop.doublebuf");
+    SetVal("sdl", "fulldouble", (GetSetSDLValue(1, doubleBufString, 0)) ? "false" : "true"); res_init();
+    mainMenu.get_item("doublebuf").check(!!GetSetSDLValue(1, doubleBufString, 0)).refresh_item(mainMenu);
     return true;
 }
 
@@ -7989,6 +7993,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         }
 
         /* more */
+        std::string doubleBufString = std::string("desktop.doublebuf");
 #if !defined(C_EMSCRIPTEN)
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"show_console").set_text("Show console").set_callback_function(show_console_menu_callback);
 #endif
@@ -7999,7 +8004,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_winlogo").set_text("Logo key").set_callback_function(sendkey_preset_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_winmenu").set_text("Menu key").set_callback_function(sendkey_preset_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_cad").set_text("Ctrl+Alt+Del").set_callback_function(sendkey_preset_menu_callback);
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, "desktop.doublebuf", 0));
+        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, doubleBufString, 0));
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"showdetails").set_text("Show details").set_callback_function(showdetails_menu_callback).check(!menu.hidecycles && !menu.showrt);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"highdpienable").set_text("High DPI enable").set_callback_function(highdpienable_menu_callback).check(dpi_aware_enable);
@@ -8497,6 +8502,11 @@ fresh_boot:
 
     mainMenu.unbuild();
     mainMenu.clear_all_menu_items();
+
+#if defined(LINUX) && defined(HAVE_ALSA)
+    // force ALSA to release global cache, so that it's one less leak reported by Valgrind
+    snd_config_update_free_global();
+#endif
 
     return 0;
 }

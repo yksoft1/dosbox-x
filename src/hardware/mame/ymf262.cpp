@@ -819,7 +819,6 @@ static inline void advance(OPL3 *chip)
 		/* Phase Generator */
 		if(op->vib)
 		{
-			uint8_t block;
 			unsigned int block_fnum = CH->block_fnum;
 
 			unsigned int fnum_lfo   = (block_fnum&0x0380) >> 7;
@@ -829,7 +828,7 @@ static inline void advance(OPL3 *chip)
 			if (lfo_fn_table_index_offset)  /* LFO phase modulation active */
 			{
 				block_fnum += lfo_fn_table_index_offset;
-				block = (block_fnum&0x1c00) >> 10;
+				uint8_t block = (block_fnum&0x1c00) >> 10;
 				op->Cnt += (chip->fn_tab[block_fnum&0x03ff] >> (7-block)) * op->mul;
 			}
 			else    /* LFO phase modulation  = zero */
@@ -1491,19 +1490,6 @@ static inline void set_mul(OPL3 *chip,int slot,int v)
 		//else normal 2 operator function
 		switch(chan_no)
 		{
-		case 0: case 1: case 2:
-		case 9: case 10: case 11:
-			if (CH->extended)
-			{
-				/* normal */
-				CALC_FCSLOT(CH,SLOT);
-			}
-			else
-			{
-				/* normal */
-				CALC_FCSLOT(CH,SLOT);
-			}
-		break;
 		case 3: case 4: case 5:
 		case 12: case 13: case 14:
 			if ((CH-3)->extended)
@@ -1554,19 +1540,6 @@ static inline void set_ksl_tl(OPL3 *chip,int slot,int v)
 		//else normal 2 operator function
 		switch(chan_no)
 		{
-		case 0: case 1: case 2:
-		case 9: case 10: case 11:
-			if (CH->extended)
-			{
-				/* normal */
-				SLOT->TLL = SLOT->TL + (CH->ksl_base>>SLOT->ksl);
-			}
-			else
-			{
-				/* normal */
-				SLOT->TLL = SLOT->TL + (CH->ksl_base>>SLOT->ksl);
-			}
-		break;
 		case 3: case 4: case 5:
 		case 12: case 13: case 14:
 			if ((CH-3)->extended)
@@ -1778,8 +1751,8 @@ static void OPL3WriteReg(OPL3 *chip, int r, int v)
 					if (chip->timer_handler) (chip->timer_handler)(chip->TimerParam,0,period);
 				}
 			}
-#endif
 		break;
+#endif
 		case 0x08:  /* x,NTS,x,x, x,x,x,x */
 			chip->nts = v;
 		break;
