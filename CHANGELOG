@@ -1,4 +1,32 @@
-0.82.23 (next)
+0.82.24 (next)
+  - Some OpenGL cleanup and fixes for when compiling for
+    Mac OS X Catalina.
+  - Shell startup now prints the actual mapper binding
+    (whatever it is) for the Host key instead of assuming
+    F12/F11.
+  - "Ro" key in PC-98 mode in the mapper interface now
+    clarifies that it is Ro / _ since the shift state is
+    the underscore.
+  - Shell startup code fixed to show F11 for Windows and
+    F12 for other platforms properly instead of always
+    showing F11.
+  - Added BOOT option --pc98-graphics to start up with
+    graphics layer enabled in order to run HDI images
+    using QMOUSE and games that expect NEC MOUSE.COM
+    behavior of showing graphics layer on driver init.
+  - BOOT now hides graphics layer on startup in PC-98 mode
+    to reflect real hardware.
+  - INT 33h mouse emulation now enables graphics layer
+    on mouse startup and INT 33h AX=0 to imitate NEC
+    MOUSE.COM behavior seen on real PC-98 hardware. This is
+    needed for some Orange House games that assume this
+    behavior, without which the graphics are invisible.
+  - INT 33h define range functions now include separate
+    range correction for text mode vs graphics mode.
+0.82.23
+  - Serial and parallel file output now disable stdio
+    buffering so that output is more immediately
+    accessible to the user.
   - Added file output to serial port emulation.
   - Parallel port emulation now support both dev: and
     file: to specify that LPTx output go to a file,

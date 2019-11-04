@@ -56,6 +56,7 @@ bool en_bios_ps2mouse=false;
 bool cell_granularity_disable=false;
 bool en_int33_hide_if_polling=false;
 bool en_int33_hide_if_intsub=false;
+bool en_int33_pc98_show_graphics=true; // NEC MOUSE.COM behavior
 
 double int33_last_poll = 0;
 
@@ -856,8 +857,16 @@ static void Mouse_ResetHardware(void){
     if (MOUSE_IRQ != 0)
         PIC_SetIRQMask(MOUSE_IRQ,false);
 
-    if (IS_PC98_ARCH)
+    if (IS_PC98_ARCH) {
         IO_WriteB(0x7FDD,IO_ReadB(0x7FDD) & (~0x10)); // remove interrupt inhibit
+
+        // NEC MOUSE.COM behavior: Driver startup and INT 33h AX=0 automatically show the graphics layer.
+        // Some games by "Orange House" depend on this behavior, without which the graphics are invisible.
+        if (en_int33_pc98_show_graphics) {
+            reg_eax = 0x40u << 8u; // AH=40h show graphics layer
+            CALLBACK_RunRealInt(0x18);
+        }
+    }
 }
 
 void Mouse_BeforeNewVideoMode(bool setmode) {
@@ -1119,16 +1128,29 @@ static Bitu INT33_Handler(void) {
             if (mouse.first_range_setx || mouse.buttons == 0) {
                 if (mouse.min_x == 0 && mouse.max_x > 0) {
                     // most games redefine the range so they can use a saner range matching the screen
-
-                    // Apply sanity rounding.
-                    //
-                    // Daggerfall: Sets max to 310 instead of 320, probably to prevent drawing the cursor
-                    //             partially offscreen. */
                     Bit16s nval = mouse.max_x;
-                    if (nval >= ((Bit16s)CurMode->swidth - 32) && nval <= ((Bit16s)CurMode->swidth + 32))
-                        nval = (Bit16s)CurMode->swidth;
-                    else if (nval >= (((Bit16s)CurMode->swidth - 32) * 2) && nval <= (((Bit16s)CurMode->swidth + 32) * 2))
-                        nval = (Bit16s)CurMode->swidth * 2;
+
+                    if (CurMode->type == M_TEXT) {
+                        // Text is reported as if each row is 8 lines high (CGA compat) even if EGA 14-line
+                        // or VGA 16-line, and 8 pixels wide even if EGA/VGA 9-pixels/char is enabled.
+                        //
+                        // Apply sanity rounding.
+                        //
+                        // FreeDOS EDIT: The max is set to just under 640x400, so that the cursor only has
+                        //               room for ONE PIXEL in the last row and column.
+                        if (nval >= ((Bit16s)(CurMode->twidth*8) - 32) && nval <= ((Bit16s)(CurMode->twidth*8) + 32))
+                            nval = (Bit16s)CurMode->twidth*8;
+                    }
+                    else {
+                        // Apply sanity rounding.
+                        //
+                        // Daggerfall: Sets max to 310 instead of 320, probably to prevent drawing the cursor
+                        //             partially offscreen. */
+                        if (nval >= ((Bit16s)CurMode->swidth - 32) && nval <= ((Bit16s)CurMode->swidth + 32))
+                            nval = (Bit16s)CurMode->swidth;
+                        else if (nval >= (((Bit16s)CurMode->swidth - 32) * 2) && nval <= (((Bit16s)CurMode->swidth + 32) * 2))
+                            nval = (Bit16s)CurMode->swidth * 2;
+                    }
 
                     if (mouse.max_screen_x != nval) {
                         mouse.max_screen_x = nval;
@@ -1167,16 +1189,29 @@ static Bitu INT33_Handler(void) {
             if (mouse.first_range_sety || mouse.buttons == 0) {
                 if (mouse.min_y == 0 && mouse.max_y > 0) {
                     // most games redefine the range so they can use a saner range matching the screen
-
-                    // Apply sanity rounding.
-                    //
-                    // Daggerfall: Sets max to 310 instead of 320, probably to prevent drawing the cursor
-                    //             partially offscreen. */
                     Bit16s nval = mouse.max_y;
-                    if (nval >= ((Bit16s)CurMode->sheight - 32) && nval <= ((Bit16s)CurMode->sheight + 32))
-                        nval = (Bit16s)CurMode->sheight;
-                    else if (nval >= (((Bit16s)CurMode->sheight - 32) * 2) && nval <= (((Bit16s)CurMode->sheight + 32) * 2))
-                        nval = (Bit16s)CurMode->sheight * 2;
+
+                    if (CurMode->type == M_TEXT) {
+                        // Text is reported as if each row is 8 lines high (CGA compat) even if EGA 14-line
+                        // or VGA 16-line, and 8 pixels wide even if EGA/VGA 9-pixels/char is enabled.
+                        //
+                        // Apply sanity rounding.
+                        //
+                        // FreeDOS EDIT: The max is set to just under 640x400, so that the cursor only has
+                        //               room for ONE PIXEL in the last row and column.
+                        if (nval >= ((Bit16s)(CurMode->theight*8) - 32) && nval <= ((Bit16s)(CurMode->theight*8) + 32))
+                            nval = (Bit16s)CurMode->theight*8;
+                    }
+                    else {
+                        // Apply sanity rounding.
+                        //
+                        // Daggerfall: Sets max to 310 instead of 320, probably to prevent drawing the cursor
+                        //             partially offscreen. */
+                        if (nval >= ((Bit16s)CurMode->sheight - 32) && nval <= ((Bit16s)CurMode->sheight + 32))
+                            nval = (Bit16s)CurMode->sheight;
+                        else if (nval >= (((Bit16s)CurMode->sheight - 32) * 2) && nval <= (((Bit16s)CurMode->sheight + 32) * 2))
+                            nval = (Bit16s)CurMode->sheight * 2;
+                    }
 
                     if (mouse.max_screen_y != nval) {
                         mouse.max_screen_y = nval;
@@ -1609,6 +1644,8 @@ void MOUSE_Startup(Section *sec) {
     en_int33_hide_if_intsub=section->Get_bool("int33 hide host cursor if interrupt subroutine");
 
     en_int33_hide_if_polling=section->Get_bool("int33 hide host cursor when polling");
+
+    en_int33_pc98_show_graphics=section->Get_bool("pc-98 show graphics layer on initialize");
 
     en_int33=section->Get_bool("int33");
     if (!en_int33) {
