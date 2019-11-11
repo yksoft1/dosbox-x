@@ -914,7 +914,7 @@ void CONFIG::Run(void) {
 				Section* sec = control->GetSection(pvars[0].c_str());
 				if (!sec) {
 					// not a section: little duplicate from above
-					Section* sec=control->GetSectionFromProperty(pvars[0].c_str());
+					sec=control->GetSectionFromProperty(pvars[0].c_str());
 					if (sec) pvars.insert(pvars.begin(),std::string(sec->GetName()));
 					else {
 						WriteOut(MSG_Get("PROGRAM_CONFIG_PROPERTY_ERROR"));
@@ -1015,6 +1015,10 @@ static void CONFIG_ProgramStart(Program * * make) {
 	*make=new CONFIG;
 }
 
+void PROGRAMS_DOS_Boot(Section *) {
+	PROGRAMS_MakeFile("CONFIG.COM",CONFIG_ProgramStart);
+}
+
 /* FIXME: Rename the function to clarify it does not init programs, it inits the callback mechanism
  *        that program generation on drive Z: needs to tie a .COM executable to a callback */
 void PROGRAMS_Init() {
@@ -1023,7 +1027,8 @@ void PROGRAMS_Init() {
 	/* Setup a special callback to start virtual programs */
 	call_program=CALLBACK_Allocate();
 	CALLBACK_Setup(call_program,&PROGRAMS_Handler,CB_RETF,"internal program");
-	PROGRAMS_MakeFile("CONFIG.COM",CONFIG_ProgramStart);
+
+    AddVMEventFunction(VM_EVENT_DOS_INIT_KERNEL_READY,AddVMEventFunctionFuncPair(PROGRAMS_DOS_Boot));
 
 	// listconf
 	MSG_Add("PROGRAM_CONFIG_NOCONFIGFILE","No config file loaded!\n");
@@ -1050,7 +1055,9 @@ void PROGRAMS_Init() {
 		"-axclear clears the autoexec section.\n"\
 		"-axadd [line] adds a line to the autoexec section.\n"\
 		"-axtype prints the content of the autoexec section.\n"\
-		"-securemode switches to secure mode.\n"\
+		"-securemode\n"\
+        " Switches to secure mode where MOUNT, IMGMOUNT and BOOT will be disabled\n"\
+        " as well as the ability to create config and language files.\n"\
 		"-get \"section property\" returns the value of the property.\n"\
 		"-set \"section property=value\" sets the value." );
 	MSG_Add("PROGRAM_CONFIG_HLP_PROPHLP","Purpose of property \"%s\" (contained in section \"%s\"):\n%s\n\nPossible Values: %s\nDefault value: %s\nCurrent value: %s\n");

@@ -1,4 +1,7 @@
 0.82.24 (next)
+  - CONFIG.COM and MIXER.COM are now registered only at
+    DOS kernel startup, to resolve their disappearance
+    after RE-DOS or guest system reset.
   - Some OpenGL cleanup and fixes for when compiling for
     Mac OS X Catalina.
   - Shell startup now prints the actual mapper binding
@@ -23,6 +26,15 @@
     behavior, without which the graphics are invisible.
   - INT 33h define range functions now include separate
     range correction for text mode vs graphics mode.
+  - Help sections in Configuration GUI have been improved,
+    they are now easier to browse and read. (aybe)
+  - CONFIG: added description for 'securemode' (aybe).
+  - Integer properties are now correctly saved when
+    they have been changed in configuration GUI (aybe).
+  - Some scenarios with command history could display
+    garbage characters from previous/next command (aybe).
+  - Fixed all hard disk images created by IMGMAKE having
+    VHD footers. (Allofich)
 0.82.23
   - Serial and parallel file output now disable stdio
     buffering so that output is more immediately
