@@ -77,8 +77,6 @@ void GFX_OpenGLRedrawScreen(void);
 #include "support.h"
 #include "debug.h"
 #include "ide.h"
-#include "bitop.h"
-#include "ptrop.h"
 #include "mapper.h"
 #include "sdlmain.h"
 #include "zipfile.h"
@@ -7235,9 +7233,6 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     control->opt_debug = true;
     control->opt_earlydebug = true;
 #endif
-
-    bitop::self_test();
-    ptrop::self_test();
 
     // initialize output libraries
     OUTPUT_SURFACE_Initialize();

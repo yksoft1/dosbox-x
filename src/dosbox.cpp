@@ -237,9 +237,6 @@ void                TANDYSOUND_Init(Section*);
 void                DISNEY_Init(Section*);
 void                PS1SOUND_Init(Section*);
 void                SERIAL_Init(Section*); 
-#if C_IPX
-void                IPX_Init(Section*);
-#endif
 void                PIC_Init(Section*);
 void                TIMER_Init(Section*);
 void                BIOS_Init(Section*);
@@ -2996,51 +2993,6 @@ void DOSBOX_SetupConfigSections(void) {
             "related to uninitialized variables in the data or stack segment. If you intend to run a\n"
             "game or demo known to have this problem (Second Unreal, for example), set to true, else\n"
             "set to false. When enabled this option may incur a slight to moderate performance penalty.");
-
-    secprop=control->AddSection_prop("ipx",&Null_Init,true);
-    Pbool = secprop->Add_bool("ipx",Property::Changeable::WhenIdle, false);
-    Pbool->Set_help("Enable ipx over UDP/IP emulation.");
-
-    secprop=control->AddSection_prop("ne2000",&Null_Init,true);
-    MSG_Add("NE2000_CONFIGFILE_HELP",
-        "macaddr -- The physical address the emulator will use on your network.\n"
-        "           If you have multiple DOSBoxes running on your network,\n"
-        "           this has to be changed. Modify the last three number blocks.\n"
-        "           I.e. AC:DE:48:88:99:AB.\n"
-        "realnic -- Specifies which of your network interfaces is used.\n"
-        "           Write \'list\' here to see the list of devices in the\n"
-        "           Status Window. Then make your choice and put either the\n"
-        "           interface number (2 or something) or a part of your adapters\n"
-        "           name, e.g. VIA here.\n"
-
-    );
-
-    Pbool = secprop->Add_bool("ne2000", Property::Changeable::WhenIdle, false);
-    Pbool->Set_help("Enable Ethernet passthrough. Requires [Win]Pcap.");
-
-    Phex = secprop->Add_hex("nicbase", Property::Changeable::WhenIdle, 0x300);
-    Phex->Set_help("The base address of the NE2000 board.");
-
-    Pint = secprop->Add_int("nicirq", Property::Changeable::WhenIdle, 3);
-    Pint->Set_help("The interrupt it uses. Note serial2 uses IRQ3 as default.");
-
-    Pstring = secprop->Add_string("macaddr", Property::Changeable::WhenIdle,"AC:DE:48:88:99:AA");
-    Pstring->Set_help("The physical address the emulator will use on your network.\n"
-        "If you have multiple DOSBoxes running on your network,\n"
-        "this has to be changed for each. AC:DE:48 is an address range reserved for\n"
-        "private use, so modify the last three number blocks.\n"
-        "I.e. AC:DE:48:88:99:AB.");
-
-    /* TODO: Change default to "nat" and then begin implementing support for emulating
-     *       an ethernet connection with DOSBox-X as a NAT/firewall between the guest
-     *       and the OS. Sort of like "NAT" mode in VirtualBox. When that works, we
-     *       can then compile NE2000 support with and without libpcap/winpcap support. */
-    Pstring = secprop->Add_string("realnic", Property::Changeable::WhenIdle,"list");
-    Pstring->Set_help("Specifies which of your network interfaces is used.\n"
-        "Write \'list\' here to see the list of devices in the\n"
-        "Status Window. Then make your choice and put either the\n"
-        "interface number (2 or something) or a part of your adapters\n"
-        "name, e.g. VIA here.");
 
     /* floppy controller emulation options and setup */
     secprop=control->AddSection_prop("fdc, primary",&Null_Init,false);

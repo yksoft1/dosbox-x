@@ -3177,7 +3177,6 @@ class ViBRA_PnP : public ISAPnPDevice {
 };
 
 bool JOYSTICK_IsEnabled(Bitu which);
-extern void HARDOPL_Init(Bitu hardwareaddr, Bitu sbbase, bool isCMS);
 
 class SBLASTER: public Module_base {
 private:
@@ -3435,14 +3434,6 @@ public:
         case OPL_opl3:
         case OPL_opl3gold:
             OPL_Init(section,oplmode);
-            break;
-        case OPL_hardwareCMS:
-            assert(!IS_PC98_ARCH);
-            isCMSpassthrough = true;
-        case OPL_hardware:
-            assert(!IS_PC98_ARCH);
-            Bitu base = (unsigned int)section->Get_hex("hardwarebase");
-            HARDOPL_Init(base, sb.hw.base, isCMSpassthrough);
             break;
         }
         if (sb.type==SBT_NONE || sb.type==SBT_GB) return;
@@ -3713,8 +3704,6 @@ ASP>
     }   
 }; //End of SBLASTER class
 
-extern void HWOPL_Cleanup();
-
 static SBLASTER* test = NULL;
 
 void SBLASTER_DOS_Shutdown() {
@@ -3726,7 +3715,6 @@ void SBLASTER_ShutDown(Section* /*sec*/) {
         delete test;    
         test = NULL;
     }
-    HWOPL_Cleanup();
 }
 
 void SBLASTER_OnReset(Section *sec) {
@@ -3737,7 +3725,6 @@ void SBLASTER_OnReset(Section *sec) {
         delete test;    
         test = NULL;
     }
-    HWOPL_Cleanup();
 
     if (test == NULL) {
         LOG(LOG_MISC,LOG_DEBUG)("Allocating Sound Blaster emulation");

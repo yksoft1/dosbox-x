@@ -29,7 +29,6 @@
 #include "bios.h"
 #include "bios_disk.h"
 #include "qcow2_disk.h"
-#include "bitop.h"
 
 #include <algorithm>
 
@@ -1028,12 +1027,24 @@ Bit32u fatDrive::getSectSize(void) {
     return sector_size;
 }
 
+//https://stackoverflow.com/questions/994593/how-to-do-an-integer-log2-in-c
+static unsigned int mylog2 (unsigned int val) {
+    if (val == 0) return ~(0u);
+    if (val == 1) return 0;
+    unsigned int ret = 0;
+    while (val > 1) {
+        val >>= 1;
+        ret++;
+    }
+    return ret;
+}
+
 void fatDrive::UpdateDPB(unsigned char dos_drive) {
     PhysPt ptr = DOS_Get_DPB(dos_drive);
     if (ptr != PhysPt(0)) {
         mem_writew(ptr+0x02,bootbuffer.bytespersector);             // +2 = bytes per sector
         mem_writeb(ptr+0x04,bootbuffer.sectorspercluster - 1);      // +4 = highest sector within a cluster
-        mem_writeb(ptr+0x05,bitop::log2(bootbuffer.sectorspercluster));// +5 = shift count to convert clusters to sectors
+        mem_writeb(ptr+0x05,mylog2(bootbuffer.sectorspercluster));// +5 = shift count to convert clusters to sectors
         mem_writew(ptr+0x06,bootbuffer.reservedsectors);            // +6 = number of reserved sectors at start of partition
         mem_writeb(ptr+0x08,bootbuffer.fatcopies);                  // +8 = number of FATs (file allocation tables)
         mem_writew(ptr+0x09,bootbuffer.rootdirentries);             // +9 = number of root directory entries
