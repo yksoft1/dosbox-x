@@ -214,7 +214,6 @@ void                MIDI_Init(Section*);
 void                HARDWARE_Init(Section*);
 void                PCIBUS_Init(Section*);
 void                PCI_Init(Section*);
-void                VOODOO_Init(Section*);
 
 void                IDE_Primary_Init(Section*);
 void                IDE_Secondary_Init(Section*);
@@ -237,9 +236,7 @@ void                PCSPEAKER_Init(Section*);
 void                TANDYSOUND_Init(Section*);
 void                DISNEY_Init(Section*);
 void                PS1SOUND_Init(Section*);
-void                INNOVA_Init(Section*);
 void                SERIAL_Init(Section*); 
-void                DONGLE_Init(Section*);
 #if C_IPX
 void                IPX_Init(Section*);
 #endif
@@ -1010,7 +1007,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char *mt32reverbLevels[] = {"0", "1", "2", "3", "4", "5", "6", "7",0};
     const char* gustypes[] = { "classic", "classic37", "max", "interwave", 0 };
     const char* sbtypes[] = { "sb1", "sb2", "sbpro1", "sbpro2", "sb16", "sb16vibra", "gb", "ess688", "reveal_sc400", "none", 0 };
-    const char* oplmodes[]={ "auto", "cms", "opl2", "dualopl2", "opl3", "opl3gold", "none", "hardware", "hardwaregb", 0};
+    const char* oplmodes[]={ "auto", "opl2", "dualopl2", "opl3", "opl3gold", "none", "hardware", "hardwaregb", 0};
     const char* serials[] = { "dummy", "disabled", "modem", "nullmodem", "serialmouse", "directserial", "log", "file", 0 };
     const char* acpi_rsd_ptr_settings[] = { "auto", "bios", "ebda", 0 };
     const char* cpm_compat_modes[] = { "auto", "off", "msdos2", "msdos5", "direct", 0 };
@@ -1081,16 +1078,6 @@ void DOSBOX_SetupConfigSections(void) {
         "dynamic",
 #endif
         "normal", "full", "simple", 0 };
-
-    const char* voodoo_settings[] = {
-        "false",
-        "software",
-#if C_OPENGL
-        "opengl",
-#endif
-        "auto",
-        0
-    };
 
 #if defined(__SSE__) && !defined(_M_AMD64) && !defined(EMSCRIPTEN)
     CheckSSESupport();
@@ -2058,10 +2045,6 @@ void DOSBOX_SetupConfigSections(void) {
 
     secprop=control->AddSection_prop("pci",&Null_Init,false); //PCI bus
 
-    Pstring = secprop->Add_string("voodoo",Property::Changeable::WhenIdle,"auto");
-    Pstring->Set_values(voodoo_settings);
-    Pstring->Set_help("Enable VOODOO support.");
-
     secprop=control->AddSection_prop("mixer",&Null_Init);
     Pbool = secprop->Add_bool("nosound",Property::Changeable::OnlyAtStart,false);
     Pbool->Set_help("Enable silent mode, sound is still emulated though.");
@@ -2265,8 +2248,7 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring = secprop->Add_string("oplmode",Property::Changeable::WhenIdle,"auto");
     Pstring->Set_values(oplmodes);
     Pstring->Set_help("Type of OPL emulation. On 'auto' the mode is determined by sblaster type.\n"
-        "To emulate Adlib, set sbtype=none and oplmode=opl2. To emulate a Game Blaster, set\n"
-        "sbtype=none and oplmode=cms");
+        "To emulate Adlib, set sbtype=none and oplmode=opl2.");
 
     Pbool = secprop->Add_bool("adlib force timer overflow on detect",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, Adlib/OPL emulation will signal 'overflow' on timers after 50 I/O reads.\n"
@@ -2483,19 +2465,6 @@ void DOSBOX_SetupConfigSections(void) {
         "there should be a MIDI directory that contains\n"
         "the patch files for GUS playback. Patch sets used\n"
         "with Timidity should work fine.");
-
-    secprop = control->AddSection_prop("innova",&Null_Init,true);//done
-    Pbool = secprop->Add_bool("innova",Property::Changeable::WhenIdle,false);
-    Pbool->Set_help("Enable the Innovation SSI-2001 emulation.");
-    Pint = secprop->Add_int("samplerate",Property::Changeable::WhenIdle,22050);
-    Pint->Set_values(rates);
-    Pint->Set_help("Sample rate of Innovation SSI-2001 emulation");
-    Phex = secprop->Add_hex("sidbase",Property::Changeable::WhenIdle,0x280);
-    Phex->Set_values(sidbaseno);
-    Phex->Set_help("SID base port (typically 280h).");
-    Pint = secprop->Add_int("quality",Property::Changeable::WhenIdle,0);
-    Pint->Set_values(qualityno);
-    Pint->Set_help("Set SID emulation quality level (0 to 3).");
 
     secprop = control->AddSection_prop("speaker",&Null_Init,true);//done
     Pbool = secprop->Add_bool("pcspeaker",Property::Changeable::WhenIdle,true);
@@ -2752,9 +2721,6 @@ void DOSBOX_SetupConfigSections(void) {
     Pstring->Set_help("see parallel1");
     Pstring = secprop->Add_string("parallel3",Property::Changeable::WhenIdle,"disabled");
     Pstring->Set_help("see parallel1");
-
-    Pbool = secprop->Add_bool("dongle",Property::Changeable::WhenIdle,false);
-    Pbool->Set_help("Enable dongle");
 
     /* All the DOS Related stuff, which will eventually start up in the shell */
     secprop=control->AddSection_prop("dos",&Null_Init,false);//done

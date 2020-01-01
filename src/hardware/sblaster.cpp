@@ -3240,7 +3240,6 @@ private:
         /* OPL/CMS Init */
         const char * omode=config->Get_string("oplmode");
         if (!strcasecmp(omode,"none")) opl_mode=OPL_none;   
-        else if (!strcasecmp(omode,"cms")) opl_mode=OPL_cms;
         else if (!strcasecmp(omode,"opl2")) opl_mode=OPL_opl2;
         else if (!strcasecmp(omode,"dualopl2")) opl_mode=OPL_dualopl2;
         else if (!strcasecmp(omode,"opl3")) opl_mode=OPL_opl3;
@@ -3252,9 +3251,6 @@ private:
             switch (type) {
             case SBT_NONE:
                 opl_mode=OPL_none;
-                break;
-            case SBT_GB:
-                opl_mode=OPL_cms;
                 break;
             case SBT_1:
             case SBT_2:
@@ -3431,14 +3427,8 @@ public:
             if (!IS_PC98_ARCH)
                 WriteHandler[0].Install(0x388,adlib_gusforward,IO_MB);
             break;
-        case OPL_cms:
-            assert(!IS_PC98_ARCH);
-            WriteHandler[0].Install(0x388,adlib_gusforward,IO_MB);
-            CMS_Init(section);
-            break;
         case OPL_opl2:
             assert(!IS_PC98_ARCH);
-            CMS_Init(section);
             // fall-through
         case OPL_dualopl2:
             assert(!IS_PC98_ARCH);
@@ -3708,11 +3698,7 @@ ASP>
         switch (oplmode) {
         case OPL_none:
             break;
-        case OPL_cms:
-            CMS_ShutDown(m_configuration);
-            break;
         case OPL_opl2:
-            CMS_ShutDown(m_configuration);
             // fall-through
         case OPL_dualopl2:
         case OPL_opl3:

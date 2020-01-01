@@ -1123,10 +1123,8 @@ void SHELL_Init() {
     if (!IS_PC98_ARCH) {
         VFILE_RegisterBuiltinFileBlob(bfb_HEXMEM16_EXE);
         VFILE_RegisterBuiltinFileBlob(bfb_HEXMEM32_EXE);
-        VFILE_RegisterBuiltinFileBlob(bfb_DOSIDLE_EXE);
         VFILE_RegisterBuiltinFileBlob(bfb_CWSDPMI_EXE);
         VFILE_RegisterBuiltinFileBlob(bfb_DOS32A_EXE);
-        VFILE_RegisterBuiltinFileBlob(bfb_DOS4GW_EXE);
         VFILE_RegisterBuiltinFileBlob(bfb_EDIT_COM);
         VFILE_RegisterBuiltinFileBlob(bfb_TREE_EXE);
 

@@ -15,7 +15,6 @@ CFLAGS	=	-O3 -DNDEBUG -Wstrict-overflow=0 -Wstrict-aliasing=0 -fomit-frame-point
 			-I$(DBX_PATH)/include \
 			-I$(DBX_PATH)/src \
 			-I$(DBX_PATH)/src/aviwriter \
-			-I$(DBX_PATH)/src/xBRZ \
 			-I$(DBX_PATH)/src/hardware/snd_pc98/sound \
 			-I$(DBX_PATH)/src/hardware/snd_pc98/common \
 			-I$(DBX_PATH)/src/hardware/snd_pc98/generic \
@@ -30,7 +29,6 @@ CXXFLAGS = -O3  -DNDEBUG -std=gnu++11 -Wstrict-overflow=0 -Wstrict-aliasing=0 -f
 			-I$(DBX_PATH)/include \
 			-I$(DBX_PATH)/src \
 			-I$(DBX_PATH)/src/aviwriter \
-			-I$(DBX_PATH)/src/xBRZ \
 			-I$(DBX_PATH)/src/hardware/snd_pc98/sound \
 			-I$(DBX_PATH)/src/hardware/snd_pc98/common \
 			-I$(DBX_PATH)/src/hardware/snd_pc98/generic \
@@ -54,9 +52,7 @@ CPPSRCS	=	$(DBX_PATH)/src/dosbox.cpp \
 			$(wildcard $(DBX_PATH)/src/gui/*.cpp) \
 			$(wildcard $(DBX_PATH)/src/gui/*.c) \
 			$(wildcard $(DBX_PATH)/src/hardware/*.cpp) \
-			$(wildcard $(DBX_PATH)/src/hardware/mame/*.cpp) \
 			$(wildcard $(DBX_PATH)/src/hardware/parport/*.cpp) \
-			$(wildcard $(DBX_PATH)/src/hardware/reSID/*.cpp) \
 			$(wildcard $(DBX_PATH)/src/hardware/serialport/*.cpp) \
 			$(DBX_PATH)/src/hardware/snd_pc98/cbus/board86.c \
 			$(DBX_PATH)/src/hardware/snd_pc98/cbus/board26k.c \
@@ -85,8 +81,7 @@ CPPSRCS	=	$(DBX_PATH)/src/dosbox.cpp \
 			$(wildcard $(DBX_PATH)/src/misc/*.cpp) \
 			$(wildcard $(DBX_PATH)/src/output/*.cpp) \
 			$(wildcard $(DBX_PATH)/src/output/direct3d/*.cpp) \
-			$(wildcard $(DBX_PATH)/src/shell/*.cpp) \
-			$(wildcard $(DBX_PATH)/src/xBRZ/*.cpp)
+			$(wildcard $(DBX_PATH)/src/shell/*.cpp) 
 
 CPPSRCS_MT32 = $(wildcard $(DBX_PATH)/src/mt32/*.cpp) \
 			$(wildcard $(DBX_PATH)/src/mt32/freeverb/*.cpp) \

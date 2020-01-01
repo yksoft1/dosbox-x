@@ -6239,7 +6239,6 @@ void ISAPNP_Cfg_Init();
 void FPU_Init();
 #endif
 void KEYBOARD_Init();
-void VOODOO_Init();
 void MIXER_Init();
 void MIDI_Init();
 
@@ -6250,7 +6249,6 @@ void DEBUG_Init();
 #endif
 void SBLASTER_Init();
 void GUS_Init();
-void INNOVA_Init();
 void PCSPEAKER_Init();
 void TANDYSOUND_Init();
 void DISNEY_Init();
@@ -6263,7 +6261,6 @@ void SERIAL_Init();
 void PRINTER_Init();
 #endif
 void PARALLEL_Init();
-void DONGLE_Init();
 void DOS_Init();
 void XMS_Init();
 void EMS_Init();
@@ -7935,7 +7932,6 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         DEBUG_Init(); /* <- NTS: Relies on callback system */
 #endif
         Init_VGABIOS();
-        VOODOO_Init();
         PROGRAMS_Init(); /* <- NTS: Does not init programs, it inits the callback used later when creating the .COM programs on drive Z: */
         PCSPEAKER_Init();
         TANDYSOUND_Init();
@@ -7956,11 +7952,9 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         DISNEY_Init();
         GUS_Init();
         IDE_Init();
-        INNOVA_Init();
         BIOS_Init();
         INT10_Init();
         SERIAL_Init();
-        DONGLE_Init();
 #if C_PRINTER
         PRINTER_Init();
 #endif

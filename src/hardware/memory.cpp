@@ -34,8 +34,6 @@
 # include <stdio.h>
 #endif
 
-#include "voodoo.h"
-
 #include <string.h>
 
 extern ZIPFile savestate_zip;
