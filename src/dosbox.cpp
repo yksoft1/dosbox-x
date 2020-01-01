@@ -1074,7 +1074,7 @@ void DOSBOX_SetupConfigSections(void) {
 #if (C_DYNAMIC_X86) || (C_DYNREC)
         "dynamic",
 #endif
-        "normal", "full", "simple", 0 };
+        "normal",  0 };
 
 #if defined(__SSE__) && !defined(_M_AMD64) && !defined(EMSCRIPTEN)
     CheckSSESupport();
