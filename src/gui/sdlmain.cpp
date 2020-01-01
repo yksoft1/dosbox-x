@@ -65,7 +65,6 @@ void GFX_OpenGLRedrawScreen(void);
 # include <sys/stat.h>
 # include <process.h>
 # if !defined(__MINGW32__) /* MinGW does not have these headers */
-#  include <shcore.h>
 #  include <shellscalingapi.h>
 # endif
 #endif
