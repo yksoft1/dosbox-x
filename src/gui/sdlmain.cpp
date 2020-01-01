@@ -90,16 +90,6 @@ void GFX_OpenGLRedrawScreen(void);
 # include <shobjidl.h>
 #endif
 
-#if defined(WIN32) && defined(__MINGW32__) /* MinGW does not have IID_ITaskbarList3 */
-/* MinGW now contains this, the older MinGW for HX-DOS does not.
- * Keep things simple and just #define around it like this */
-static const GUID __my_CLSID_TaskbarList ={ 0x56FDF344,0xFD6D,0x11d0,{0x95,0x8A,0x00,0x60,0x97,0xC9,0xA0,0x90}};
-# define CLSID_TaskbarList __my_CLSID_TaskbarList
-
-static const GUID __my_IID_ITaskbarList3 = { 0xEA1AFB91ul,0x9E28u,0x4B86u,0x90u,0xE9u,0x9Eu,0x9Fu,0x8Au,0x5Eu,0xEFu,0xAFu };
-# define IID_ITaskbarList3 __my_IID_ITaskbarList3
-#endif
-
 #if defined(WIN32) && defined(__MINGW32__) /* MinGW does not have this */
 typedef enum PROCESS_DPI_AWARENESS {
     PROCESS_DPI_UNAWARE             = 0,
@@ -240,75 +230,6 @@ const char *DKM_to_descriptive_string(const unsigned int dkm) {
 
     return "";
 }
-
-#if defined(WIN32) && !defined(HX_DOS)
-ITaskbarList3 *winTaskbarList = NULL;
-#endif
-
-#if defined(WIN32) && !defined(HX_DOS)
-void WindowsTaskbarUpdatePreviewRegion(void) {
-    if (winTaskbarList != NULL) {
-        /* Windows 7/8/10: Tell the taskbar which part of our window contains the DOS screen */
-        RECT r;
-
-        r.top = sdl.clip.y;
-        r.left = sdl.clip.x;
-        r.right = sdl.clip.x + sdl.clip.w;
-        r.bottom = sdl.clip.y + sdl.clip.h;
-
-        /* NTS: The MSDN documentation is misleading. Apparently, despite 30+ years of Windows SDK
-                behavior where the "client area" is the area below the menu bar and inside the frame,
-                ITaskbarList3's idea of the "client area" is the the area inside the frame INCLUDING
-                the menu bar. Why? */
-        if (GetMenu(GetHWND()) != NULL) {
-            MENUBARINFO mb;
-            int rh;
-
-            memset(&mb, 0, sizeof(mb));
-            mb.cbSize = sizeof(mb);
-
-            GetMenuBarInfo(GetHWND(), OBJID_MENU, 0, &mb); // returns absolute screen coordinates, apparently.
-            rh = mb.rcBar.bottom + 1 - mb.rcBar.top; // menu screen space is top <= y <= bottom, inclusive.
-
-            r.top += rh;
-            r.bottom += rh;
-        }
-
-        if (winTaskbarList->SetThumbnailClip(GetHWND(), &r) != S_OK)
-            LOG_MSG("WARNING: ITaskbarList3::SetThumbnailClip() failed");
-    }
-}
-
-void WindowsTaskbarResetPreviewRegion(void) {
-    if (winTaskbarList != NULL) {
-        /* Windows 7/8/10: Tell the taskbar which part of our window contains the client area (not including the menu bar) */
-        RECT r;
-
-        GetClientRect(GetHWND(), &r);
-
-        /* NTS: The MSDN documentation is misleading. Apparently, despite 30+ years of Windows SDK
-                behavior where the "client area" is the area below the menu bar and inside the frame,
-                ITaskbarList3's idea of the "client area" is the the area inside the frame INCLUDING
-                the menu bar. Why? */
-        if (GetMenu(GetHWND()) != NULL) {
-            MENUBARINFO mb;
-            int rh;
-
-            memset(&mb, 0, sizeof(mb));
-            mb.cbSize = sizeof(mb);
-
-            GetMenuBarInfo(GetHWND(), OBJID_MENU, 0, &mb); // returns absolute screen coordinates, apparently.
-            rh = mb.rcBar.bottom + 1 - mb.rcBar.top; // menu screen space is top <= y <= bottom, inclusive.
-
-            r.top += rh;
-            r.bottom += rh;
-        }
-
-        if (winTaskbarList->SetThumbnailClip(GetHWND(), &r) != S_OK)
-            LOG_MSG("WARNING: ITaskbarList3::SetThumbnailClip() failed");
-    }
-}
-#endif
 
 unsigned int mapper_keyboard_layout = DKM_US;
 unsigned int host_keyboard_layout = DKM_US;
@@ -1119,8 +1040,7 @@ SDL_Window* GFX_SetSDLWindowMode(Bit16u width, Bit16u height, SCREEN_TYPES scree
                                       width, height,
                                       (GFX_IsFullscreen() ? (sdl.desktop.full.display_res ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN) : 0)
                                       | ((screenType == SCREEN_OPENGL) ? SDL_WINDOW_OPENGL : 0) | SDL_WINDOW_SHOWN
-                                      | (SDL2_resize_enable ? SDL_WINDOW_RESIZABLE : 0)
-                                      | (dpi_aware_enable ? SDL_WINDOW_ALLOW_HIGHDPI : 0));
+                                      | (SDL2_resize_enable ? SDL_WINDOW_RESIZABLE : 0));
         if (sdl.window) {
             GFX_SetTitle(-1, -1, -1, false); //refresh title.
         }
@@ -1918,271 +1838,7 @@ Bitu GFX_SetSize(Bitu width, Bitu height, Bitu flags, double scalex, double scal
 
     UpdateWindowDimensions();
 
-#if defined(WIN32) && !defined(HX_DOS)
-    WindowsTaskbarUpdatePreviewRegion();
-#endif
-
     return retFlags;
-}
-
-#if defined(WIN32) && !defined(HX_DOS)
-// WARNING: Not recommended, there is danger you cannot exit emulator because mouse+keyboard are taken
-static bool enable_hook_everything = false;
-#endif
-
-// Whether or not to hook the keyboard and block special keys.
-// Setting this is recommended so that your keyboard is fully usable in the guest OS when you
-// enable the mouse+keyboard capture. But hooking EVERYTHING is not recommended because there is a
-// danger you become trapped in the DOSBox emulator!
-static bool enable_hook_special_keys = true;
-
-#if defined(WIN32) && !defined(HX_DOS)
-// Whether or not to hook Num/Scroll/Caps lock in order to give the guest OS full control of the
-// LEDs on the keyboard (i.e. the LEDs do not change until the guest OS changes their state).
-// This flag also enables code to set the LEDs to guest state when setting mouse+keyboard capture,
-// and restoring LED state when releasing capture.
-static bool enable_hook_lock_toggle_keys = true;
-#endif
-
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
-// and this is where we store host LED state when capture is set.
-static bool on_capture_num_lock_was_on = true; // reasonable guess
-static bool on_capture_scroll_lock_was_on = false;
-static bool on_capture_caps_lock_was_on = false;
-#endif
-
-static bool exthook_enabled = false;
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
-static HHOOK exthook_winhook = NULL;
-
-#if !defined(__MINGW32__)
-extern "C" void SDL_DOSBox_X_Hack_Set_Toggle_Key_WM_USER_Hack(unsigned char x);
-#endif
-
-static LRESULT CALLBACK WinExtHookKeyboardHookProc(int nCode,WPARAM wParam,LPARAM lParam) {
-    if (nCode == HC_ACTION) {
-        HWND myHwnd = GetHWND();
-
-        if (exthook_enabled && GetFocus() == myHwnd) { /* intercept only if DOSBox-X is the focus and the keyboard is hooked */
-            if (wParam == WM_SYSKEYDOWN || wParam == WM_KEYDOWN || wParam == WM_SYSKEYUP || wParam == WM_KEYUP) {
-                KBDLLHOOKSTRUCT *st_hook = (KBDLLHOOKSTRUCT*)lParam;
-
-                if (st_hook->flags & LLKHF_INJECTED) {
-                    // injected keys are automatically allowed, especially if we are injecting keyboard input into ourself
-                    // to control Num/Scroll/Caps Lock LEDs. If we don't check this we cannot control the LEDs. Injecting
-                    // keydown/keyup for Num Lock is the only means provided by Windows to control those LEDs.
-                }
-                else if (st_hook->vkCode == VK_MENU/*alt*/ || st_hook->vkCode == VK_CONTROL ||
-                    st_hook->vkCode == VK_LSHIFT || st_hook->vkCode == VK_RSHIFT) {
-                    // always allow modifier keys through, so other applications are not left with state inconsistent from
-                    // actual keyboard state.
-                }
-                else {
-                    bool nopass = enable_hook_everything; // if the user wants us to hook ALL keys then that's where this signals it
-                    bool alternate_message = false; // send as WM_USER+0x100 instead of WM_KEYDOWN
-
-                    if (!nopass) {
-                        // hook only certain keys Windows is likely to act on by itself.
-
-                        // FIXME: Hooking the keyboard does NOT prevent Fn+SPACE (zoom) from triggering screen resolution
-                        //        changes in Windows 10! How do we stop that?
-
-                        // FIXME: It might be nice to let the user decide whether or not Print Screen is intercepted.
-
-                        // TODO: We do not hook the volume up/down/mute keys. This is to be kind to the user. They may
-                        // appreciate the ability to dial down the volume if a loud DOS program comes up. But
-                        // if the user WANTS us to, we should allow hooking those keys.
-
-                        // TODO: Allow (if instructed) hooking the VK_SLEEP key so pushing the sleep key (the
-                        // one with the icon of the moon on Microsoft keyboards) can be sent instead to the
-                        // guest OS. Also add code where if we're not hooking the key, then we should listen
-                        // for signals the guest OS is suspending or hibernating and auto-disconnect the
-                        // mouse capture and keyboard hook.
-
-                        switch (st_hook->vkCode) {
-                        case VK_LWIN:   // left Windows key (normally triggers Start menu)
-                        case VK_RWIN:   // right Windows key (normally triggers Start menu)
-                        case VK_APPS:   // Application key (normally open to the user, but just in case)
-                        case VK_PAUSE:  // pause key
-                        case VK_SNAPSHOT: // print screen
-                        case VK_TAB:    // try to catch ALT+TAB too (not blocking VK_TAB will allow host OS to switch tasks)
-                        case VK_ESCAPE: // try to catch CTRL+ESC as well (so Windows 95 Start Menu is accessible)
-                        case VK_SPACE:  // and space (catching VK_ZOOM isn't enough to prevent Windows 10 from changing res)
-                        // these keys have no meaning to DOSBox and so we hook them by default to allow the guest OS to use them
-                        case VK_BROWSER_BACK: // Browser Back key
-                        case VK_BROWSER_FORWARD: // Browser Forward key
-                        case VK_BROWSER_REFRESH: // Browser Refresh key
-                        case VK_BROWSER_STOP: // Browser Stop key
-                        case VK_BROWSER_SEARCH: // Browser Search key
-                        case VK_BROWSER_FAVORITES: // Browser Favorites key
-                        case VK_BROWSER_HOME: // Browser Start and Home key
-                        case VK_MEDIA_NEXT_TRACK: // Next Track key
-                        case VK_MEDIA_PREV_TRACK: // Previous Track key
-                        case VK_MEDIA_STOP: // Stop Media key
-                        case VK_MEDIA_PLAY_PAUSE: // Play / Pause Media key
-                        case VK_LAUNCH_MAIL: // Start Mail key
-                        case VK_LAUNCH_MEDIA_SELECT: // Select Media key
-                        case VK_LAUNCH_APP1: // Start Application 1 key
-                        case VK_LAUNCH_APP2: // Start Application 2 key
-                        case VK_PLAY: // Play key
-                        case VK_ZOOM: // Zoom key (the (+) magnifying glass keyboard shortcut laptops have these days on the spacebar?)
-                            nopass = true;
-                            break;
-
-                            // IME Hiragana key, otherwise inaccessible to us
-                        case 0xF2:
-                            nopass = true; // FIXME: This doesn't (yet) cause a SDL key event.
-                            break;
-
-                            // we allow hooking Num/Scroll/Caps Lock keys so that pressing them does not toggle the LED.
-                            // we then take Num/Scroll/Caps LED state from the guest and let THAT control the LED state.
-                        case VK_CAPITAL:
-                        case VK_NUMLOCK:
-                        case VK_SCROLL:
-                            nopass = enable_hook_lock_toggle_keys;
-                            alternate_message = true;
-                            break;
-                        }
-                    }
-
-                    if (nopass) {
-                        // convert WM_KEYDOWN/WM_KEYUP if obfuscating the message to distinguish between real and injected events
-                        if (alternate_message) {
-                            if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
-                                wParam = WM_USER + 0x100;
-                            else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
-                                wParam = WM_USER + 0x101;
-                        }
-
-                        DWORD lParam =
-                            (st_hook->scanCode << 8U) +
-                            ((st_hook->flags & LLKHF_EXTENDED) ? 0x01000000 : 0) +
-                            ((wParam == WM_KEYUP || wParam == WM_SYSKEYUP) ? 0xC0000000 : 0);
-
-                        // catch the keystroke, post it to ourself, do not pass it on
-                        PostMessage(myHwnd, (UINT)wParam, st_hook->vkCode, lParam);
-                        return TRUE;
-                    }
-                }
-            }
-        }
-    }
-
-    return CallNextHookEx(exthook_winhook, nCode, wParam, lParam);
-}
-
-// Microsoft doesn't have an outright "set toggle key state" call, they expect you
-// to know the state and then fake input to toggle. Blegh. Fine.
-void WinSetKeyToggleState(unsigned int vkCode, bool state) {
-    bool curState = (GetKeyState(vkCode) & 1) ? true : false;
-    INPUT inps;
-
-    // if we're already in that state, then there is nothing to do.
-    if (curState == state) return;
-
-    // fake keyboard input.
-    memset(&inps, 0, sizeof(inps));
-    inps.type = INPUT_KEYBOARD;
-    inps.ki.wVk = vkCode;
-    inps.ki.dwFlags = KEYEVENTF_EXTENDEDKEY; // pressed, use wVk.
-    SendInput(1, &inps, sizeof(INPUT));
-
-    memset(&inps, 0, sizeof(inps));
-    inps.type = INPUT_KEYBOARD;
-    inps.ki.wVk = vkCode;
-    inps.ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP; // release, use wVk.
-    SendInput(1, &inps, sizeof(INPUT));
-}
-#endif
-
-Bitu Keyboard_Guest_LED_State();
-void UpdateKeyboardLEDState(Bitu led_state/* in the same bitfield arrangement as using command 0xED on PS/2 keyboards */);
-
-void UpdateKeyboardLEDState(Bitu led_state/* in the same bitfield arrangement as using command 0xED on PS/2 keyboards */) {
-    (void)led_state;//POSSIBLY UNUSED
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS) /* Microsoft Windows */
-    if (exthook_enabled) { // ONLY if ext hook is enabled, else we risk infinite loops with keyboard events
-        //WinSetKeyToggleState(VK_NUMLOCK, !!(led_state & 2));
-        //WinSetKeyToggleState(VK_SCROLL, !!(led_state & 1));
-        //WinSetKeyToggleState(VK_CAPITAL, !!(led_state & 4));
-    }
-#endif
-}
-
-void DoExtendedKeyboardHook(bool enable) {
-    if (exthook_enabled == enable)
-        return;
-
-#if defined(WIN32) && !defined(C_SDL2) && !defined(HX_DOS)
-    if (enable) {
-        if (!exthook_winhook) {
-            exthook_winhook = SetWindowsHookEx(WH_KEYBOARD_LL, WinExtHookKeyboardHookProc, GetModuleHandle(NULL), 0);
-            if (exthook_winhook == NULL) return;
-        }
-
-        // it's on
-        exthook_enabled = enable;
-
-        // flush out and handle pending keyboard I/O
-        {
-            MSG msg;
-
-            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-        }
-
-#if !defined(__MINGW32__)
-        // Enable the SDL hack for Win32 to handle Num/Scroll/Caps
-        SDL_DOSBox_X_Hack_Set_Toggle_Key_WM_USER_Hack(1);
-#endif
-
-        // if hooking Num/Scroll/Caps Lock then record the toggle state of those keys.
-        // then read from the keyboard emulation the LED state set by the guest and apply it to the host keyboard.
-        if (enable_hook_lock_toggle_keys) {
-            // record state
-            on_capture_num_lock_was_on = (GetKeyState(VK_NUMLOCK) & 1) ? true : false;
-            on_capture_scroll_lock_was_on = (GetKeyState(VK_SCROLL) & 1) ? true : false;
-            on_capture_caps_lock_was_on = (GetKeyState(VK_CAPITAL) & 1) ? true : false;
-            // change to guest state (FIXME: Read emulated keyboard state and apply!)
-            UpdateKeyboardLEDState(Keyboard_Guest_LED_State());
-        }
-    }
-    else {
-        if (exthook_winhook) {
-            if (enable_hook_lock_toggle_keys) {
-                // restore state
-                //WinSetKeyToggleState(VK_NUMLOCK, on_capture_num_lock_was_on);
-                //WinSetKeyToggleState(VK_SCROLL, on_capture_scroll_lock_was_on);
-                //WinSetKeyToggleState(VK_CAPITAL, on_capture_caps_lock_was_on);
-            }
-
-            {
-                MSG msg;
-
-                // before we disable the SDL hack make sure we flush out and handle any pending keyboard events.
-                // if we don't do this the posted Num/Scroll/Caps events will stay in the queue and will be handled
-                // by SDL after turning off the toggle key hack.
-                Sleep(1); // make sure Windows posts the keystrokes
-                while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-                    TranslateMessage(&msg);
-                    DispatchMessage(&msg);
-                }
-            }
-
-#if !defined(__MINGW32__)
-            // Disable the SDL hack for Win32 to handle Num/Scroll/Caps
-            SDL_DOSBox_X_Hack_Set_Toggle_Key_WM_USER_Hack(0);
-#endif
-
-            UnhookWindowsHookEx(exthook_winhook);
-            exthook_winhook = NULL;
-        }
-
-        exthook_enabled = enable;
-    }
-#endif
 }
 
 void GFX_ReleaseMouse(void) {
@@ -2202,10 +1858,8 @@ void GFX_CaptureMouse(bool capture) {
 #else
         SDL_WM_GrabInput(SDL_GRAB_ON);
 #endif
-        if (enable_hook_special_keys) DoExtendedKeyboardHook(true);
         SDL_ShowCursor(SDL_DISABLE);
     } else {
-        DoExtendedKeyboardHook(false);
 #if defined(C_SDL2)
         SDL_SetRelativeMouseMode(SDL_FALSE);
 #else
@@ -2237,10 +1891,8 @@ void GFX_UpdateSDLCaptureState(void) {
 #else
         SDL_WM_GrabInput(SDL_GRAB_ON);
 #endif
-        if (enable_hook_special_keys) DoExtendedKeyboardHook(true);
         SDL_ShowCursor(SDL_DISABLE);
     } else {
-        DoExtendedKeyboardHook(false);
 #if defined(C_SDL2)
         SDL_SetRelativeMouseMode(SDL_FALSE);
 #else
@@ -4540,7 +4192,6 @@ void GFX_LosingFocus(void) {
     sdl.laltstate=SDL_KEYUP;
     sdl.raltstate=SDL_KEYUP;
     MAPPER_LosingFocus();
-    DoExtendedKeyboardHook(false);
 }
 
 #if !defined(C_SDL2)
@@ -6040,7 +5691,6 @@ bool DOSBOX_parse_argv() {
             fprintf(stderr,"  -early-debug                            Log early initialization messages in DOSBox (implies -console)\n");
             fprintf(stderr,"  -keydbg                                 Log all SDL key events (debugging)\n");
             fprintf(stderr,"  -lang <message file>                    Use specific message file instead of language= setting\n");
-            fprintf(stderr,"  -nodpiaware                             Ignore (don't signal) Windows DPI awareness\n");
             fprintf(stderr,"  -securemode                             Enable secure mode\n");
             fprintf(stderr,"  -noautoexec                             Don't execute AUTOEXEC.BAT config section\n");
             fprintf(stderr,"  -exit                                   Exit after executing AUTOEXEC.BAT\n");
@@ -6082,9 +5732,6 @@ bool DOSBOX_parse_argv() {
         }
         else if (optname == "securemode") {
             control->opt_securemode = true;
-        }
-        else if (optname == "nodpiaware") {
-            control->opt_disable_dpi_awareness = true;
         }
         else if (optname == "keydbg") {
             log_keyboard_scan_codes = true;
@@ -6271,45 +5918,6 @@ void IDE_Init();
 void NE2K_Init();
 void FDC_Primary_Init();
 void AUTOEXEC_Init();
-
-#if defined(WIN32)
-// NTS: I intend to add code that not only indicates High DPI awareness but also queries the monitor DPI
-//      and then factor the DPI into DOSBox's scaler and UI decisions.
-void Windows_DPI_Awareness_Init() {
-    // if the user says not to from the command line, or disables it from dosbox.conf, then don't enable DPI awareness.
-    if (!dpi_aware_enable || control->opt_disable_dpi_awareness)
-        return;
-
-    /* log it */
-    LOG(LOG_MISC,LOG_DEBUG)("Win32: I will announce High DPI awareness to Windows to eliminate upscaling");
-
-    // turn off DPI scaling so DOSBox-X doesn't look so blurry on Windows 8 & Windows 10.
-    // use GetProcAddress and LoadLibrary so that these functions are not hard dependencies that prevent us from
-    // running under Windows 7 or XP.
-    HRESULT (WINAPI *__SetProcessDpiAwareness)(PROCESS_DPI_AWARENESS) = NULL; // windows 8.1
-    BOOL (WINAPI *__SetProcessDPIAware)(void) = NULL; // vista/7/8/10
-    HMODULE __user32;
-    HMODULE __shcore;
-
-    __user32 = GetModuleHandle("USER32.DLL");
-    __shcore = GetModuleHandle("SHCORE.DLL");
-
-    if (__user32)
-        __SetProcessDPIAware = (BOOL(WINAPI *)(void))GetProcAddress(__user32, "SetProcessDPIAware");
-    if (__shcore)
-        __SetProcessDpiAwareness = (HRESULT (WINAPI *)(PROCESS_DPI_AWARENESS))GetProcAddress(__shcore, "SetProcessDpiAwareness");
-
-    if (__SetProcessDpiAwareness) {
-        LOG(LOG_MISC,LOG_DEBUG)("SHCORE.DLL exports SetProcessDpiAwareness function, calling it to signal we are DPI aware.");
-        if (__SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE) != S_OK)
-            LOG(LOG_MISC,LOG_DEBUG)("SetProcessDpiAwareness failed");
-    }
-    if (__SetProcessDPIAware) {
-        LOG(LOG_MISC,LOG_DEBUG)("USER32.DLL exports SetProcessDPIAware function, calling it to signal we are DPI aware.");
-        __SetProcessDPIAware();
-    }
-}
-#endif
 
 bool VM_Boot_DOSBox_Kernel() {
     if (!dos_kernel_disabled) {
@@ -6964,18 +6572,7 @@ bool x11_on_top = false;
 bool macosx_on_top = false;
 #endif
 
-bool is_always_on_top(void) {
-#if defined(_WIN32) && !defined(C_SDL2)
-    DWORD dwExStyle = ::GetWindowLong(GetHWND(), GWL_EXSTYLE);
-    return !!(dwExStyle & WS_EX_TOPMOST);
-#elif defined(MACOSX) && !defined(C_SDL2)
-    return macosx_on_top;
-#elif defined(LINUX)
-    return x11_on_top;
-#else
-    return false;
-#endif
-}
+
 
 #if defined(_WIN32) && !defined(C_SDL2)
 extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
@@ -6983,23 +6580,6 @@ extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
 #if defined(MACOSX) && !defined(C_SDL2)
 extern "C" void sdl1_hax_set_topmost(unsigned char topmost);
 #endif
-#if defined(MACOSX) && !defined(C_SDL2)
-extern "C" void sdl1_hax_macosx_highdpi_set_enable(const bool enable);
-#endif
-
-void toggle_always_on_top(void) {
-    bool cur = is_always_on_top();
-#if defined(_WIN32) && !defined(C_SDL2)
-    sdl1_hax_set_topmost(!cur);
-#elif defined(MACOSX) && !defined(C_SDL2)
-    sdl1_hax_set_topmost(macosx_on_top = (!cur));
-#elif defined(LINUX)
-    void LinuxX11_OnTop(bool f);
-    LinuxX11_OnTop(x11_on_top = (!cur));
-#else
-    (void)cur;
-#endif
-}
 
 void BlankDisplay(void);
 
@@ -7023,32 +6603,6 @@ bool showdetails_menu_callback(DOSBoxMenu * const xmenu, DOSBoxMenu::item * cons
     menu.showrt = !(menu.hidecycles = !menu.hidecycles);
     GFX_SetTitle((Bit32s)CPU_CycleMax, -1, -1, false);
     mainMenu.get_item("showdetails").check(!menu.hidecycles).refresh_item(mainMenu);
-    return true;
-}
-
-bool alwaysontop_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
-    (void)menu;//UNUSED
-    (void)menuitem;//UNUSED
-    toggle_always_on_top();
-    mainMenu.get_item("alwaysontop").check(is_always_on_top()).refresh_item(mainMenu);
-    return true;
-}
-
-bool highdpienable_menu_callback(DOSBoxMenu * const menu, DOSBoxMenu::item * const menuitem) {
-    void RENDER_CallBack( GFX_CallBackFunctions_t function );
-
-    (void)menu;//UNUSED
-    (void)menuitem;//UNUSED
-
-#if defined(MACOSX) && !defined(C_SDL2)
-    dpi_aware_enable = !dpi_aware_enable;
-    if (!control->opt_disable_dpi_awareness) {
-        sdl1_hax_macosx_highdpi_set_enable(dpi_aware_enable);
-        RENDER_CallBack(GFX_CallBackReset);
-    }
-#endif
-
-    mainMenu.get_item("highdpienable").check(dpi_aware_enable).refresh_item(mainMenu);
     return true;
 }
 
@@ -7500,23 +7054,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
     {
         Section_prop *section = static_cast<Section_prop *>(control->GetSection("dosbox"));
         assert(section != NULL);
-
-        // boot-time option whether or not to report ourself as "DPI aware" to Windows so the
-        // DWM doesn't upscale our window for backwards compat.
-        dpi_aware_enable = section->Get_bool("dpi aware");
     }
-
-#ifdef WIN32
-        /* Windows Vista/7/8/10 DPI awareness. If we don't tell Windows we're high DPI aware, the DWM will
-         * upscale our window to emulate a 96 DPI display which on high res screen will make our UI look blurry.
-         * But we obey the user if they don't want us to do that. */
-        Windows_DPI_Awareness_Init();
-#endif
-#if defined(MACOSX) && !defined(C_SDL2)
-    /* Our SDL1 in-tree library has a High DPI awareness function for Mac OS X now */
-        if (!control->opt_disable_dpi_awareness)
-            sdl1_hax_macosx_highdpi_set_enable(dpi_aware_enable);
-#endif
 
 #ifdef MACOSX
         osx_detect_nstouchbar();/*assigns to has_touch_bar_support*/
@@ -7868,13 +7406,6 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         menu.showrt = control->opt_showrt;
         menu.hidecycles = (control->opt_showcycles ? false : true);
 
-#if defined(WIN32) && !defined(C_SDL2)
-        {
-            Section_prop *sec = static_cast<Section_prop *>(control->GetSection("dosbox"));
-            enable_hook_special_keys = sec->Get_bool("keyboard hook");
-        }
-#endif
-
         MSG_Init();
         MAPPER_StartUp();
         DOSBOX_InitTickLoop();
@@ -8011,9 +7542,7 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_winmenu").set_text("Menu key").set_callback_function(sendkey_preset_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"sendkey_cad").set_text("Ctrl+Alt+Del").set_callback_function(sendkey_preset_menu_callback);
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"doublebuf").set_text("Double Buffering (Fullscreen)").set_callback_function(doublebuf_menu_callback).check(!!GetSetSDLValue(1, doubleBufString, 0));
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"alwaysontop").set_text("Always on top").set_callback_function(alwaysontop_menu_callback).check(is_always_on_top());
         mainMenu.alloc_item(DOSBoxMenu::item_type_id,"showdetails").set_text("Show details").set_callback_function(showdetails_menu_callback).check(!menu.hidecycles && !menu.showrt);
-        mainMenu.alloc_item(DOSBoxMenu::item_type_id,"highdpienable").set_text("High DPI enable").set_callback_function(highdpienable_menu_callback).check(dpi_aware_enable);
 
         mainMenu.get_item("mapper_blankrefreshtest").set_text("Refresh test (blank display)").set_callback_function(refreshtest_menu_callback).refresh_item(mainMenu);
 
@@ -8082,62 +7611,6 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
         mainMenu.screenWidth = (unsigned int)sdl.surface->w;
         mainMenu.screenHeight = (unsigned int)sdl.surface->h;
         mainMenu.updateRect();
-#endif
-#if defined(WIN32) && !defined(HX_DOS)
-        /* Windows 7 taskbar extension support */
-        {
-            HRESULT hr;
-
-            hr = CoCreateInstance(CLSID_TaskbarList, NULL, CLSCTX_SERVER, IID_ITaskbarList3, (LPVOID*)(&winTaskbarList));
-            if (hr == S_OK) {
-                LOG_MSG("Windows: IID_ITaskbarList3 is available");
-
-#if !defined(C_SDL2)
-                THUMBBUTTON buttons[8];
-                int buttoni = 0;
-
-                {
-                    THUMBBUTTON &b = buttons[buttoni++];
-                    memset(&b, 0, sizeof(b));
-                    b.iId = ID_WIN_SYSMENU_MAPPER;
-                    b.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_MAPPER));
-                    b.dwMask = THB_TOOLTIP | THB_FLAGS | THB_ICON;
-                    b.dwFlags = THBF_ENABLED | THBF_DISMISSONCLICK;
-                    wcscpy(b.szTip, L"Mapper");
-                }
-
-                {
-                    THUMBBUTTON &b = buttons[buttoni++];
-                    memset(&b, 0, sizeof(b));
-                    b.iId = ID_WIN_SYSMENU_CFG_GUI;
-                    b.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_CFG_GUI));
-                    b.dwMask = THB_TOOLTIP | THB_FLAGS | THB_ICON;
-                    b.dwFlags = THBF_ENABLED | THBF_DISMISSONCLICK;
-                    wcscpy(b.szTip, L"Configuration GUI");
-                }
-
-                {
-                    THUMBBUTTON &b = buttons[buttoni++];
-                    memset(&b, 0, sizeof(b));
-                    b.iId = 1;
-                    b.dwMask = THB_FLAGS;
-                    b.dwFlags = THBF_DISABLED | THBF_NONINTERACTIVE | THBF_NOBACKGROUND;
-                }
-
-                {
-                    THUMBBUTTON &b = buttons[buttoni++];
-                    memset(&b, 0, sizeof(b));
-                    b.iId = ID_WIN_SYSMENU_PAUSE;
-                    b.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_PAUSE));
-                    b.dwMask = THB_TOOLTIP | THB_FLAGS | THB_ICON;
-                    b.dwFlags = THBF_ENABLED;
-                    wcscpy(b.szTip, L"Pause");
-                }
-
-                winTaskbarList->ThumbBarAddButtons(GetHWND(), buttoni, buttons);
-#endif
-            }
-        }
 #endif
         {
             Section_prop *section = static_cast<Section_prop *>(control->GetSection("SDL"));
@@ -8503,13 +7976,6 @@ fresh_boot:
 #endif
 
     SDL_Quit();//Let's hope sdl will quit as well when it catches an exception
-
-#if defined(WIN32) && !defined(HX_DOS)
-    if (winTaskbarList != NULL) {
-        winTaskbarList->Release();
-        winTaskbarList = NULL;
-    }
-#endif
 
     mainMenu.unbuild();
     mainMenu.clear_all_menu_items();

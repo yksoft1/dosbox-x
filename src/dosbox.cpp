@@ -990,7 +990,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* capturechromaformats[] = { "auto", "4:4:4", "4:2:2", "4:2:0", 0};
     const char* controllertypes[] = { "auto", "at", "xt", "pcjr", "pc98", 0}; // Future work: Tandy(?) and USB
     const char* auxdevices[] = {"none","2button","3button","intellimouse","intellimouse45",0};
-    const char* cputype_values[] = {"auto", "8086", "8086_prefetch", "80186", "80186_prefetch", "286", "286_prefetch", "386", "386_prefetch", "486old", "486old_prefetch", "486", "486_prefetch", "pentium", "pentium_mmx", "ppro_slow", 0};
+    const char* cputype_values[] = {"auto", "8086",  "80186", "286",  "386", "386_prefetch", "486old", "486old_prefetch", "486", "486_prefetch", "pentium", "pentium_mmx", "ppro_slow", 0};
     const char* rates[] = {  "44100", "48000", "32000","22050", "16000", "11025", "8000", "49716", 0 };
     const char* oplrates[] = {   "44100", "49716", "48000", "32000","22050", "16000", "11025", "8000", 0 };
     const char* devices[] = { "default", "win32", "alsa", "oss", "coreaudio", "coremidi", "mt32", "synth", "timidity", "none", 0}; // FIXME: add some way to offer the actually available choices.
@@ -1031,7 +1031,7 @@ void DOSBOX_SetupConfigSections(void) {
     const char* irqssb[] = { "7", "5", "3", "9", "10", "11", "12", 0 };
     const char* dmasgus[] = { "3", "0", "1", "5", "6", "7", 0 };
     const char* dmassb[] = { "1", "5", "0", "3", "6", "7", 0 };
-    const char* oplemus[] = { "default", "compat", "fast", "nuked", "mame", 0 };
+    const char* oplemus[] = { "default", "compat", "fast",  0 };
     const char *qualityno[] = { "0", "1", "2", "3", 0 };
     const char* tandys[] = { "auto", "on", "off", 0};
     const char* ps1opt[] = { "on", "off", 0};
@@ -1090,24 +1090,6 @@ void DOSBOX_SetupConfigSections(void) {
 
     Pbool = secprop->Add_bool("enable 8-bit dac",Property::Changeable::OnlyAtStart,true);
     Pbool->Set_help("If set, allow VESA BIOS calls in IBM PC mode to set DAC width. Has no effect in PC-98 mode.");
-
-#if defined(MACOSX)
-    /* Let's make DPI aware OFF by default so Mac OS X users with Retina displays don't yell at us about eyestrain.
-       They can turn it on in combination with a nice scaler when they want it. */
-    Pbool = secprop->Add_bool("dpi aware",Property::Changeable::OnlyAtStart,false);
-#else
-    Pbool = secprop->Add_bool("dpi aware",Property::Changeable::OnlyAtStart,true);
-#endif
-    Pbool->Set_help("Set this option (on by default) to indicate to your OS that DOSBox is DPI aware.\n"
-            "If it is not set, Windows Vista/7/8/10 and higher may upscale the DOSBox window\n"
-            "on higher resolution monitors which is probably not what you want.");
-
-    Pbool = secprop->Add_bool("keyboard hook", Property::Changeable::Always, false);
-    Pbool->Set_help("Use keyboard hook (currently only on Windows) to catch special keys and synchronize the keyboard LEDs with the host");
-
-    // STUB OPTION, NOT YET FULLY IMPLEMENTED
-    Pbool = secprop->Add_bool("weitek",Property::Changeable::WhenIdle,false);
-    Pbool->Set_help("If set, emulate the Weitek coprocessor. This option only has effect if cputype=386 or cputype=486.");
 
     Pbool = secprop->Add_bool("bochs debug port e9",Property::Changeable::WhenIdle,false);
     Pbool->Set_help("If set, emulate Bochs debug port E9h. ASCII text written to this I/O port is assumed to be debug output, and logged.");

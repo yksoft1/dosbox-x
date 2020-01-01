@@ -177,11 +177,8 @@ static const char *def_menu_cpu_type[] =
     "cputype_auto",
     "--",
     "cputype_8086",
-    "cputype_8086_prefetch",
     "cputype_80186",
-    "cputype_80186_prefetch",
     "cputype_286",
-    "cputype_286_prefetch",
     "cputype_386",
     "cputype_386_prefetch",
     "cputype_486old",
@@ -325,12 +322,6 @@ static const char *def_menu_video[] =
 #if !defined(HX_DOS)
     "mapper_fullscr",
     "--",
-#endif
-#if !defined(HX_DOS) && (defined(LINUX) || !defined(C_SDL2))
-    "alwaysontop",
-#endif
-#if !defined(C_SDL2) && defined(MACOSX)
-    "highdpienable",
 #endif
 #if !defined(C_SDL2)
     "doublebuf",

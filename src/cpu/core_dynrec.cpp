@@ -339,7 +339,7 @@ run_block:
 		case BR_OpcodeFull:
 			CPU_CycleLeft+=CPU_Cycles;
 			CPU_Cycles=1;
-			return CPU_Core_Full_Run();
+			return CPU_Core_Normal_Run();
 #endif
 
 		case BR_Link1:

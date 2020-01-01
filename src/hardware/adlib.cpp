@@ -27,7 +27,6 @@
 #include "mapper.h"
 #include "mem.h"
 #include "dbopl.h"
-#include "nukedopl.h"
 
 #define OPL2_INTERNAL_FREQ    3600000   // The OPL2 operates at 3.6MHz
 #define OPL3_INTERNAL_FREQ    14400000  // The OPL3 operates at 14.4MHz
@@ -95,38 +94,6 @@ namespace OPL3 {
 		}
 	};
 }
-
-namespace NukedOPL {
-	struct Handler : public Adlib::Handler {
-        opl3_chip chip = {};
-		virtual void WriteReg( Bit32u reg, Bit8u val ) {
-			OPL3_WriteReg(&chip, reg, val);
-		}
-		virtual Bit32u WriteAddr( Bit32u port, Bit8u val ) {
-			Bit16u addr;
-			addr = val;
-			if ((port & 2) && (addr == 0x05 || chip.newm)) {
-				addr |= 0x100;
-			}
-			return addr;
-		}
-		virtual void Generate( MixerChannel* chan, Bitu samples ) {
-			Bit16s buf[1024*2];
-			while( samples > 0 ) {
-				Bitu todo = samples > 1024 ? 1024 : samples;
-				samples -= todo;
-				OPL3_GenerateStream(&chip, buf, (Bit32u)todo);
-				chan->AddSamples_s16( todo, buf );
-			}
-		}
-		virtual void Init( Bitu rate ) {
-			OPL3_Reset(&chip, (Bit32u)rate);
-		}
-		~Handler() {
-		}
-	};
-}
-
 
 #define RAW_SIZE 1024
 
@@ -828,8 +795,6 @@ Module::Module( Section* configuration ) : Module_base(configuration) {
 		else {
 			handler = new OPL3::Handler();
 		}
-	} else if (oplemu == "nuked") {
-		handler = new NukedOPL::Handler();
 	} else {
 		handler = new DBOPL::Handler();
 	}
