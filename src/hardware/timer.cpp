@@ -407,8 +407,12 @@ static void write_latch(Bitu port,Bitu val,Bitu /*iolen*/) {
     if (IS_PC98_ARCH) {
         if (port >= 0x3FD9)
             port = ((port - 0x3FD9) >> 1) + 0x40;
-        else
+        else if (port >=0x71 && port <= 0x75)
             port = ((port - 0x71) >> 1) + 0x40;
+        else {
+            E_Exit("PIT: PC-98 port in write_latch is out of range.");
+            return;
+        }
     }
 
 	Bitu counter=port-0x40;
@@ -538,8 +542,12 @@ static Bitu read_latch(Bitu port,Bitu /*iolen*/) {
     if (IS_PC98_ARCH) {
         if (port >= 0x3FD9)
             port = ((port - 0x3FD9) >> 1) + 0x40;
-        else
+        else if (port >=0x71 && port <= 0x75)
             port = ((port - 0x71) >> 1) + 0x40;
+        else {
+            E_Exit("PIT: PC-98 port in read_latch is out of range.");
+            return 0;
+        }
     }
 
 	Bit32u counter=(Bit32u)(port-0x40);
@@ -784,8 +792,8 @@ void TIMER_BIOS_INIT_Configure() {
         if (freq < 0)
             freq = IS_PC98_ARCH ? 2000 : 903;
 
-		if (freq < 19) {
-			div = 1;
+		if (freq < 1) {
+			div = 65535;
 		}
 		else {
 			div = (unsigned int)PIT_TICK_RATE / (unsigned int)freq;

@@ -1304,7 +1304,7 @@ void DOS_Shell::CMD_GOTO(char * args) {
 	HELP("GOTO");
 	StripSpaces(args);
 	if (!bf) return;
-	if (*args &&(*args==':')) args++;
+	if (*args==':') args++;
 	//label ends at the first space
 	char* non_space = args;
 	while (*non_space) {
@@ -1792,7 +1792,7 @@ static void delayed_sdlpress(Bitu core) {
 	if(core==1) SetVal("cpu","core","normal");
 	else if(core==2) SetVal("cpu","core","simple");
 	else if(core==3) SetVal("cpu","core","dynamic");
-	else if(core==3) SetVal("cpu","core","full");
+	else if(core==4) SetVal("cpu","core","full");
 }
 // ADDKEY patch was created by Moe
 void DOS_Shell::CMD_ADDKEY(char * args){

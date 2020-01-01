@@ -1,4 +1,74 @@
-0.82.24 (next)
+0.82.25
+  - Added 1920x1440 4:3 HD VESA BIOS mode and increased
+    scaler limits to support it.
+  - VESA BIOS emulation now rejects video modes that
+    exceed the render scaler architecture's limits,
+    to avoid frozen screens if set. However, VESAMOED.COM
+    warns the user, so if the user ignores the warning,
+    VESA BIOS emulation will allow user-defined modes
+    that exceed the limits anyway.
+  - VESAMOED.COM will now warn you if the custom mode
+    you modified exceeds the render scaler's limits.
+  - VGA emulation now reports render scaler limits
+    in the logfile at startup, if debug logging is
+    enabled.
+  - Render scaler code now logs a warning when it
+    rejects a video mode that exceeds the render
+    scaler limits.
+  - S3 emulation now allows 16MB of video memory.
+  - Due to continuous problems with DOS games and a
+    very long VESA modelist, the defaults for VESA
+    BIOS options in dosbox.conf have been changed to
+    limit the modelist to something a late 1990s
+    VESA BIOS would list. New defaults include a
+    maximum resolution of 1280x1024, the removal of
+    4bpp 16-color packed, unusual video modes,
+    "High Definition" TV broadcast modes, and the
+    extra explicitly defined 24bpp modes to complement
+    VBE1.2 32bpp modes. Those options remain
+    changeable and all limits can be lifted with
+    settings in dosbox.conf if wanted.
+  - Allow using "" in the debugger to specify that
+    a hex value should be used rather than the
+    contents of the flag with that name. Allows
+    hex values of AC, AF, CF and DF to be directly
+    specified. (Allofich)
+  - 25.COM, 28.COM, and 50.COM now have different
+    versions for VGA, EGA, and other IBM compatible
+    video machines. 28.COM now correctly sets 28 lines
+    for machine=ega. CGA/MDA/Hercules/etc. still use
+    INT AX=3h for 25.COM.
+  - Change 25.COM to use INT 10h AX=1114h (8x16) instead
+    of INT 10h AX=3 (set 80x25 mode).
+  - INT 10h AX=1111h (8x14) and AX=1113h (8x8), related
+    to 28.COM and 50.COM, now range check the current
+    cursor row against number of rows to keep it on
+    screen.
+  - Fixed ADDKEY "full" command not turning on the
+    full core when used with a delay. (Allofich)
+  - INT 10h AX=101Ah Get Video DAC color-page state fixed
+    to restore display after blanking it due to Attribute
+    Controller read and write operations. This fixes
+    IBM PC compatible MS-DOS game "Blue Force".
+  - Debugger: "VGA AC" now shows AC disable bits as well
+    as the internal state indicating whether the last
+    byte written to 3C0h was handled as the index.
+0.82.24
+  - FDC emulation now allows READ command to look for
+    sector numbers that are out of range in order to
+    support booter games that read out of range sector
+    numbers as part of their copy protection.
+  - Windows SDL1 window resizing fixed to avoid snapping
+    and jumping issues when the window is sized down
+    to the point the menu bar doubles or triples in
+    height due to menu item wrapping.
+  - FDC clear DMA terminal count automatically (with a
+    warning printed to the log) at beginning of FDC
+    read/write (PC-98 booter game Star Cruiser).
+  - FDC DMA read/write failure now causes FDC to signal
+    an error, and the debug output will say so.
+  - FDC debug output now shows motor bits in the correct
+    order, not backwards
   - CONFIG.COM and MIXER.COM are now registered only at
     DOS kernel startup, to resolve their disappearance
     after RE-DOS or guest system reset.
@@ -35,6 +105,13 @@
     garbage characters from previous/next command (aybe).
   - Fixed all hard disk images created by IMGMAKE having
     VHD footers. (Allofich)
+  - Windows Visual Studio solution: (aybe)
+    - cleaned and clarified project properties for projects
+    - removed configurations that didn't make sense
+    - fixed broken debugging
+    - consolidated to use single versions of SDK and IDE
+    - enabled faster builds (multi-processor compilation)
+    - fixed broken builds, e.g. ARM, ARM64
 0.82.23
   - Serial and parallel file output now disable stdio
     buffering so that output is more immediately

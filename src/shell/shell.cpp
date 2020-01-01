@@ -352,7 +352,7 @@ void DOS_Shell::Run(void) {
 	char input_line[CMD_MAXLINE] = {0};
 	std::string line;
 	if (cmd->FindStringRemainBegin("/C",line)) {
-		strcpy(input_line,line.c_str());
+		strncpy(input_line,line.c_str(),CMD_MAXLINE);
 		char* sep = strpbrk(input_line,"\r\n"); //GTA installer
 		if (sep) *sep = 0;
 		DOS_Shell temp;
@@ -380,7 +380,7 @@ void DOS_Shell::Run(void) {
     }
 
 	if (cmd->FindString("/INIT",line,true)) {
-		strcpy(input_line,line.c_str());
+		strncpy(input_line,line.c_str(),CMD_MAXLINE);
 		line.erase();
 		ParseLine(input_line);
 	}
@@ -426,8 +426,7 @@ private:
     AutoexecObject autoexec_auto_bat;
 public:
 	AUTOEXEC(Section* configuration):Module_base(configuration) {
-		/* Register a virtual AUOEXEC.BAT file */
-		std::string line;
+		/* Register a virtual AUTOEXEC.BAT file */
 		Section_line * section=static_cast<Section_line *>(configuration);
 
 		/* Check -securemode switch to disable mount/imgmount/boot after running autoexec.bat */
@@ -1130,7 +1129,13 @@ void SHELL_Init() {
         VFILE_RegisterBuiltinFileBlob(bfb_DOS4GW_EXE);
         VFILE_RegisterBuiltinFileBlob(bfb_EDIT_COM);
         VFILE_RegisterBuiltinFileBlob(bfb_TREE_EXE);
-        VFILE_RegisterBuiltinFileBlob(bfb_25_COM);
+
+        if (IS_VGA_ARCH)
+            VFILE_RegisterBuiltinFileBlob(bfb_25_COM);
+        else if (IS_EGA_ARCH)
+            VFILE_RegisterBuiltinFileBlob(bfb_25_COM_ega);
+        else
+            VFILE_RegisterBuiltinFileBlob(bfb_25_COM_other);
     }
 
     /* MEM.COM is not compatible with PC-98 and/or 8086 emulation */
@@ -1144,7 +1149,10 @@ void SHELL_Init() {
         VFILE_RegisterBuiltinFileBlob(bfb_DSXMENU_EXE_PC);
 
     /* don't register 28.com unless EGA/VGA */
-    if (IS_EGAVGA_ARCH) VFILE_RegisterBuiltinFileBlob(bfb_28_COM);
+    if (IS_VGA_ARCH)
+        VFILE_RegisterBuiltinFileBlob(bfb_28_COM);
+    else if (IS_EGA_ARCH)
+        VFILE_RegisterBuiltinFileBlob(bfb_28_COM_ega);
 
 	/* don't register 50 unless VGA */
 	if (IS_VGA_ARCH) VFILE_RegisterBuiltinFileBlob(bfb_50_COM);
@@ -1175,7 +1183,7 @@ void SHELL_Init() {
 	CommandTail tail;
 	tail.count=(Bit8u)strlen(init_line);
 	memset(&tail.buffer, 0, 127);
-	strcpy(tail.buffer,init_line);
+	strncpy(tail.buffer,init_line,127);
 	MEM_BlockWrite(PhysMake(psp_seg,128),&tail,128);
 	
 	/* Setup internal DOS Variables */

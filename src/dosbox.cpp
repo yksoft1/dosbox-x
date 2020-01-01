@@ -1148,7 +1148,7 @@ void DOSBOX_SetupConfigSections(void) {
             "what you want. Recommended values -1, 0 to 2000.");
 
     Pint = secprop->Add_int("vmemsize", Property::Changeable::WhenIdle,-1);
-    Pint->SetMinMax(-1,8);
+    Pint->SetMinMax(-1,16);
     Pint->Set_help(
         "Amount of video memory in megabytes.\n"
         "  The maximum resolution and color depth the svga_s3 will be able to display\n"
@@ -1681,18 +1681,13 @@ void DOSBOX_SetupConfigSections(void) {
             "of the electron beam in a CRT monitor");
 
     Pint = secprop->Add_int("vesa modelist cap",Property::Changeable::Always,0);
-    Pint->Set_help("IF nonzero, the VESA modelist is capped so that it contains no more than the specified number of video modes.\n"
-            "Set this option to a value between 8 to 32 if the DOS application has problems with long modelists or a fixed\n"
-            "buffer for querying modes. Such programs may crash if given the entire modelist supported by DOSBox-X.\n"
-            "  Warcraft II by Blizzard ................ Set to a value between 8 and 16. This game has a fixed buffer that it\n"
-            "                                           reads the modelist into. DOSBox-X's normal modelist is too long and\n"
-            "                                           the game will overrun the buffer and crash without this setting.");
+    Pint->Set_help("IF nonzero, the VESA modelist is capped so that it contains no more than the specified number of video modes.");
 
-    Pint = secprop->Add_int("vesa modelist width limit",Property::Changeable::Always,0);
+    Pint = secprop->Add_int("vesa modelist width limit",Property::Changeable::Always,1280);
     Pint->Set_help("IF nonzero, VESA modes with horizontal resolution higher than the specified pixel count will not be listed.\n"
             "This is another way the modelist can be capped for DOS applications that have trouble with long modelists.");
 
-    Pint = secprop->Add_int("vesa modelist height limit",Property::Changeable::Always,0);
+    Pint = secprop->Add_int("vesa modelist height limit",Property::Changeable::Always,1024);
     Pint->Set_help("IF nonzero, VESA modes with vertical resolution higher than the specified pixel count will not be listed.\n"
             "This is another way the modelist can be capped for DOS applications that have trouble with long modelists.");
 
@@ -1710,6 +1705,25 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("If set, allow low resolution VESA modes (320x200x16/24/32bpp and so on). You could set this to false to simulate\n"
             "SVGA hardware with a BIOS that does not support the lowres modes for testing purposes.");
 
+    Pbool = secprop->Add_bool("allow explicit 24bpp vesa modes",Property::Changeable::Always,false);
+    Pbool->Set_help("If set, additional 24bpp modes are listed in the modelist regardless whether modes 0x100-0x11F are\n"
+                    "configured to be 24bpp or 32bpp. Setting this option can provide the best testing and development\n"
+                    "environment for new retro DOS code. If clear, 24bpp will only be available in the 0x100-0x11F range\n"
+                    "if the \"vesa vbe 1.2 modes are 32bpp\" is false. Setting to false helps to emulate typical SVGA\n"
+                    "hardware in which either 24bpp is supported, or 32bpp is supported, but not both. Disabled by default.");
+
+    Pbool = secprop->Add_bool("allow high definition vesa modes",Property::Changeable::Always,false);
+    Pbool->Set_help("If set, offer HD video modes in the VESA modelist (such as 1280x720 aka 720p or 1920x1080 aka 1080p).\n"
+                    "This option also offers 4:3 versions (960x720 and 1440x1080) for DOS games that cannot properly handle\n"
+                    "a 16:9 aspect ratio, and several other HD modes. The modes enabled by this option are still limited by the\n"
+                    "width and height limits and available video memory.\n"
+                    "This is unusual for VESA BIOSes to do and is disabled by default.");
+
+    Pbool = secprop->Add_bool("allow unusual vesa modes",Property::Changeable::Always,false);
+    Pbool->Set_help("If set, unusual (uncommon) modes are added to the list. The modes reflect uncommon resolutions\n"
+                    "added by external drivers (UNIVBE), some VESA BIOSes, some laptop and netbook displays, and\n"
+                    "some added by DOSBox-X for additional fun. Disabled by default.");
+
     Pbool = secprop->Add_bool("allow 32bpp vesa modes",Property::Changeable::Always,true);
     Pbool->Set_help("If the DOS game or demo has problems with 32bpp VESA modes, set to 'false'");
 
@@ -1726,10 +1740,14 @@ void DOSBOX_SetupConfigSections(void) {
     Pbool->Set_help("If the DOS game or demo has problems with 8bpp VESA modes, set to 'false'");
 
     Pbool = secprop->Add_bool("allow 4bpp vesa modes",Property::Changeable::Always,true);
-    Pbool->Set_help("If the DOS game or demo has problems with 4bpp VESA modes, set to 'false'");
+    Pbool->Set_help("If the DOS game or demo has problems with 4bpp VESA modes, set to 'false'.\n"
+                    "These modes have the same 16-color planar memory layout as standard VGA, but\n"
+                    "at SVGA resolution.");
 
-    Pbool = secprop->Add_bool("allow 4bpp packed vesa modes",Property::Changeable::Always,true);
-    Pbool->Set_help("If the DOS game or demo has problems with 4bpp packed VESA modes, set to 'false'");
+    Pbool = secprop->Add_bool("allow 4bpp packed vesa modes",Property::Changeable::Always,false);
+    Pbool->Set_help("If the DOS game or demo has problems with 4bpp packed VESA modes, set to 'false'.\n"
+                    "4bpp (16-color) packed is an unusual novelty mode only seen on specific Chips & Tech 65550\n"
+                    "VESA BIOSes such as the one in a Toshiba Libretto laptop. Disabled by default.");
 
     Pbool = secprop->Add_bool("allow tty vesa modes",Property::Changeable::Always,true);
     Pbool->Set_help("If the DOS game or demo has problems with text VESA modes, set to 'false'");
@@ -3158,13 +3176,13 @@ void DOSBOX_SetupConfigSections(void) {
                 "         Setting the IRQ to one already occupied by another device or IDE controller will trigger \"resource conflict\" errors in Windows 95.\n"
                 "         Using IRQ 9, 12, 13, or IRQ 2-7 may cause problems with MS-DOS CD-ROM drivers.");
 
-        secprop->Add_hex("io",Property::Changeable::WhenIdle,0/*use IDE default*/);
-        if (i == 0) Pint->Set_help("Base I/O port for IDE controller. Set to 0 for default.\n"
+        Phex = secprop->Add_hex("io",Property::Changeable::WhenIdle,0/*use IDE default*/);
+        if (i == 0) Phex->Set_help("Base I/O port for IDE controller. Set to 0 for default.\n"
                 "WARNING: Setting the I/O port to non-standard values will not work unless the guest OS is using the ISA PnP BIOS to detect the IDE controller.\n"
                 "         Using any port other than 1F0, 170, 1E8 or 168 can prevent MS-DOS CD-ROM drivers from detecting the IDE controller.");
 
         Phex = secprop->Add_hex("altio",Property::Changeable::WhenIdle,0/*use IDE default*/);
-        if (i == 0) Pint->Set_help("Alternate I/O port for IDE controller (alt status, etc). Set to 0 for default.\n"
+        if (i == 0) Phex->Set_help("Alternate I/O port for IDE controller (alt status, etc). Set to 0 for default.\n"
                 "WARNING: Setting the I/O port to non-standard values will not work unless the guest OS is using the ISA PnP BIOS to detect the IDE controller.\n"
                 "         For best compatability set this value to io+0x206, for example, io=1F0 altio=3F6.\n"
                 "         The primary IDE controller will not claim port 3F7 if the primary floppy controller is enabled due to I/O port overlap in the 3F0-3F7 range.");

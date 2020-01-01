@@ -205,8 +205,6 @@ void DOS_Shell::InputCommand(char * line) {
                         cr = 0x4000;
                     else if (c == 0x4A)  // F7
                         cr = 0x4100;
-                    else if (c == 0x50)  // F8
-                        cr = 0x4200;
                     else if (c == 0x51)  // F9
                         cr = 0x4300;
                     else if (c == 0x5A)  // F10
@@ -742,7 +740,7 @@ void DOS_Shell::ProcessCmdLineEnvVarStitution(char *line) {
 				else {
 					/* nope. didn't find a valid name */
 
-					while (*r != 0 && *r == ' ') r++; /* skip spaces */
+					while (*r == ' ') r++; /* skip spaces */
 					name--; /* step "name" back to cover the first '%' we found */
 
 					for (char *c=name;c < r;) {
