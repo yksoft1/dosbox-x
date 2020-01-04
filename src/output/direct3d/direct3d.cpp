@@ -967,9 +967,7 @@ HRESULT CDirect3D::LoadPixelShader(const char * shader, double scalex, double sc
     }
 
     if (psEffect) {
-#if LOG_D3D
 	LOG_MSG("D3D:Shader scale: %.2f", psEffect->getScale());
-#endif
 	// Compare optimal scaling factor
 	bool dblgfx=((scalex < scaley ? scalex : scaley) >= psEffect->getScale());
 
@@ -1018,7 +1016,7 @@ HRESULT CDirect3D::LoadPixelShader(void)
 
     psEffect->setinputDim((float)dwWidth, (float)dwHeight);
     if(FAILED(psEffect->LoadEffect(pshader)) || FAILED(psEffect->Validate())) {
-	/*LOG_MSG("D3D:Pixel shader error:");
+	LOG_MSG("D3D:Pixel shader error:");
 
 	// The resulting string can exceed 512 char LOG_MSG limit, split on newlines
 	std::stringstream ss(psEffect->getErrors());
@@ -1027,7 +1025,7 @@ HRESULT CDirect3D::LoadPixelShader(void)
 	    LOG_MSG(" %s", line.c_str());
 	}
 
-	LOG_MSG("D3D:Pixel shader output disabled");*/
+	LOG_MSG("D3D:Pixel shader output disabled");
 	delete psEffect;
 	psEffect = NULL;
 	psActive = false;
@@ -1379,21 +1377,40 @@ HRESULT CDirect3D::CreateVertex(void)
     vertexBuffer->Lock(0, 0, (void**)&vertices, 0);
 
     //Setup vertices
-    vertices[0].position = D3DXVECTOR3( (float)dwX,					  (float)dwY,					 0.0f );
-    vertices[0].diffuse  = 0xFFFFFFFF;
-    vertices[0].texcoord = D3DXVECTOR2( 0.0f,						  0.0f );
+    if (psActive) {
+        vertices[0].position = D3DXVECTOR3(-0.5f, -0.5f, 0.0f);
+        vertices[0].diffuse = 0xFFFFFFFF;
+        vertices[0].texcoord = D3DXVECTOR2(0.0f, (float)sizey);
 
-    vertices[1].position = D3DXVECTOR3( (float)dwX,					  (float)(dwY + dwScaledHeight), 0.0f );
-    vertices[1].diffuse  = 0xFFFFFFFF;
-    vertices[1].texcoord = D3DXVECTOR2( 0.0f,						  (float)sizey );
-    
-    vertices[2].position = D3DXVECTOR3( (float)(dwX + dwScaledWidth), (float)dwY,				     0.0f );
-    vertices[2].diffuse  = 0xFFFFFFFF;
-    vertices[2].texcoord = D3DXVECTOR2( (float)sizex,				  0.0f );
-    
-    vertices[3].position = D3DXVECTOR3( (float)(dwX + dwScaledWidth), (float)(dwY + dwScaledHeight), 0.0f );
-    vertices[3].diffuse  = 0xFFFFFFFF;
-    vertices[3].texcoord = D3DXVECTOR2( (float)sizex,				  (float)sizey );
+        vertices[1].position = D3DXVECTOR3(-0.5f, 0.5f, 0.0f);
+        vertices[1].diffuse = 0xFFFFFFFF;
+        vertices[1].texcoord = D3DXVECTOR2(0.0f, 0.0f);
+
+        vertices[2].position = D3DXVECTOR3(0.5f, -0.5f, 0.0f);
+        vertices[2].diffuse = 0xFFFFFFFF;
+        vertices[2].texcoord = D3DXVECTOR2((float)sizex, (float)sizey);
+
+        vertices[3].position = D3DXVECTOR3(0.5f, 0.5f, 0.0f);
+        vertices[3].diffuse = 0xFFFFFFFF;
+        vertices[3].texcoord = D3DXVECTOR2((float)sizex, 0.0f);
+    }
+    else {
+        vertices[0].position = D3DXVECTOR3((float)dwX, (float)dwY, 0.0f);
+        vertices[0].diffuse = 0xFFFFFFFF;
+        vertices[0].texcoord = D3DXVECTOR2(0.0f, 0.0f);
+
+        vertices[1].position = D3DXVECTOR3((float)dwX, (float)(dwY + dwScaledHeight), 0.0f);
+        vertices[1].diffuse = 0xFFFFFFFF;
+        vertices[1].texcoord = D3DXVECTOR2(0.0f, (float)sizey);
+
+        vertices[2].position = D3DXVECTOR3((float)(dwX + dwScaledWidth), (float)dwY, 0.0f);
+        vertices[2].diffuse = 0xFFFFFFFF;
+        vertices[2].texcoord = D3DXVECTOR2((float)sizex, 0.0f);
+
+        vertices[3].position = D3DXVECTOR3((float)(dwX + dwScaledWidth), (float)(dwY + dwScaledHeight), 0.0f);
+        vertices[3].diffuse = 0xFFFFFFFF;
+        vertices[3].texcoord = D3DXVECTOR2((float)sizex, (float)sizey);
+    }
 
     // Additional vertices required for some PS effects
     // FIXME: Recent changes may have BROKEN pixel shader support here!!!!!
@@ -1437,22 +1454,47 @@ void CDirect3D::SetupSceneScaled(void)
 
     // Projection is screenspace coords
     D3DXMatrixOrthoOffCenterLH(&m_matProj, 0.0f, (float)Viewport.Width, 0.0f, (float)Viewport.Height, 0.0f, 1.0f);
-    {
+    if (!psActive) {
 	    D3DXMATRIX x;
 	    D3DXMatrixScaling(&x, 1.0f, -1.0f, 1.0f);
 	    m_matProj *= x;
     }
 
-    // View matrix with -0.5f offset to avoid a fuzzy picture
-    D3DXMatrixTranslation(&m_matView, -0.5f, -0.5f, 0.0f);
+    if (psActive) {
+        // View matrix does offset
+        // A -0.5f modifier is applied to vertex coordinates to match texture
+        // and screen coords. Some drivers may compensate for this
+        // automatically, but on others texture alignment errors are introduced
+        // More information on this can be found in the Direct3D 9 documentation
+        D3DXMatrixTranslation(&m_matView, (float)Viewport.Width / 2 - 0.5f, (float)Viewport.Height / 2 + 0.5f, 0.0f);
+    }
+    else {
+        // View matrix with -0.5f offset to avoid a fuzzy picture
+        D3DXMatrixTranslation(&m_matView, -0.5f, -0.5f, 0.0f);
+    }
 
     // TODO: Re-implement 5:4 monitor autofit
-
-#if LOG_D3D
-    LOG_MSG("D3D:Scaled resolution: %.1fx%.1f, factor: %dx%d", sizex, sizey, x, y);
-#endif
-
-    D3DXMatrixScaling(&m_matWorld, 1.0, 1.0, 1.0f);
+    if (psActive) {
+        D3DXMatrixScaling(&m_matWorld, (float)dwScaledWidth, (float)dwScaledHeight, 1.0f);
+        { /* translation matrix to make dwX and dwY effective. Note that the code inherited from Daum naturally
+             centers the image on screen by it's design, so the calculation has to account for that. */
+            /* NTS: The reason we go to these great pains for pixel shaders is that there are other forks of
+                    DOSBox that have this same Direct3D code, but without this fork's alterations that use
+                    pure integer coordinates. The shaders require the -0.5 to 0.5 vertex and texture coordinates
+                    to work properly and will not render properly with this fork's modifications. */
+            D3DXMATRIX t;
+            float nx = float(Viewport.Width - dwScaledWidth) / 2.0f;
+            float ny = float(Viewport.Height - dwScaledHeight) / 2.0f;
+            float dx = float(dwX);
+            float dy = float(dwY);
+//          LOG_MSG("dx=%.3f dy=%.3f nx=%.3f ny=%.3f", dx, dy, nx, ny);
+            D3DXMatrixTranslation(&t, -(dx - nx), -(dy - ny), 0.0f);
+            m_matWorld *= t;
+        }
+    }
+    else {
+        D3DXMatrixScaling(&m_matWorld, 1.0, 1.0, 1.0f);
+    }
 }
 
 #if !(C_D3DSHADERS)
