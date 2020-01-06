@@ -6804,6 +6804,95 @@ bool vid_pc98_cleartext_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item *
     return true;
 }
 
+#ifdef C_D3DSHADERS
+bool vid_select_pixel_shader_menu_callback(DOSBoxMenu* const menu, DOSBoxMenu::item* const menuitem) {
+    (void)menu;//UNUSED
+    (void)menuitem;//UNUSED
+
+    OPENFILENAME ofn;
+    char filenamebuf[300] = { 0 };
+    char cwd[1024]; /* to prevent the dialog box from browsing relative to the Documents folder */
+
+    GetCurrentDirectory(sizeof(cwd) - 16,cwd);
+
+    std::string forced_setting;
+    std::string o_cwd = cwd; /* GetOpenFileName() will change the current working directory! */
+
+    strcat(cwd, "\\shaders"); /* DOSBox "D3D patch" compat: File names are assumed to exist relative to <cwd>\shaders */
+
+    Section_prop* section = static_cast<Section_prop*>(control->GetSection("sdl"));
+    assert(section != NULL);
+    {
+        Section_prop* section = static_cast<Section_prop*>(control->GetSection("sdl"));
+        Prop_multival* prop = section->Get_multival("pixelshader");
+        const char *path = prop->GetSection()->Get_string("type");
+        forced_setting = prop->GetSection()->Get_string("force");
+
+        if (path != NULL && strcmp(path, "none") != 0) {
+            filenamebuf[sizeof(filenamebuf) - 1] = 0;
+            strncpy(filenamebuf, path, sizeof(filenamebuf) - 1);
+        }
+    }
+
+    memset(&ofn, 0, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = GetHWND();
+    ofn.lpstrFilter =
+        "D3D shaders\0"                 "*.fx\0"
+        "\0"                            "\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = filenamebuf;
+    ofn.nMaxFile = sizeof(filenamebuf);
+    ofn.lpstrTitle = "Select D3D shader";
+    ofn.lpstrInitialDir = cwd;
+    ofn.Flags = OFN_DONTADDTORECENT | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_LONGNAMES;
+
+    if (GetOpenFileName(&ofn)) {
+        /* Windows will fill lpstrFile with the FULL PATH.
+           The full path should be given to the pixelshader setting unless it's just
+           the same base path it was given: <cwd>\shaders in which case just cut it
+           down to the filename. */
+        const char* name = ofn.lpstrFile;
+
+        /* filenames in Windows are case insensitive so do the comparison the same */
+        if (!strnicmp(name, cwd, strlen(cwd))) {
+            name += strlen(cwd);
+            while (*name == '\\') name++;
+        }
+
+        /* the shader set included with the source code includes none.fx which is empty.
+           if that was chosen then just change it to "none" so the D3D shader code does
+           not waste it's time. */
+        {
+            const char* n = strrchr(name, '\\');
+            if (n == NULL) n = name;
+
+            if (!strcasecmp(n, "none.fx"))
+                name = "none";
+        }
+
+        /* SetVal just forces the interpreter to parse name=value and pixelshader is a multivalue. */
+        std::string tmp = name;
+        tmp += " ";
+        tmp += forced_setting;
+        SetVal("sdl", "pixelshader", tmp);
+
+        /* GetOpenFileName() probably changed the current directory.
+           This must be done before reinit of GFX because pixelshader might be relative path. */
+        SetCurrentDirectory(o_cwd.c_str());
+
+        /* force reinit */
+        GFX_ForceRedrawScreen();
+    }
+    else {
+        /* GetOpenFileName() probably changed the current directory */
+        SetCurrentDirectory(o_cwd.c_str());
+    }
+
+    return true;
+}
+#endif
+
 bool vid_pc98_graphics_menu_callback(DOSBoxMenu * const menu,DOSBoxMenu::item * const menuitem) {
     (void)menu;//UNUSED
     (void)menuitem;//UNUSED
@@ -7869,6 +7958,12 @@ int main(int argc, char* argv[]) SDL_MAIN_NOEXCEPT {
                 DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"VideoDebugMenu");
                 item.set_text("Debug");
             }
+#ifdef C_D3DSHADERS
+            {
+                mainMenu.alloc_item(DOSBoxMenu::item_type_id, "load_d3d_shader").set_text("Select pixel shader...").
+                    set_callback_function(vid_select_pixel_shader_menu_callback);
+            }
+#endif
         }
         {
             DOSBoxMenu::item &item = mainMenu.alloc_item(DOSBoxMenu::submenu_type_id,"SoundMenu");
